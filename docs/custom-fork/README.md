@@ -27,7 +27,8 @@
 - 已选择性合并 PR #212：Windows `/C:/...` 本地浏览路径修复。
 - 已建立本目录的维护、架构、部署、安全、同步、需求、测试和 Desktop parity 文档。
 - PR #211 Goal mode 按用户要求排除。
-- Runtime Reload、Project Sync、Timeline 重构和断线诊断仍为规划项，未实现。
+- 当前功能分支已实现 Project Sync 的 Desktop `local-projects`/saved roots 后端适配与网页新增项目持久化；跨主机预览、mirror 和复杂同步 UI 仍未实现。
+- Runtime Reload、Timeline 重构和断线诊断仍为规划项。
 
 ## 已知限制
 
@@ -47,6 +48,7 @@
 - [测试计划](TEST_PLAN.md)
 - [上游 PR 审计](UPSTREAM_PR_AUDIT.md)
 - [Codex Desktop Parity](CODEX_DESKTOP_PARITY.md)
+- [项目状态同步](PROJECT_SYNC.md)
 
 ## 完成定义
 

@@ -66,7 +66,9 @@ Windows 11 与 Ubuntu 24.04 各自运行这一整套链路。两台主机不能�
 
 - Codex Desktop 与 `codexapp` 通常各自启动 app-server；重载其中一个不等于重启另一个。
 - 两者可读取相同 `CODEX_HOME`，但内存缓存、项目白名单、workspace roots、选中 thread 和流式状态仍可能不同。
-- Desktop 状态文件只能只读解析已确认的项目字段；不得修改或把完整 JSON 返回浏览器。
+- 项目状态适配只解析 `local-projects` 的 ID、名称和 `rootPaths`，并在写入时保留其他顶层字段和项目未知字段；不得把完整 JSON 返回浏览器。
+- Web API 使用路径顺序，Desktop 磁盘 `project-order` 使用项目 ID，后端负责双向翻译，不能混写两种语义。
+- 同一主机的浏览器共享该主机 `CODEX_HOME`；不同主机的绝对路径不能直接复制，必须以 host-aware remote project 表示。
 
 ## 未来模块边界
 

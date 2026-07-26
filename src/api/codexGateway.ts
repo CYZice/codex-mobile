@@ -289,6 +289,8 @@ export type WorkspaceRootsState = {
 
 let workspaceRootsStatePromise: Promise<WorkspaceRootsState> | null = null
 let cachedWorkspaceRootsState: WorkspaceRootsState | null = null
+let cachedWorkspaceRootsStateAt = 0
+const WORKSPACE_ROOTS_STATE_CACHE_TTL_MS = 2_000
 
 export type StoredQueuedMessage = {
   id: string
@@ -2620,13 +2622,17 @@ function normalizeThreadQueueState(value: unknown): ThreadQueueState {
 }
 
 export async function getWorkspaceRootsState(): Promise<WorkspaceRootsState> {
-  if (cachedWorkspaceRootsState) {
+  if (
+    cachedWorkspaceRootsState
+    && Date.now() - cachedWorkspaceRootsStateAt < WORKSPACE_ROOTS_STATE_CACHE_TTL_MS
+  ) {
     return cloneWorkspaceRootsState(cachedWorkspaceRootsState)
   }
   if (!workspaceRootsStatePromise) {
     workspaceRootsStatePromise = fetchWorkspaceRootsState()
       .then((state) => {
         cachedWorkspaceRootsState = state
+        cachedWorkspaceRootsStateAt = Date.now()
         return state
       })
       .finally(() => {
@@ -2637,7 +2643,7 @@ export async function getWorkspaceRootsState(): Promise<WorkspaceRootsState> {
 }
 
 async function fetchWorkspaceRootsState(): Promise<WorkspaceRootsState> {
-  const response = await fetch('/codex-api/workspace-roots-state')
+  const response = await fetch('/codex-api/workspace-roots-state', { cache: 'no-store' })
   const payload = (await response.json()) as unknown
   if (!response.ok) {
     throw new Error('Failed to load workspace roots state')
@@ -2661,6 +2667,7 @@ function cloneWorkspaceRootsState(state: WorkspaceRootsState): WorkspaceRootsSta
 
 function invalidateWorkspaceRootsStateCache(): void {
   cachedWorkspaceRootsState = null
+  cachedWorkspaceRootsStateAt = 0
 }
 
 export async function getThreadQueueState(): Promise<ThreadQueueState> {
@@ -3090,6 +3097,7 @@ export async function setWorkspaceRootsState(nextState: WorkspaceRootsState): Pr
     throw new Error('Failed to save workspace roots state')
   }
   cachedWorkspaceRootsState = cloneWorkspaceRootsState(nextState)
+  cachedWorkspaceRootsStateAt = Date.now()
 }
 
 export async function openProjectRoot(path: string, options?: { createIfMissing?: boolean; label?: string }): Promise<string> {

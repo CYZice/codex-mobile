@@ -97,6 +97,14 @@ export type WorkspaceRootsState = {
   }>
 }
 
+type LocalProjectState = {
+  storageKey: string
+  id: string
+  name: string
+  rootPaths: string[]
+  raw: Record<string, unknown>
+}
+
 type PendingServerRequest = {
   id: number
   method: string
@@ -4541,6 +4549,31 @@ function normalizeRemoteProjects(value: unknown): WorkspaceRootsState['remotePro
   return next
 }
 
+function normalizeLocalProjects(value: unknown): LocalProjectState[] {
+  const record = asRecord(value)
+  if (!record) return []
+
+  const projects: LocalProjectState[] = []
+  const seenIds = new Set<string>()
+  for (const [storageKey, item] of Object.entries(record)) {
+    const raw = asRecord(item)
+    if (!raw) continue
+    const id = (typeof raw.id === 'string' ? raw.id : storageKey).trim()
+    if (!id || seenIds.has(id)) continue
+    const rootPaths = normalizeStringArray(raw.rootPaths)
+    if (rootPaths.length === 0) continue
+    seenIds.add(id)
+    projects.push({
+      storageKey,
+      id,
+      name: typeof raw.name === 'string' ? raw.name.trim() : '',
+      rootPaths,
+      raw,
+    })
+  }
+  return projects
+}
+
 
 
 function getCodexAuthPath(): string {
@@ -5877,6 +5910,178 @@ async function canonicalizeWorkspaceRootPathList(
   return normalizeStringArray(await Promise.all(values.map((value) => canonicalizeWorkspaceRootPath(value, pathRealpath))))
 }
 
+function workspaceRootComparisonKey(value: string): string {
+  const normalized = process.platform === 'win32'
+    ? value.replace(/\//gu, '\\').toLowerCase()
+    : value
+  return normalized.replace(/[\\/]+$/u, '') || normalized
+}
+
+function appendUniqueWorkspaceRoot(target: string[], seen: Set<string>, value: string): void {
+  const normalized = value.trim()
+  if (!normalized) return
+  const key = workspaceRootComparisonKey(normalized)
+  if (seen.has(key)) return
+  seen.add(key)
+  target.push(normalized)
+}
+
+async function canonicalizeLocalProjects(
+  projects: LocalProjectState[],
+  pathRealpath: PathRealpathResolver = realpath,
+): Promise<LocalProjectState[]> {
+  return await Promise.all(projects.map(async (project) => ({
+    ...project,
+    rootPaths: await canonicalizeWorkspaceRootPathList(project.rootPaths, pathRealpath),
+  })))
+}
+
+function mergeLocalProjectsIntoWorkspaceRootsState(
+  state: WorkspaceRootsState,
+  localProjects: LocalProjectState[],
+): WorkspaceRootsState {
+  const order: string[] = []
+  const seenOrder = new Set<string>()
+  for (const rootPath of state.order) appendUniqueWorkspaceRoot(order, seenOrder, rootPath)
+  for (const project of localProjects) {
+    for (const rootPath of project.rootPaths) appendUniqueWorkspaceRoot(order, seenOrder, rootPath)
+  }
+
+  const labels = { ...state.labels }
+  const labeledRootKeys = new Set(Object.keys(labels).map(workspaceRootComparisonKey))
+  for (const project of localProjects) {
+    if (!project.name) continue
+    for (const rootPath of project.rootPaths) {
+      const key = workspaceRootComparisonKey(rootPath)
+      if (labeledRootKeys.has(key)) continue
+      labels[rootPath] = project.name
+      labeledRootKeys.add(key)
+    }
+  }
+
+  const localProjectById = new Map(localProjects.map((project) => [project.id, project]))
+  const remoteProjectIds = new Set(state.remoteProjects.map((project) => project.id))
+  const projectOrder: string[] = []
+  const seenProjectOrder = new Set<string>()
+  const appendProjectOrder = (item: string): void => {
+    const key = workspaceRootComparisonKey(item)
+    if (!item || seenProjectOrder.has(key)) return
+    seenProjectOrder.add(key)
+    projectOrder.push(item)
+  }
+
+  for (const item of state.projectOrder) {
+    const localProject = localProjectById.get(item)
+    if (localProject) {
+      for (const rootPath of localProject.rootPaths) appendProjectOrder(rootPath)
+    } else if (remoteProjectIds.has(item) || seenOrder.has(workspaceRootComparisonKey(item))) {
+      appendProjectOrder(item)
+    }
+  }
+  for (const rootPath of order) appendProjectOrder(rootPath)
+  for (const remoteProject of state.remoteProjects) appendProjectOrder(remoteProject.id)
+
+  return {
+    order,
+    labels,
+    active: [...state.active],
+    projectOrder,
+    remoteProjects: state.remoteProjects.map((project) => ({ ...project })),
+  }
+}
+
+function reconcileLocalProjectsForWorkspaceState(
+  existingValue: unknown,
+  existingProjects: LocalProjectState[],
+  existingProjectOrder: string[],
+  state: WorkspaceRootsState,
+  now = Date.now(),
+  createId: () => string = randomUUID,
+): { localProjects: Record<string, unknown>; projectOrder: string[]; localOrder: string[] } {
+  const remoteProjectIds = new Set(state.remoteProjects.map((project) => project.id))
+  const localOrder = state.order.filter((item) => isAbsolute(item) && !remoteProjectIds.has(item))
+  const desiredRootByKey = new Map(localOrder.map((rootPath) => [workspaceRootComparisonKey(rootPath), rootPath]))
+  const existingRecord = asRecord(existingValue) ?? {}
+  const managedStorageKeys = new Set(existingProjects.map((project) => project.storageKey))
+  const existingProjectIds = new Set(existingProjects.map((project) => project.id))
+  const localProjects: Record<string, unknown> = {}
+  for (const [storageKey, value] of Object.entries(existingRecord)) {
+    if (!managedStorageKeys.has(storageKey)) localProjects[storageKey] = value
+  }
+
+  const rootToProjectId = new Map<string, string>()
+  const keptProjectIds = new Set<string>()
+  for (const project of existingProjects) {
+    const rootPaths: string[] = []
+    for (const currentRoot of project.rootPaths) {
+      const key = workspaceRootComparisonKey(currentRoot)
+      const desiredRoot = desiredRootByKey.get(key)
+      if (!desiredRoot || rootToProjectId.has(key)) continue
+      rootToProjectId.set(key, project.id)
+      rootPaths.push(desiredRoot)
+    }
+    if (rootPaths.length === 0) continue
+
+    const explicitName = rootPaths
+      .map((rootPath) => state.labels[rootPath]?.trim() ?? '')
+      .find((name) => name.length > 0)
+    const name = explicitName || project.name || basename(rootPaths[0] ?? '') || project.id
+    const rootsChanged = rootPaths.length !== project.rootPaths.length
+      || rootPaths.some((rootPath, index) => rootPath !== project.rootPaths[index])
+    const nameChanged = name !== project.name
+    localProjects[project.storageKey] = {
+      ...project.raw,
+      id: project.id,
+      name,
+      rootPaths,
+      ...(rootsChanged || nameChanged ? { updatedAt: now } : {}),
+    }
+    keptProjectIds.add(project.id)
+  }
+
+  const usedIds = new Set([
+    ...Object.keys(existingRecord),
+    ...existingProjects.map((project) => project.id),
+  ])
+  for (const rootPath of localOrder) {
+    const rootKey = workspaceRootComparisonKey(rootPath)
+    if (rootToProjectId.has(rootKey)) continue
+    let id = createId().trim()
+    while (!id || usedIds.has(id)) id = createId().trim()
+    usedIds.add(id)
+    const name = state.labels[rootPath]?.trim() || basename(rootPath) || rootPath
+    localProjects[id] = {
+      id,
+      name,
+      rootPaths: [rootPath],
+      createdAt: now,
+      updatedAt: now,
+    }
+    rootToProjectId.set(rootKey, id)
+    keptProjectIds.add(id)
+  }
+
+  const projectOrder: string[] = []
+  const appendProjectId = (id: string): void => {
+    if (id && !projectOrder.includes(id)) projectOrder.push(id)
+  }
+  for (const item of state.projectOrder) {
+    const projectId = rootToProjectId.get(workspaceRootComparisonKey(item))
+    if (projectId) appendProjectId(projectId)
+    else if (keptProjectIds.has(item) || remoteProjectIds.has(item)) appendProjectId(item)
+  }
+  for (const rootPath of localOrder) {
+    const projectId = rootToProjectId.get(workspaceRootComparisonKey(rootPath))
+    if (projectId) appendProjectId(projectId)
+  }
+  for (const remoteProject of state.remoteProjects) appendProjectId(remoteProject.id)
+  for (const item of existingProjectOrder) {
+    if (!existingProjectIds.has(item) && !isAbsolute(item)) appendProjectId(item)
+  }
+
+  return { localProjects, projectOrder, localOrder }
+}
+
 export async function canonicalizeWorkspaceRootsState(
   state: WorkspaceRootsState,
   pathRealpath: PathRealpathResolver = realpath,
@@ -5958,7 +6163,7 @@ export async function canonicalizeThreadListResponseForRead(
   }
 }
 
-async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
+export async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
   const statePath = getCodexGlobalStatePath()
   let payload: Record<string, unknown> = {}
 
@@ -5970,13 +6175,17 @@ async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
     payload = {}
   }
 
-  return await canonicalizeWorkspaceRootsState({
-    order: normalizeStringArray(payload['electron-saved-workspace-roots']),
-    labels: normalizeStringRecord(payload['electron-workspace-root-labels']),
-    active: normalizeStringArray(payload['active-workspace-roots']),
-    projectOrder: normalizeStringArray(payload['project-order']),
-    remoteProjects: normalizeRemoteProjects(payload['remote-projects']),
-  })
+  const [state, localProjects] = await Promise.all([
+    canonicalizeWorkspaceRootsState({
+      order: normalizeStringArray(payload['electron-saved-workspace-roots']),
+      labels: normalizeStringRecord(payload['electron-workspace-root-labels']),
+      active: normalizeStringArray(payload['active-workspace-roots']),
+      projectOrder: normalizeStringArray(payload['project-order']),
+      remoteProjects: normalizeRemoteProjects(payload['remote-projects']),
+    }),
+    canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects'])),
+  ])
+  return mergeLocalProjectsIntoWorkspaceRootsState(state, localProjects)
 }
 
 export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): Promise<void> {
@@ -5990,10 +6199,21 @@ export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): 
     payload = {}
   }
 
-  payload['electron-saved-workspace-roots'] = normalizeStringArray(state.order)
+  const existingProjects = await canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects']))
+  const reconciled = reconcileLocalProjectsForWorkspaceState(
+    payload['local-projects'],
+    existingProjects,
+    normalizeStringArray(payload['project-order']),
+    state,
+  )
+
+  payload['electron-saved-workspace-roots'] = normalizeStringArray(reconciled.localOrder)
   payload['electron-workspace-root-labels'] = normalizeStringRecord(state.labels)
+  const localRootKeys = new Set(reconciled.localOrder.map(workspaceRootComparisonKey))
   payload['active-workspace-roots'] = normalizeStringArray(state.active)
-  payload['project-order'] = normalizeStringArray(state.projectOrder)
+    .filter((rootPath) => localRootKeys.has(workspaceRootComparisonKey(rootPath)))
+  payload['local-projects'] = reconciled.localProjects
+  payload['project-order'] = reconciled.projectOrder
 
   await writeFile(statePath, JSON.stringify(payload), 'utf8')
 }
@@ -6019,6 +6239,35 @@ async function updateWorkspaceRootsState(
   await queueWorkspaceRootsMutation(async () => {
     const existingState = await readWorkspaceRootsState()
     await writeWorkspaceRootsState(updater(existingState))
+  })
+}
+
+export async function migrateWorkspaceRootsStateCompatibility(): Promise<boolean> {
+  return await queueWorkspaceRootsMutation(async () => {
+    const statePath = getCodexGlobalStatePath()
+    let payload: Record<string, unknown>
+    try {
+      payload = asRecord(JSON.parse(await readFile(statePath, 'utf8'))) ?? {}
+    } catch {
+      return false
+    }
+
+    const [savedRoots, localProjects] = await Promise.all([
+      canonicalizeWorkspaceRootPathList(normalizeStringArray(payload['electron-saved-workspace-roots']), realpath),
+      canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects'])),
+    ])
+    const savedRootKeys = new Set(savedRoots.map(workspaceRootComparisonKey))
+    const localRootKeys = new Set(localProjects.flatMap((project) => project.rootPaths.map(workspaceRootComparisonKey)))
+    const persistedProjectOrder = normalizeStringArray(payload['project-order'])
+    const orderedProjectIds = new Set(persistedProjectOrder)
+    const hasMismatchedRootSets = savedRootKeys.size !== localRootKeys.size
+      || Array.from(savedRootKeys).some((key) => !localRootKeys.has(key))
+    const hasPathBasedProjectOrder = persistedProjectOrder.some((item) => isAbsolute(item))
+    const hasUnorderedLocalProject = localProjects.some((project) => !orderedProjectIds.has(project.id))
+    if (!hasMismatchedRootSets && !hasPathBasedProjectOrder && !hasUnorderedLocalProject) return false
+
+    await writeWorkspaceRootsState(await readWorkspaceRootsState())
+    return true
   })
 }
 
@@ -7437,6 +7686,7 @@ async function buildThreadSearchIndex(appServer: AppServerProcess): Promise<Thre
 
 export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
   const { appServer, terminalManager, methodCatalog, telegramBridge, backendQueueProcessor } = getSharedBridgeState()
+  const workspaceRootsCompatibilityMigration = migrateWorkspaceRootsStateCompatibility().catch(() => false)
   let threadSearchIndex: ThreadSearchIndex | null = null
   let threadSearchIndexPromise: Promise<ThreadSearchIndex> | null = null
 
@@ -8467,6 +8717,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       }
 
       if (req.method === 'GET' && url.pathname === '/codex-api/workspace-roots-state') {
+        await workspaceRootsCompatibilityMigration
         const state = await readWorkspaceRootsState()
         setJson(res, 200, { data: state })
         return
