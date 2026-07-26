@@ -7,12 +7,12 @@
 | 编号 | 用户场景 | 功能需求 | 非功能需求 | 验收标准 | 优先级 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- |
 | BASE-001 | Windows 与 Ubuntu 双机远程使用 | 两台主机各自运行 codexapp + app-server，并可经 FRP 访问 | Windows 优先，Ubuntu 24.04 兼容 | 两平台构建、启动、RPC、WS 和核心流程通过 | P0 | planned |
-| BASE-002 | 安全开始维护 | 检查分支、工作区、remote、HEAD、工具版本和测试基线 | 不覆盖本地修改，不在 main 实验 | 审计文档含真实 commit/version/result | P0 | done-in-branch |
-| BASE-003 | 可持续同步上游 | 配置 `upstream=friuns2/codex-mobile`，逐 PR 选择性集成 | 不盲合并，不使用自动 ours/theirs | 每 PR 独立 diff、commit、测试、风险与回滚 | P0 | done-in-branch |
+| BASE-002 | 安全开始维护 | 检查分支、工作区、remote、HEAD、工具版本和测试基线 | 不覆盖本地修改，不在 main 实验 | 审计文档含真实 commit/version/result | P0 | done-on-main |
+| BASE-003 | 可持续同步上游 | 配置 `upstream=friuns2/codex-mobile`，逐 PR 选择性集成 | 不盲合并，不使用自动 ours/theirs | 每 PR 独立 diff、commit、测试、风险与回滚 | P0 | done-on-main |
 | BASE-004 | 可复现构建 | 固定包管理器和依赖解析 | 供应链可审计 | lockfile 与双平台 clean install/build 通过 | P0 | planned |
-| PR-203 | PowerShell 可运行 codex 但 Node 找不到 | 统一 Windows Codex 命令探测、登录、临时/主 app-server 启动 | 不增加 probe/网络，不读取认证 | shim 走 cmd.exe，bundled bin path 正确，测试/build 通过 | P0 | done-in-branch |
-| PR-209 | GPT-5.6 选择 max/ultra | 从 `model/list` 读取每模型 supported/default reasoning | 未声明能力不显示新档；切模有确定 fallback | Sol/Terra/Luna/5.5 与未知模型菜单和 payload 正确 | P0 | done-in-branch |
-| PR-212 | Windows 文件链接 404 | `/C:/...` 还原为 `C:/...` | Unix、UNC、已规范化、坏编码不回归 | unit、真实 GET、TestChat 三断言通过 | P0 | done-in-branch |
+| PR-203 | PowerShell 可运行 codex 但 Node 找不到 | 统一 Windows Codex 命令探测、登录、临时/主 app-server 启动 | 不增加 probe/网络，不读取认证 | shim 走 cmd.exe，bundled bin path 正确，测试/build 通过 | P0 | done-on-main |
+| PR-209 | GPT-5.6 选择 max/ultra | 从 `model/list` 读取每模型 supported/default reasoning | 未声明能力不显示新档；切模有确定 fallback | Sol/Terra/Luna/5.5 与未知模型菜单和 payload 正确 | P0 | done-on-main |
+| PR-212 | Windows 文件链接 404 | `/C:/...` 还原为 `C:/...` | Unix、UNC、已规范化、坏编码不回归 | unit、真实 GET、TestChat 三断言通过 | P0 | done-on-main |
 | PR-211 | 不需要 Goal mode | 不集成 Goal mode PR | 不引入无关 UI/状态 | 分支与文档无 Goal mode 代码 | P0 | excluded |
 
 ## Runtime Reload 与诊断
@@ -62,11 +62,11 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | SEC-001 | 保护认证 | 禁止读取/上传/记录敏感认证与完整配置 | 默认最小数据；无遥测 | 代码审查和日志/响应泄密测试通过 | P0 | planned |
 | SEC-002 | 限制进程控制 | 只能重启当前 bridge child，不接受任意 PID/命令 | 现有认证覆盖 | 恶意 PID/命令字段被拒绝 | P0 | planned |
-| TEST-001 | 每阶段可验证 | 提供修改文件、设计、单测、build、手测、限制、回滚 | 真实结果，不因耗时跳过 | `ROADMAP/AUDIT/TEST_PLAN` 同步更新 | P0 | done-in-branch |
-| TEST-002 | UI 不回归 | 亮/暗、375x812、768x1024，文件链接使用 TestChat 三断言 | 截图可追溯；无重叠/溢出 | assertion + screenshot 路径入测试报告 | P0 | done-in-branch |
-| PERF-001 | 功能不拖慢应用 | 每行为变更审计 duplicate requests、阻塞、fanout、payload、cache 和 bundle | 以测量或具体路径为证 | 每提交有性能记录 | P0 | done-in-branch |
+| TEST-001 | 每阶段可验证 | 提供修改文件、设计、单测、build、手测、限制、回滚 | 真实结果，不因耗时跳过 | `ROADMAP/AUDIT/TEST_PLAN` 同步更新 | P0 | done-on-main |
+| TEST-002 | UI 不回归 | 亮/暗、375x812、768x1024，文件链接使用 TestChat 三断言 | 截图可追溯；无重叠/溢出 | assertion + screenshot 路径入测试报告 | P0 | done-on-main |
+| PERF-001 | 功能不拖慢应用 | 每行为变更审计 duplicate requests、阻塞、fanout、payload、cache 和 bundle | 以测量或具体路径为证 | 每提交有性能记录 | P0 | done-on-main |
 | PARITY-001 | 对齐 Desktop | 先观察、截图、列差异，再自行实现 | 不复制私有源码/资源 | 每项标 fixed/deviation/follow-up | P2 | planned |
 
 ## 状态更新规则
 
-代码只在集成分支通过不等于已发布；进入 `main` 后把对应项改为 `done-on-main`，生产部署验证后再改为 `deployed`。任何 stub UI 测试必须标明 stub 范围，不能替代真实 app-server/Provider 验证。
+进入 `main` 只表示代码已合并，生产部署验证后才能改为 `deployed`。任何 stub UI 测试必须标明 stub 范围，不能替代真实 app-server/Provider 验证。

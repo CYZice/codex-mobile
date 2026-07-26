@@ -33,8 +33,8 @@ Thread
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| 模型能力菜单 | fixed in integration | PR #209 按真实 metadata 限定 reasoning levels |
-| Windows 本地链接 | fixed in integration | PR #212 修复 `/C:/...` 后端解析 |
+| 模型能力菜单 | fixed on main | PR #209 按真实 metadata 限定 reasoning levels |
+| Windows 本地链接 | fixed on main | PR #212 修复 `/C:/...` 后端解析 |
 | Turn 分组与统一 reducer | needs follow-up | 当前仍主要使用扁平 `UiMessage[]` |
 | Worked/文件修改主数据源 | needs follow-up | 需要统一 fileChange/item/diff/persisted 优先级 |
 | 断线恢复 | needs follow-up | 先做诊断与 reducer 对账 |

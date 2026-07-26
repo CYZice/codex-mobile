@@ -20,11 +20,11 @@
 
 ## 当前状态
 
-截至 2026-07-27，以下工作位于 `integration/upstream-prs`，尚未声明已经进入 `main`：
+截至 2026-07-27，Fork PR #1 已合并到 `main`，merge commit 为 `5b9d584`：
 
-- 已选择性集成 PR #203：Windows Codex CLI 解析。
-- 已选择性集成 PR #209：按模型能力显示 `max/ultra` 推理等级，并增加无元数据模型的保守回退。
-- 已选择性集成 PR #212：Windows `/C:/...` 本地浏览路径修复。
+- 已选择性合并 PR #203：Windows Codex CLI 解析。
+- 已选择性合并 PR #209：按模型能力显示 `max/ultra` 推理等级，并增加无元数据模型的保守回退。
+- 已选择性合并 PR #212：Windows `/C:/...` 本地浏览路径修复。
 - 已建立本目录的维护、架构、部署、安全、同步、需求、测试和 Desktop parity 文档。
 - PR #211 Goal mode 按用户要求排除。
 - Runtime Reload、Project Sync、Timeline 重构和断线诊断仍为规划项，未实现。

@@ -1,6 +1,6 @@
 # Upstream PR 审计
 
-审计基线：`fac2291`。本轮“合并”指把选定上游提交集成到 `CYZice/codex-mobile` 的 `integration/upstream-prs`；在进入 fork `main` 前状态仍为 `in-progress`，且不会声称上游 PR 已由 `friuns2` 合并。
+审计基线：`fac2291`。选定上游提交已通过 Fork PR #1 合并到 `CYZice/codex-mobile` 的 `main`，merge commit 为 `5b9d584`。这不表示上游 `friuns2` 的原 PR 已由其维护者合并或关闭。
 
 ## 已集成
 
@@ -31,6 +31,6 @@
 
 ## 后续动作
 
-1. 推送 `integration/upstream-prs` 到 origin，创建 fork PR。
-2. 在 fork PR checks 通过后合并到 `main`，验证 `origin/main` 包含三个 Fork 提交。
-3. 上游若更新 PR head，先比较新旧 head；不自动覆盖本地调整。
+1. 上游若更新 PR head，先比较新旧 head；不自动覆盖本地调整。
+2. 在 Windows dev wrapper 和 Codex app-server 兼容性问题解决后，重跑真实 RPC/模型菜单验证。
+3. 到达各自复查条件后，再深审 #187、#199、#206。
