@@ -9,10 +9,12 @@
 | pnpm | 10.18.3 via Corepack |
 | Codex CLI | 0.144.6 |
 | 基线 commit | `fac2291` |
-| 集成分支 | `integration/upstream-prs` |
+| 合并结果 | Fork PR #1，merge commit `5b9d584` |
 | lockfile | 不存在 |
 
 依赖安装使用 `COREPACK_ENABLE_PROJECT_SPEC=0` 和 `--lockfile=false`，避免 Corepack 自动改写 `package.json`。这只适合当前开发验证，不能替代生产可复现依赖策略。
+
+GitHub 已确认 PR #1 为 `MERGED`，`mergedAt` 非空，`origin/main` 包含 `bcd9524`、`90c5ae2`、`e73599c` 和文档提交 `a0fab0b`。
 
 ## 自动化结果
 
