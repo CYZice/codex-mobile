@@ -1,6 +1,6 @@
 # Custom Fork 需求基线
 
-优先级：P0 阻塞安全/可用性；P1 核心维护能力；P2 大型体验与架构迁移。状态：`done-in-branch`、`planned`、`deferred`、`excluded`。
+优先级：P0 阻塞安全/可用性；P1 核心维护能力；P2 大型体验与架构迁移。状态：`done-on-main`、`done-in-branch`、`partial-in-branch`、`planned`、`deferred`、`excluded`。
 
 ## 基线与上游维护
 
@@ -34,13 +34,14 @@
 | 编号 | 用户场景 | 功能需求 | 非功能需求 | 验收标准 | 优先级 | 状态 |
 | --- | --- | --- | --- | --- | --- | --- |
 | PROJ-001 | 网页项目与 Desktop 不一致 | 支持 Manual、Codex Desktop、Smart 三种来源，Smart 推荐 | Desktop 文件只读；启动不依赖其存在 | 缺失/损坏/字段漂移均安全回退 | P1 | planned |
-| PROJ-002 | 读取 Desktop 项目 | allowlist 提取 local-projects、order、roots、assignments、hints、projectless 等已知字段 | 不返回完整 state，不读取无关敏感字段 | fixture 版本矩阵通过 | P1 | planned |
-| PROJ-003 | 旧 thread 超过首页 | 完整分页 `thread/list`，默认排除 archived，可选包含 | 有上限/取消/错误处理；不只读前 50 条 | 150+ thread fixture 无遗漏/重复 | P1 | planned |
+| PROJ-002 | 读取 Desktop 项目 | allowlist 提取 local-projects、order、roots、assignments、hints、projectless 等已知字段 | 不返回完整 state，不读取无关敏感字段 | fixture 版本矩阵通过 | P1 | partial-in-branch |
+| PROJ-003 | 旧 thread 超过首页 | 完整分页 `thread/list`，默认排除 archived，可选包含 | 有上限/取消/错误处理；不只读前 50 条 | 150+ thread fixture 无遗漏/重复 | P1 | done-on-main |
 | PROJ-004 | Windows/Linux 路径漂移 | drive 大小写、分隔符、尾斜杠、`\\?\`、realpath、symlink/junction 安全规范化 | Windows 大小写不敏感；Linux 敏感；不存在安全回退 | 双平台 path table 全通过 | P1 | planned |
 | PROJ-005 | cwd 是子目录/worktree | assignment > hint > 最长父路径 > Git root > cwd candidate 匹配 | 同名不同路径不误合并 | worktree/多 root/子目录 fixture 通过 | P1 | planned |
 | PROJ-006 | 同步前评估影响 | preview 分类 add/existing/merge/missing | 只读、可重复、确定排序 | 同输入生成相同 preview | P1 | planned |
 | PROJ-007 | 安全合并 | merge 添加/改名/排序并保留手动项目，不自动删除 | 幂等；写入失败可回滚 | 两次 apply 结果一致，手动项目保留 | P1 | planned |
 | PROJ-008 | 严格镜像 | mirror 与来源一致，删除前二次确认，默认不可用 | 精确删除列表；防误触 | 无确认 token 不能执行 | P2 | planned |
+| PROJ-009 | 网页新增项目可被 Desktop/其他浏览器读取 | saved roots 与 `local-projects` 双写，路径顺序翻译回项目 ID | 保留未知字段；同主机一致；不同主机不复制绝对路径 | 新增、重命名、排序、删除和第二浏览器重验证通过 | P1 | done-in-branch |
 | PROJ-UI-001 | 一键同步 | Projects 标题旁增加 Sync Projects/同步项目与预览 | 自定义 menu，非 native select；移动端/明暗主题 | 后端 preview/apply 稳定后做 parity 验证 | P2 | deferred |
 
 ## Timeline 与断线行为

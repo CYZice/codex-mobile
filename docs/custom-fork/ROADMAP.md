@@ -31,8 +31,10 @@
 | App Server 手动重载 | planned | 先实现 bridge generation、状态 API、单飞 restart promise、活动 turn/approval 阻断；前端按钮后置 |
 | Runtime diagnostics | planned | 只返回脱敏状态、PID、generation、pending 数、最后退出/重启原因 |
 | 配置变化检测 | planned | 评审 `config.toml`、`auth.json`、Provider/base_url 的安全签名，不返回原文或 Token |
-| Desktop 项目状态读取 | planned | 后端只读解析已知项目字段；容忍缺失/损坏/版本漂移 |
-| 全量 thread/list 项目发现 | planned | 完整分页、默认排除 archived、路径规范化与最长父路径匹配 |
+| Desktop 项目 roots 读取 | done | 当前分支合并 saved roots 与 `local-projects.rootPaths`，并把项目 ID 翻译为 API 路径 |
+| 网页项目本地登记 | done | 当前分支写入 saved roots、`local-projects` 和 ID 型 `project-order`，保留未知字段 |
+| roots 跨客户端重验证 | done | 2 秒 TTL；并发 GET 单飞，无新增轮询 |
+| 全量 thread/list 项目发现 | done-on-main | 首屏分页后按 100 条后台继续，默认排除 archived；后续仍需归属 preview |
 | Project Sync 预览/merge | planned | 先提供只读 preview 和 merge；mirror 默认禁用且需二次确认 |
 
 ## P2 延期前端与消息流
@@ -50,5 +52,5 @@
 1. 单独修复或约束 Windows dev wrapper，并确认 Codex CLI 0.144.6 app-server 退出原因。
 2. 为 Runtime Reload 写状态机单测，再实现只读 status API。
 3. 实现 restart 单飞、活动 turn/approval 保护、旧 RPC 失败收敛和 diagnostics。
-4. 实现 Project Sync 的 Desktop reader、thread/list 全分页和 preview API。
+4. 在当前 roots/local-projects 适配上实现 Project Sync preview API 与 host-aware 远程项目合并。
 5. 最后开始 Reload/Sync UI 与 Timeline/Parity 工作。

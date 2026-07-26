@@ -24,13 +24,14 @@ GitHub 已确认 PR #1 为 `MERGED`，`mergedAt` 非空，`origin/main` 包含 `
 | PR #203 | 4 pass | 149 pass, 2 fail | pass | pass |
 | PR #209 | 52 pass | 155 pass, 2 fail | pass | pass |
 | PR #212 | 3 pass | 158 pass, 2 fail | pass | pass |
+| Project state sync | 5 pass | 165 pass | pass | pass |
 
-固定的两项 Windows 失败：
+主分支基线曾有两项 Windows 失败：
 
 1. `writeWorkspaceRootsState > persists workspace roots in canonical form`：创建 symlink 返回 `EPERM`，需要 Developer Mode/管理员权限或平台条件测试。
 2. `ensureDefaultFreeModeStateForMissingAuthSync > creates CODEX_HOME before writing free-mode state`：Windows 报告 mode `0666`，不能按 POSIX `0600` 断言。
 
-若后续出现第三项失败，不能以“基线失败”为由忽略。
+当前功能分支改用 Windows junction 验证 realpath，并只在非 Windows 断言 POSIX `0600` mode；全量 165 项已全部通过。
 
 ## Build 与性能证据
 
@@ -39,6 +40,8 @@ GitHub 已确认 PR #1 为 `MERGED`，`mergedAt` 非空，`origin/main` 包含 `
 - PR #203 只改变已有同步命令 probe 的执行封装，probe 数量不变。
 - PR #209 使用已有 `model/list` 响应做有界数组/Map 查找，没有新增请求、轮询或 fanout。
 - PR #212 每次 decode 增加一个有界正则，没有新增 I/O 或缓存失效。
+- Project state sync 对 roots/local-projects 做有界线性扫描；没有目录递归、thread fanout 或轮询。roots GET 使用 2 秒 TTL 和并发单飞。
+- 当前 frontend main chunk 为 513.30 kB，gzip 158.41 kB，相对 PR #212 增加约 0.08/0.05 kB；CLI bundle 为 594.47 kB。
 - Vite 始终提示主 chunk 超过 500 kB；这是既有性能债务，Timeline/大型 UI 变更前必须重新测量。
 
 ## 浏览器证据
@@ -81,6 +84,8 @@ UI 断言使用隔离浏览器与 method-aware RPC stubs，因为真实 app-serv
 
 ### Project Sync
 
+- 隔离 4192 HTTP 验证：启动时 saved-only/local-only 状态由 1+1 迁移为 2 saved roots + 2 local projects，路径型 `project-order` 项为 0；网页新增后变为 3+3，未知 sentinel 保留。
+- 当前主机 4173 幂等验证：API 返回 8 roots/8 order，连续 GET 前后全局状态 mtime 不变。项目状态测试必须显式使用隔离 `CODEX_HOME`。
 - Desktop state 缺失、损坏、字段漂移。
 - thread/list 超过 50/100 条的完整分页；archived 开关。
 - Windows drive 大小写、分隔符、`\\?\`、UNC、junction/symlink、不存在路径。

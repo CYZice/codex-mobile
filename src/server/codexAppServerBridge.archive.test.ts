@@ -202,7 +202,7 @@ describe('writeWorkspaceRootsState', () => {
     try {
       await mkdir(canonicalRoot, { recursive: true })
       await mkdir(symlinkParent, { recursive: true })
-      await symlink(canonicalRoot, symlinkRoot)
+      await symlink(canonicalRoot, symlinkRoot, process.platform === 'win32' ? 'junction' : undefined)
       await writeWorkspaceRootsState({
         order: [symlinkRoot, 'remote-project-id', canonicalRoot],
         labels: {
@@ -223,12 +223,15 @@ describe('writeWorkspaceRootsState', () => {
       const rawState = JSON.parse(await readFile(join(codexHome, '.codex-global-state.json'), 'utf8')) as Record<string, unknown>
       expect(rawState['electron-saved-workspace-roots']).toEqual([
         canonicalRoot,
-        'remote-project-id',
       ])
+      const localProjects = rawState['local-projects'] as Record<string, Record<string, unknown>>
+      const localProject = Object.values(localProjects)[0]
+      expect(Object.keys(localProjects)).toHaveLength(1)
+      expect(localProject?.rootPaths).toEqual([canonicalRoot])
       expect(rawState['active-workspace-roots']).toEqual([canonicalRoot])
       expect(rawState['project-order']).toEqual([
         'remote-project-id',
-        canonicalRoot,
+        localProject?.id,
       ])
       expect(rawState['electron-workspace-root-labels']).toEqual({
         [canonicalRoot]: 'Canonical Demo',
@@ -409,7 +412,9 @@ describe('ensureDefaultFreeModeStateForMissingAuthSync', () => {
 
       const info = await stat(statePath)
       expect(info.isFile()).toBe(true)
-      expect(info.mode & 0o777).toBe(0o600)
+      if (process.platform !== 'win32') {
+        expect(info.mode & 0o777).toBe(0o600)
+      }
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }
