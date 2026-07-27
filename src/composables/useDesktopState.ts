@@ -5054,6 +5054,11 @@ export function useDesktopState() {
       return
     }
 
+    // Keep the submitted prompt visible while the app-server persists the next
+    // turn. New threads already do this; selected threads must follow the same
+    // optimistic path so Thinking never replaces the user's message.
+    appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+
     if (isInProgress) {
       shouldAutoScrollOnNextAgentEvent = true
       void startTurnForThread(

@@ -153,9 +153,6 @@
                         :key="`file-change:${message.id}:${change.path}:${change.movedToPath || ''}`"
                         class="file-change-item"
                       >
-                        <span class="file-change-badge" :data-operation="fileChangeOperationTone(change)">
-                          {{ fileChangeOperationLabel(change) }}
-                        </span>
                         <button
                           type="button"
                           class="file-change-path-button"
@@ -186,7 +183,10 @@
                         </span>
                       </li>
                     </ul>
-                    <div v-if="isFileChangeActionable(readStandaloneFileChangeSummary(message))" class="file-change-actions">
+                    <div
+                      v-if="message.fileChangeStatus === 'completed' && isFileChangeActionable(readStandaloneFileChangeSummary(message))"
+                      class="file-change-actions"
+                    >
                       <p v-if="fileChangeActionErrorText(readStandaloneFileChangeSummary(message))" class="file-change-action-error">
                         {{ fileChangeActionErrorText(readStandaloneFileChangeSummary(message)) }}
                       </p>
@@ -334,12 +334,17 @@
                   </ol>
                   <div v-else class="plan-card-markdown" v-html="renderMarkdownBlocksAsHtml(message.text)" />
                   <div v-if="showImplementPlanButton(message)" class="plan-card-actions">
-                    <button
-                      type="button"
-                      class="plan-card-implement-button"
-                      @click="implementPlan(message)"
-                    >
-                      Implement plan
+                    <template v-if="planConfirmationMessageId === message.id">
+                      <div class="plan-confirmation">
+                        <p>实施此计划？</p>
+                        <div class="plan-confirmation-actions">
+                          <button type="button" class="plan-card-implement-button" @click="implementPlan(message)">是，实施此计划</button>
+                          <button type="button" class="plan-card-dismiss-button" @click="planConfirmationMessageId = ''">跳过</button>
+                        </div>
+                      </div>
+                    </template>
+                    <button v-else type="button" class="plan-card-implement-button" @click="planConfirmationMessageId = message.id">
+                      实施此计划
                     </button>
                   </div>
                 </div>
@@ -934,6 +939,7 @@ import IconTablerX from '../icons/IconTablerX.vue'
 type HighlightJsModule = (typeof import('highlight.js/lib/common'))['default']
 
 const expandedCommandIds = ref<Set<string>>(new Set())
+const planConfirmationMessageId = ref('')
 const collapsedAutoCommandIds = ref<Set<string>>(new Set())
 const expandedCommandGroupIds = ref<Set<string>>(new Set())
 const expandedWorkedIds = ref<Set<string>>(new Set())
@@ -1048,12 +1054,12 @@ function showImplementPlanButton(message: UiMessage): boolean {
 function implementPlan(message: UiMessage): void {
   const turnId = message.turnId?.trim() ?? ''
   if (!turnId) return
+  planConfirmationMessageId.value = ''
   emit('implementPlan', { turnId })
 }
 
 function isFileChangeMessage(message: UiMessage): boolean {
   return message.messageType === 'fileChange'
-    && message.fileChangeStatus === 'completed'
     && Array.isArray(message.fileChanges)
     && message.fileChanges.length > 0
 }
@@ -1868,11 +1874,11 @@ const forkableTurnIndexByAnchorId = computed<Record<string, number>>(() => {
 })
 
 function showCopyResponseButton(message: UiMessage): boolean {
-  return typeof copyableResponseContentByAnchorId.value[message.id] === 'string'
+  return !isLiveTurnRuntime.value && typeof copyableResponseContentByAnchorId.value[message.id] === 'string'
 }
 
 function showForkResponseButton(message: UiMessage): boolean {
-  return typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
+  return !isLiveTurnRuntime.value && typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
 }
 
 function mergeFileChangeDiff(first: string, second: string): string {
@@ -4774,7 +4780,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card {
-  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-slate-900;
+  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 shadow-sm;
 }
 
 .plan-card-header {
@@ -4782,15 +4788,15 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-title {
-  @apply m-0 text-sm font-semibold leading-5 text-sky-900;
+  @apply m-0 text-sm font-semibold leading-5 text-zinc-100;
 }
 
 .plan-card-badge {
-  @apply inline-flex items-center rounded-full bg-sky-200 px-2 py-0.5 text-[11px] font-medium leading-4 text-sky-900;
+  @apply inline-flex items-center rounded-full bg-zinc-700 px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-200;
 }
 
 .plan-card-explanation {
-  @apply text-slate-700;
+  @apply text-zinc-300;
 }
 
 .plan-card-markdown {
@@ -4808,7 +4814,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-markdown :deep(.message-text) {
-  @apply text-sm leading-relaxed whitespace-pre-wrap text-slate-800;
+  @apply text-sm leading-relaxed whitespace-pre-wrap text-zinc-200;
 }
 
 .plan-card-markdown :deep(.message-heading) {
@@ -4904,31 +4910,31 @@ onBeforeUnmount(() => {
 }
 
 .plan-step-list {
-  @apply m-0 flex list-none flex-col gap-2 p-0;
+  @apply m-0 flex list-none flex-col gap-1 p-0;
 }
 
 .plan-step-item {
-  @apply flex items-start gap-2 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm leading-relaxed text-slate-800;
+  @apply flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-relaxed text-zinc-200;
 }
 
 .plan-step-item[data-status='completed'] {
-  @apply border-emerald-200 bg-emerald-50/80;
+  @apply text-zinc-500;
 }
 
 .plan-step-item[data-status='inProgress'] {
-  @apply border-amber-200 bg-amber-50/80;
+  @apply bg-zinc-700/50;
 }
 
 .plan-step-status {
-  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700;
+  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-700 text-xs font-semibold text-zinc-300;
 }
 
 .plan-step-status[data-status='completed'] {
-  @apply bg-emerald-200 text-emerald-900;
+  @apply bg-zinc-700 text-zinc-500;
 }
 
 .plan-step-status[data-status='inProgress'] {
-  @apply bg-amber-200 text-amber-900;
+  @apply bg-zinc-600 text-zinc-100;
 }
 
 .plan-step-text {
@@ -4940,7 +4946,23 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-implement-button {
-  @apply inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-50;
+  @apply inline-flex items-center rounded-full border border-zinc-600 bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:border-zinc-500 hover:bg-zinc-600;
+}
+
+.plan-confirmation {
+  @apply w-full rounded-xl border border-zinc-600 bg-zinc-900/70 p-3 text-sm text-zinc-200;
+}
+
+.plan-confirmation p {
+  @apply m-0 font-medium;
+}
+
+.plan-confirmation-actions {
+  @apply mt-3 flex flex-wrap items-center gap-2;
+}
+
+.plan-card-dismiss-button {
+  @apply inline-flex items-center rounded-full border border-transparent px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100;
 }
 
 .message-text {
@@ -5202,11 +5224,11 @@ onBeforeUnmount(() => {
 }
 
 .cmd-row {
-  @apply w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-200 bg-zinc-50 cursor-pointer transition text-left hover:bg-zinc-100;
+  @apply w-full flex items-center gap-2 px-0 py-1 bg-transparent border-0 cursor-pointer transition text-left hover:text-zinc-950;
 }
 
 .cmd-row.cmd-row-group {
-  @apply border-dashed border-zinc-300 bg-zinc-100/90 text-zinc-600;
+  @apply bg-transparent text-zinc-500;
 }
 
 .cmd-row.cmd-compact {
@@ -5306,7 +5328,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-summary-block {
-  @apply mt-3 flex flex-col gap-0;
+  @apply mt-3 flex flex-col gap-0 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-800;
 }
 
 .file-change-summary-block-inline {
@@ -5314,27 +5336,27 @@ onBeforeUnmount(() => {
 }
 
 .file-change-summary-row {
-  @apply border-dashed;
+  @apply rounded-none border-0 bg-transparent px-4 py-3 hover:bg-zinc-700/40;
 }
 
 .file-change-summary-label {
-  @apply flex-1 min-w-0 truncate text-xs font-medium text-zinc-700;
+  @apply flex-1 min-w-0 truncate text-sm font-semibold text-zinc-100;
 }
 
 .file-change-summary-status {
-  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-[11px] font-semibold text-zinc-500 flex-shrink-0;
+  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-sm font-semibold text-zinc-300 flex-shrink-0;
 }
 
 .file-change-panel-inner {
-  @apply mb-1 min-h-0 overflow-hidden pl-2;
+  @apply min-h-0 overflow-hidden;
 }
 
 .file-change-list {
-  @apply m-0 flex list-none flex-col gap-0.5 rounded-xl border border-zinc-200 bg-white/80 p-1.5;
+  @apply m-0 flex list-none flex-col gap-0 border-t border-zinc-700 bg-zinc-800 p-0;
 }
 
 .file-change-item {
-  @apply flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-zinc-700;
+  @apply flex flex-wrap items-center gap-1.5 border-b border-zinc-700/70 px-4 py-2 text-sm text-zinc-200 last:border-b-0;
 }
 
 .file-change-badge {
@@ -5362,7 +5384,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-path-button {
-  @apply min-w-0 border-0 bg-transparent p-0 text-left font-mono text-[13px] text-[#0969da] hover:text-[#1f6feb] hover:underline underline-offset-2;
+  @apply min-w-0 border-0 bg-transparent p-0 text-left font-mono text-[13px] text-zinc-100 hover:text-white hover:underline underline-offset-2;
 }
 
 .file-change-arrow {
@@ -5370,7 +5392,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-delta {
-  @apply ml-auto inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-600;
+  @apply ml-auto inline-flex items-center gap-1.5 px-0 py-0 text-sm font-semibold text-zinc-300;
 }
 
 .file-change-actions {

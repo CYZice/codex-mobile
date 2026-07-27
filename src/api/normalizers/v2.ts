@@ -508,7 +508,7 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
   if (item.type === 'fileChange') {
     const fileChanges = toUiFileChanges(item.changes)
     const fileChangeStatus = normalizeFileChangeStatus(item.status)
-    if (fileChanges.length === 0 || fileChangeStatus !== 'completed') {
+    if (fileChanges.length === 0) {
       return []
     }
     return [
