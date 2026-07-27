@@ -2126,7 +2126,7 @@ export function useDesktopState() {
       const normalizedProviderId = normalizeProviderContextId(currentConfig.providerId)
       activeProviderId.value = normalizedProviderId
       const targetProviderId = readProviderIdForThread(selectedThreadId.value)
-      const isProviderBacked = targetProviderId !== 'codex'
+      const isProviderBacked = targetProviderId !== 'codex' && targetProviderId !== 'custom'
       const normalizedSelectedModelId = readModelIdForThread(selectedThreadId.value)
       const models = await getAvailableModels({
         includeProviderModels: isProviderBacked || options?.includeProviderModels !== false,

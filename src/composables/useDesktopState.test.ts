@@ -753,6 +753,42 @@ describe('live error overlay', () => {
 })
 
 describe('provider model selection', () => {
+  it('keeps the official model list when the OpenAI provider uses the custom id', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.6-terra',
+      providerId: 'custom',
+      reasoningEffort: 'high',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue(modelsWithoutReasoning(
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+    ))
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(gatewayMocks.getAvailableModels).toHaveBeenCalledWith({
+      includeProviderModels: true,
+      requireProviderModels: false,
+      providerId: undefined,
+    })
+    expect(state.availableModelIds.value).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+    ])
+    expect(state.selectedModelId.value).toBe('gpt-5.6-terra')
+  })
+
   it('ignores global selected-model localStorage when OpenCode Zen is the active provider', async () => {
     installTestWindow({
       'codex-web-local.selected-model-by-context.v1': JSON.stringify({
