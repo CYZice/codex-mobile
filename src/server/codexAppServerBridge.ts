@@ -6286,10 +6286,11 @@ function prependUniqueString(value: string, items: string[]): string[] {
 
 async function updateWorkspaceRootsState(
   updater: (existingState: WorkspaceRootsState) => WorkspaceRootsState,
-): Promise<void> {
-  await queueWorkspaceRootsMutation(async () => {
+): Promise<WorkspaceRootsState> {
+  return await queueWorkspaceRootsMutation(async () => {
     const existingState = await readWorkspaceRootsState()
     await writeWorkspaceRootsState(updater(existingState))
+    return await readWorkspaceRootsState()
   })
 }
 
@@ -6338,6 +6339,116 @@ async function persistWorkspaceRoot(workspaceRoot: string, label = ''): Promise<
       active: prependUniqueString(normalizedRoot, existingState.active),
       projectOrder: prependUniqueString(normalizedRoot, existingState.projectOrder),
       remoteProjects: existingState.remoteProjects,
+    }
+  })
+}
+
+export async function ensureWorkspaceRootForThread(workspaceRoot: string): Promise<boolean> {
+  const normalizedRoot = workspaceRoot.trim()
+  if (!normalizedRoot || !isAbsolute(normalizedRoot)) return false
+  try {
+    if (!(await stat(normalizedRoot)).isDirectory()) return false
+  } catch {
+    return false
+  }
+  await persistWorkspaceRoot(normalizedRoot)
+  return true
+}
+
+function isRunningThreadSummary(value: unknown): boolean {
+  const record = asRecord(value)
+  if (!record) return false
+  if (record.inProgress === true || record.status === 'inProgress' || record.turnStatus === 'inProgress') return true
+  const status = asRecord(record.status)
+  return status?.type === 'active' || status?.type === 'inProgress'
+}
+
+export async function recoverWorkspaceRootsForRunningThreads(threadSummaries: unknown[]): Promise<boolean> {
+  const candidates = Array.from(new Set(threadSummaries
+    .filter(isRunningThreadSummary)
+    .map((summary) => readNonEmptyString(asRecord(summary)?.cwd))
+    .filter((cwd) => cwd && isAbsolute(cwd))))
+  const existingDirectories = (await Promise.all(candidates.map(async (cwd) => {
+    try {
+      return (await stat(cwd)).isDirectory() ? cwd : ''
+    } catch {
+      return ''
+    }
+  }))).filter(Boolean)
+  if (existingDirectories.length === 0) return false
+
+  let recovered = false
+  await updateWorkspaceRootsState((existingState) => {
+    const existingKeys = new Set(existingState.order.map(workspaceRootComparisonKey))
+    const missing = existingDirectories.filter((cwd) => !existingKeys.has(workspaceRootComparisonKey(cwd)))
+    if (missing.length === 0) return existingState
+    recovered = true
+    return {
+      ...existingState,
+      order: [...missing, ...existingState.order],
+      active: existingState.active.length > 0 ? existingState.active : [missing[0]],
+      projectOrder: [...missing, ...existingState.projectOrder],
+    }
+  })
+  return recovered
+}
+
+export async function reorderWorkspaceRoots(requestedOrder: string[]): Promise<WorkspaceRootsState> {
+  return await updateWorkspaceRootsState((existingState) => {
+    const currentOrder = [...existingState.order, ...existingState.remoteProjects.map((project) => project.id)]
+    const currentByKey = new Map(currentOrder.map((item) => [workspaceRootComparisonKey(item), item]))
+    const nextProjectOrder: string[] = []
+    const seen = new Set<string>()
+    const append = (item: string): void => {
+      const key = workspaceRootComparisonKey(item)
+      if (!seen.has(key)) {
+        seen.add(key)
+        nextProjectOrder.push(item)
+      }
+    }
+    for (const item of requestedOrder) {
+      const current = currentByKey.get(workspaceRootComparisonKey(item))
+      if (current) append(current)
+    }
+    for (const item of currentOrder) append(item)
+    const remoteProjectIds = new Set(existingState.remoteProjects.map((project) => project.id))
+    const nextOrder = nextProjectOrder.filter((item) => !remoteProjectIds.has(item))
+    return {
+      order: nextOrder,
+      labels: { ...existingState.labels },
+      active: existingState.active.filter((item) => nextOrder.some((root) => workspaceRootComparisonKey(root) === workspaceRootComparisonKey(item))),
+      projectOrder: nextProjectOrder,
+      remoteProjects: existingState.remoteProjects,
+    }
+  })
+}
+
+export async function renameWorkspaceRoots(rootPaths: string[], label: string): Promise<WorkspaceRootsState> {
+  const targetKeys = new Set(normalizeStringArray(rootPaths).map(workspaceRootComparisonKey))
+  return await updateWorkspaceRootsState((existingState) => {
+    const labels = { ...existingState.labels }
+    for (const rootPath of existingState.order) {
+      if (!targetKeys.has(workspaceRootComparisonKey(rootPath))) continue
+      if (label.trim()) labels[rootPath] = label.trim()
+      else delete labels[rootPath]
+    }
+    return { ...existingState, labels }
+  })
+}
+
+export async function removeWorkspaceRoots(rootPaths: string[]): Promise<WorkspaceRootsState> {
+  const targetKeys = new Set(normalizeStringArray(rootPaths).map(workspaceRootComparisonKey))
+  return await updateWorkspaceRootsState((existingState) => {
+    const order = existingState.order.filter((rootPath) => !targetKeys.has(workspaceRootComparisonKey(rootPath)))
+    const labels = Object.fromEntries(Object.entries(existingState.labels)
+      .filter(([rootPath]) => !targetKeys.has(workspaceRootComparisonKey(rootPath))))
+    const active = existingState.active.filter((rootPath) => !targetKeys.has(workspaceRootComparisonKey(rootPath)))
+    return {
+      ...existingState,
+      order,
+      labels,
+      active: active.length > 0 || order.length === 0 ? active : [order[0]],
+      projectOrder: existingState.projectOrder.filter((item) => !targetKeys.has(workspaceRootComparisonKey(item))),
     }
   })
 }
@@ -8242,6 +8353,12 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 	          return
 	        }
 
+        if (body.method === 'thread/start') {
+          const params = asRecord(body.params)
+          const cwd = readNonEmptyString(params?.cwd)
+          if (cwd) await ensureWorkspaceRootForThread(cwd)
+        }
+
         let rpcResult: unknown
         try {
           rpcResult = await callRpcWithArchiveRecovery(appServer, body.method, body.params ?? null)
@@ -8275,8 +8392,15 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
               return
             }
           }
-		          throw error
-		        }
+	          throw error
+	        }
+        if (body.method === 'thread/list') {
+          const listResult = asRecord(rpcResult)
+          const rows = Array.isArray(listResult?.data) ? listResult.data : []
+          if (await recoverWorkspaceRootsForRunningThreads(rows)) {
+            rpcResult = { ...listResult, workspaceRootsRecovered: true }
+          }
+        }
         const trimmedResult = trimThreadTurnsInRpcResult(body.method, rpcResult)
         const errorMergedResult = THREAD_METHODS_WITH_TURNS.has(body.method)
           ? mergeStreamTurnErrorsIntoThreadResult(appServer, trimmedResult)
@@ -8779,6 +8903,36 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       if (req.method === 'GET' && url.pathname === '/codex-api/thread-queue-state') {
         const state = await readThreadQueueState()
         setJson(res, 200, { data: state })
+        return
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/codex-api/workspace-roots-order') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.projectOrder)) {
+          setJson(res, 400, { error: 'Invalid body: expected { projectOrder: string[] }' })
+          return
+        }
+        setJson(res, 200, { data: await reorderWorkspaceRoots(normalizeStringArray(record.projectOrder)) })
+        return
+      }
+
+      if (req.method === 'PATCH' && url.pathname === '/codex-api/workspace-roots-label') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.rootPaths) || typeof record.label !== 'string') {
+          setJson(res, 400, { error: 'Invalid body: expected { rootPaths: string[], label: string }' })
+          return
+        }
+        setJson(res, 200, { data: await renameWorkspaceRoots(normalizeStringArray(record.rootPaths), record.label) })
+        return
+      }
+
+      if (req.method === 'DELETE' && url.pathname === '/codex-api/workspace-roots') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.rootPaths)) {
+          setJson(res, 400, { error: 'Invalid body: expected { rootPaths: string[] }' })
+          return
+        }
+        setJson(res, 200, { data: await removeWorkspaceRoots(normalizeStringArray(record.rootPaths)) })
         return
       }
 
@@ -9367,15 +9521,27 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 400, { error: 'Invalid body: expected object' })
           return
         }
-        await updateWorkspaceRootsState((existingState) => ({
-          order: normalizeStringArray(record.order),
-          labels: normalizeStringRecord(record.labels),
-          active: normalizeStringArray(record.active),
-          projectOrder: Array.isArray(record.projectOrder)
+        await updateWorkspaceRootsState((existingState) => {
+          const incomingOrder = normalizeStringArray(record.order)
+          const knownOrder = [...incomingOrder, ...existingState.order.filter((rootPath) => !incomingOrder.some(
+            (item) => workspaceRootComparisonKey(item) === workspaceRootComparisonKey(rootPath),
+          ))]
+          const incomingProjectOrder = Array.isArray(record.projectOrder)
             ? normalizeStringArray(record.projectOrder)
-            : existingState.projectOrder,
-          remoteProjects: existingState.remoteProjects,
-        }))
+            : []
+          const projectOrder = [...incomingProjectOrder, ...existingState.projectOrder.filter((item) => !incomingProjectOrder.some(
+            (candidate) => workspaceRootComparisonKey(candidate) === workspaceRootComparisonKey(item),
+          ))]
+          return {
+            order: knownOrder,
+            labels: { ...existingState.labels, ...normalizeStringRecord(record.labels) },
+            active: normalizeStringArray(record.active).filter((rootPath) => knownOrder.some(
+              (item) => workspaceRootComparisonKey(item) === workspaceRootComparisonKey(rootPath),
+            )),
+            projectOrder,
+            remoteProjects: existingState.remoteProjects,
+          }
+        })
         setJson(res, 200, { ok: true })
         return
       }

@@ -22,10 +22,12 @@ import {
   getThreadQueueState,
   getPermissionState,
   getWorkspaceRootsState,
+  removeWorkspaceRootPaths,
+  renameWorkspaceRootPaths,
   setCodexSpeedMode,
   setThreadQueueState,
   setPermissionState,
-  setWorkspaceRootsState,
+  setWorkspaceProjectOrder,
   getThreadTitleCache,
   persistThreadTitle,
   generateThreadTitle,
@@ -930,20 +932,6 @@ function omitKey<TValue>(record: Record<string, TValue>, key: string): Record<st
   const next = { ...record }
   delete next[key]
   return next
-}
-
-function omitKeys<TValue>(record: Record<string, TValue>, keys: Set<string>): Record<string, TValue> {
-  if (keys.size === 0) return record
-  let changed = false
-  const next: Record<string, TValue> = {}
-  for (const [key, value] of Object.entries(record)) {
-    if (keys.has(key)) {
-      changed = true
-      continue
-    }
-    next[key] = value
-  }
-  return changed ? next : record
 }
 
 function areThreadFieldsEqual(first: UiThread, second: UiThread): boolean {
@@ -4488,7 +4476,10 @@ export function useDesktopState() {
         loadWorkspaceRootsStateForThreadList(),
         loadThreadTitleCacheIfNeeded({ force: options.force === true }),
       ])
-      loadedThreadListRootsState = rootsState
+      const currentRootsState = page.workspaceRootsRecovered
+        ? await loadWorkspaceRootsStateForThreadList()
+        : rootsState
+      loadedThreadListRootsState = currentRootsState
       const groups = page.groups
       loadedThreadListGroups = hasLoadedThreads.value
         ? mergeThreadGroupPages(loadedThreadListGroups, groups)
@@ -4498,13 +4489,13 @@ export function useDesktopState() {
         : page.nextCursor
       hasLoadedAllThreadPages = page.nextCursor === null
       isThreadListFullyLoaded.value = hasLoadedAllThreadPages
-      await hydrateWorkspaceRootsStateIfNeeded(groups, rootsState)
+      await hydrateWorkspaceRootsStateIfNeeded(groups, currentRootsState)
 
-      applyThreadGroups(loadedThreadListGroups, rootsState)
+      applyThreadGroups(loadedThreadListGroups, currentRootsState)
       hasLoadedThreads.value = true
       lastThreadListLoadAt = Date.now()
       if (!hasLoadedAllThreadPages) {
-        scheduleRemainingThreadPages(rootsState)
+        scheduleRemainingThreadPages(currentRootsState)
       }
 
       const flatThreads = flattenThreads(projectGroups.value)
@@ -5461,29 +5452,8 @@ export function useDesktopState() {
   async function persistProjectLabelToGlobalState(projectName: string, displayName: string): Promise<void> {
     try {
       const rootsState = await getWorkspaceRootsState()
-      const nextLabels = { ...rootsState.labels }
-      let changed = false
-      for (const rootPath of rootsState.order) {
-        if (!matchesWorkspaceRootProject(rootPath, projectName)) continue
-        const trimmed = displayName.trim()
-        if (trimmed.length === 0) {
-          if (nextLabels[rootPath] !== undefined) {
-            delete nextLabels[rootPath]
-            changed = true
-          }
-        } else if (nextLabels[rootPath] !== trimmed) {
-          nextLabels[rootPath] = trimmed
-          changed = true
-        }
-      }
-      if (changed) {
-        await setWorkspaceRootsState({
-          order: rootsState.order,
-          labels: nextLabels,
-          active: rootsState.active,
-          projectOrder: rootsState.projectOrder,
-        })
-      }
+      const rootPaths = Array.from(collectWorkspaceRootPathsForProjectRemoval(rootsState, projectName))
+      if (rootPaths.length > 0) await renameWorkspaceRootPaths(rootPaths, displayName)
     } catch {
       // Keep localStorage-only rename when global state is unavailable.
     }
@@ -5548,18 +5518,7 @@ export function useDesktopState() {
 
     if (removedRootPaths.size > 0) {
       try {
-        const rootsState = await getWorkspaceRootsState()
-        const nextOrder = rootsState.order.filter((rootPath) => !removedRootPaths.has(rootPath))
-        const nextActive = rootsState.active.filter((rootPath) => !removedRootPaths.has(rootPath))
-        const fallbackActive = nextActive.length === 0 && nextOrder.length > 0
-          ? [nextOrder[0]]
-          : nextActive
-        await setWorkspaceRootsState({
-          order: nextOrder,
-          labels: omitKeys(rootsState.labels, removedRootPaths),
-          active: fallbackActive,
-          projectOrder: rootsState.projectOrder.filter((item) => item !== projectName && !removedRootPaths.has(item)),
-        })
+        await removeWorkspaceRootPaths(Array.from(removedRootPaths))
         return
       } catch {
         // Fall back to order-only persistence if direct removal fails.
@@ -5610,12 +5569,7 @@ export function useDesktopState() {
       const rootsState = await getWorkspaceRootsState()
       const nextState = buildWorkspaceRootsProjectOrderState(rootsState, projectOrder.value, sourceGroups.value)
 
-      await setWorkspaceRootsState({
-        order: nextState.order,
-        labels: rootsState.labels,
-        active: nextState.active,
-        projectOrder: nextState.projectOrder,
-      })
+      await setWorkspaceProjectOrder(nextState.projectOrder)
     } catch {
       // Keep local project order when global state persistence is unavailable.
     }

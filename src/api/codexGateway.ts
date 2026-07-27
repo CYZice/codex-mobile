@@ -733,6 +733,7 @@ const BACKGROUND_THREAD_LIST_LIMIT = 100
 export type ThreadGroupsPage = {
   groups: UiProjectGroup[]
   nextCursor: string | null
+  workspaceRootsRecovered: boolean
 }
 
 export type ThreadTurnPage = {
@@ -752,11 +753,14 @@ async function getThreadGroupsPageV2(cursor: string | null, limit: number): Prom
     modelProviders: [],
     cursor,
   })
+  const workspaceRootsRecovered = (payload as Record<string, unknown>).workspaceRootsRecovered === true
+  if (workspaceRootsRecovered) invalidateWorkspaceRootsStateCache()
   return {
     groups: normalizeThreadGroupsV2(payload),
     nextCursor: typeof payload.nextCursor === 'string' && payload.nextCursor.length > 0
       ? payload.nextCursor
       : null,
+    workspaceRootsRecovered,
   }
 }
 
@@ -3147,6 +3151,41 @@ export async function setWorkspaceRootsState(nextState: WorkspaceRootsState): Pr
   }
   cachedWorkspaceRootsState = cloneWorkspaceRootsState(nextState)
   cachedWorkspaceRootsStateAt = Date.now()
+}
+
+async function mutateWorkspaceRootsState(
+  path: string,
+  method: 'PUT' | 'PATCH' | 'DELETE',
+  body: Record<string, unknown>,
+): Promise<WorkspaceRootsState> {
+  const response = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to update workspace projects'))
+  }
+  const envelope = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const state = normalizeWorkspaceRootsState(envelope.data)
+  cachedWorkspaceRootsState = cloneWorkspaceRootsState(state)
+  cachedWorkspaceRootsStateAt = Date.now()
+  return cloneWorkspaceRootsState(state)
+}
+
+export async function setWorkspaceProjectOrder(projectOrder: string[]): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots-order', 'PUT', { projectOrder })
+}
+
+export async function renameWorkspaceRootPaths(rootPaths: string[], label: string): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots-label', 'PATCH', { rootPaths, label })
+}
+
+export async function removeWorkspaceRootPaths(rootPaths: string[]): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots', 'DELETE', { rootPaths })
 }
 
 export async function openProjectRoot(path: string, options?: { createIfMissing?: boolean; label?: string }): Promise<string> {
