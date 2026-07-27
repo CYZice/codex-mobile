@@ -793,3 +793,9 @@ After each feature implementation session that uses this skill:
 - The permission picker is a wide floating surface with a title, secondary description, and a check icon for the active option.
 - The input row keeps the add button separate from the rounded message field so configuration controls do not reduce typing width.
 - On Windows, an already-running packaged Codex instance may not expose CDP on the common parity ports. When the user provides an exact native mobile screenshot, preserve it as the reference artifact and document the CDP gap instead of restarting their active Codex session.
+
+## Findings: Combined Model And Thinking Control (2026-07-27)
+
+- Native Codex mobile keeps the active model and thinking level in one compact composer pill instead of giving the level a separate row.
+- Its menu exposes the thinking levels directly, then provides a secondary Model row that enters model selection; this keeps the two settings logically grouped while preserving independent values.
+- A horizontally scrollable control row is preferable to wrapping a standalone thinking chip below the model on narrow browsers.

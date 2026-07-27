@@ -257,17 +257,19 @@
         </div>
 
         <div v-if="!isDictationRecording" class="thread-composer-config-controls">
-          <ComposerDropdown
+          <ModelSettingsDropdown
             class="thread-composer-control"
             :model-value="selectedModel"
-            :options="modelOptions"
-            :selected-prefix-icon="showFastModeModelIcon ? IconTablerBolt : null"
+            :model-options="modelOptions"
+            :reasoning-value="selectedReasoningEffort"
+            :reasoning-options="reasoningOptions"
             :placeholder="t('Model')"
-            open-direction="up"
-            :disabled="isComposerConfigDisabled || models.length === 0"
-            enable-search
+            :model-label="t('Model')"
+            :thinking-label="t('Thinking')"
             :search-placeholder="t('Search models...')"
+            :disabled="isComposerConfigDisabled || models.length === 0"
             @update:model-value="onModelSelect"
+            @update:reasoning-value="onReasoningEffortSelect"
           />
 
           <PermissionsDropdown
@@ -294,15 +296,6 @@
             @remove="onRemovePrompt"
           />
 
-          <ComposerDropdown
-            class="thread-composer-control thread-composer-thinking-control"
-            :model-value="selectedReasoningEffort"
-            :options="reasoningOptions"
-            :placeholder="t('Thinking')"
-            open-direction="up"
-            :disabled="isComposerConfigDisabled || reasoningOptions.length === 0"
-            @update:model-value="onReasoningEffortSelect"
-          />
         </div>
 
         <div
@@ -436,9 +429,9 @@ import IconTablerMaximize from '../icons/IconTablerMaximize.vue'
 import IconTablerMicrophone from '../icons/IconTablerMicrophone.vue'
 import IconTablerMinimize from '../icons/IconTablerMinimize.vue'
 import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
-import ComposerDropdown from './ComposerDropdown.vue'
 import ComposerSearchDropdown from './ComposerSearchDropdown.vue'
 import FullAccessConfirmation from './FullAccessConfirmation.vue'
+import ModelSettingsDropdown from './ModelSettingsDropdown.vue'
 import PermissionsDropdown from './PermissionsDropdown.vue'
 
 type SkillSourceBadge = {
@@ -2305,7 +2298,12 @@ watch(
   }
 
   .thread-composer-config-controls {
-    @apply order-1 col-span-full flex-wrap gap-1.5 px-0.5;
+    @apply order-1 col-span-full flex-nowrap gap-1.5 overflow-x-auto px-0.5;
+    scrollbar-width: none;
+  }
+
+  .thread-composer-config-controls::-webkit-scrollbar {
+    display: none;
   }
 
   .thread-composer-control {
@@ -2313,6 +2311,7 @@ watch(
   }
 
   .thread-composer-control :deep(.composer-dropdown-trigger),
+  .thread-composer-control :deep(.model-settings-trigger),
   .thread-composer-control :deep(.search-dropdown-trigger),
   .thread-composer-control :deep(.permissions-dropdown-trigger) {
     @apply min-h-9 max-w-[12rem] rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1.5 text-zinc-700 hover:bg-zinc-200 hover:text-zinc-900;

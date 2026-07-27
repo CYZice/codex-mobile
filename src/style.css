@@ -273,6 +273,7 @@
   }
 
   :root.dark .thread-composer-config-controls .composer-dropdown-trigger,
+  :root.dark .thread-composer-config-controls .model-settings-trigger,
   :root.dark .thread-composer-config-controls .search-dropdown-trigger,
   :root.dark .thread-composer-config-controls .permissions-dropdown-trigger,
   :root.dark .thread-composer-attach-trigger {
@@ -355,6 +356,47 @@
 
 :root.dark .composer-dropdown-menu {
   @apply border-zinc-600 bg-zinc-800;
+}
+
+:root.dark .model-settings-trigger {
+  @apply text-zinc-400 hover:text-zinc-200;
+}
+
+:root.dark .model-settings-menu {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .model-settings-section-label,
+:root.dark .model-settings-navigation-value,
+:root.dark .model-settings-empty {
+  @apply text-zinc-400;
+}
+
+:root.dark .model-settings-option,
+:root.dark .model-settings-navigation-label,
+:root.dark .model-settings-model-header {
+  @apply text-zinc-100;
+}
+
+:root.dark .model-settings-option:hover,
+:root.dark .model-settings-option.is-selected,
+:root.dark .model-settings-navigation-row:hover,
+:root.dark .model-settings-back:hover {
+  @apply bg-zinc-800;
+}
+
+:root.dark .model-settings-selected-mark,
+:root.dark .model-settings-navigation-chevron,
+:root.dark .model-settings-back {
+  @apply text-zinc-300;
+}
+
+:root.dark .model-settings-divider {
+  @apply bg-zinc-800;
+}
+
+:root.dark .model-settings-search {
+  @apply border-zinc-700 bg-zinc-800 text-zinc-100 focus:border-zinc-500;
 }
 
 :root.dark .composer-dropdown-option {
