@@ -280,7 +280,7 @@ onBeforeUnmount(() => {
 }
 
 .model-settings-selected-mark::before {
-  content: '\\2713';
+  content: '\2713';
   @apply text-xl leading-none;
 }
 
