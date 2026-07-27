@@ -58,6 +58,14 @@ import type {
   UiThreadAutomationStatus,
 } from '../types/codex'
 import { normalizePathForUi } from '../pathUtils.js'
+import {
+  inferPermissionPresetFromSettings,
+  normalizePermissionPreset,
+  normalizePermissionState,
+  type PermissionConfig,
+  type PermissionPreset,
+  type PermissionState,
+} from '../permissions'
 
 type CurrentModelConfig = {
   model: string
@@ -299,6 +307,7 @@ export type StoredQueuedMessage = {
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
   collaborationMode: CollaborationModeKind
+  permissionPreset: PermissionPreset
 }
 
 export type ThreadQueueState = Record<string, StoredQueuedMessage[]>
@@ -1506,6 +1515,7 @@ export async function removeAccount(storageId: string): Promise<AccountsListResu
 export type ResumedThread = {
   model: string
   modelProvider: string
+  permissionPreset: PermissionPreset | null
   messages: UiMessage[]
   inProgress: boolean
   activeTurnId: string
@@ -1527,6 +1537,7 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
     return {
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
       messages,
       inProgress: readThreadInProgressFromResponse(payload),
       activeTurnId: readActiveTurnIdFromResponse(payload),
@@ -1661,10 +1672,17 @@ function normalizeThreadModelProviderFromPayload(payload: unknown): string {
   return readString(thread?.modelProvider)?.trim() ?? ''
 }
 
+function readPermissionPresetFromThreadPayload(payload: unknown): PermissionPreset | null {
+  const record = asRecord(payload)
+  return inferPermissionPresetFromSettings(record?.approvalPolicy, record?.sandbox ?? record?.sandboxPolicy)
+}
+
 export type StartedThread = {
   threadId: string
+  cwd: string
   model: string
   modelProvider: string
+  permissionPreset: PermissionPreset | null
 }
 
 export type ForkedThread = {
@@ -1690,8 +1708,10 @@ export async function startThread(cwd?: string, model?: string): Promise<Started
     }
     return {
       threadId,
+      cwd: normalizeThreadCwdFromPayload(payload),
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
     }
   } catch (error) {
     throw normalizeCodexApiError(error, 'Failed to start a new thread', 'thread/start')
@@ -1747,8 +1767,10 @@ export async function forkThread(
     }
     return {
       threadId: nextThreadId,
+      cwd: normalizeThreadCwdFromPayload(payload),
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
     }
   } catch (error) {
     throw normalizeCodexApiError(error, `Failed to fork thread ${threadId}`, 'thread/fork')
@@ -1848,6 +1870,7 @@ export async function startThreadTurn(
   skills?: Array<{ name: string; path: string }>,
   fileAttachments: FileAttachmentParam[] = [],
   collaborationMode?: CollaborationModeKind,
+  permissionConfig?: PermissionConfig,
 ): Promise<string> {
   try {
     const normalizedModel = model?.trim() ?? ''
@@ -1892,6 +1915,10 @@ export async function startThreadTurn(
     const params: Record<string, unknown> = {
       threadId,
       input,
+    }
+    if (permissionConfig) {
+      params.approvalPolicy = permissionConfig.approvalPolicy
+      params.sandboxPolicy = permissionConfig.sandboxPolicy
     }
     if (attachments.length > 0) params.attachments = attachments
     if (normalizedModel) {
@@ -2601,6 +2628,7 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     skills,
     fileAttachments,
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
+    permissionPreset: normalizePermissionPreset(record.permissionPreset),
   }
 }
 
@@ -2691,6 +2719,27 @@ export async function setThreadQueueState(nextState: ThreadQueueState): Promise<
   })
   if (!response.ok) {
     throw new Error('Failed to save thread queue state')
+  }
+}
+
+export async function getPermissionState(): Promise<PermissionState> {
+  const response = await fetch('/codex-api/permission-state', { cache: 'no-store' })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, 'Failed to load permission state'))
+  }
+  return normalizePermissionState(asRecord(payload)?.data)
+}
+
+export async function setPermissionState(nextState: PermissionState): Promise<void> {
+  const response = await fetch('/codex-api/permission-state', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizePermissionState(nextState)),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(extractErrorMessage(payload, 'Failed to save permission state'))
   }
 }
 

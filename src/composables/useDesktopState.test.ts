@@ -19,6 +19,7 @@ const gatewayMocks = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
   getCurrentModelConfig: vi.fn(),
   getPendingServerRequests: vi.fn(),
+  getPermissionState: vi.fn(),
   getSkillsList: vi.fn(),
   getThreadDetail: vi.fn(),
   getThreadGroupsPage: vi.fn(),
@@ -34,6 +35,7 @@ const gatewayMocks = vi.hoisted(() => ({
   revertThreadFileChanges: vi.fn(),
   rollbackThread: vi.fn(),
   setCodexSpeedMode: vi.fn(),
+  setPermissionState: vi.fn(),
   setThreadQueueState: vi.fn(),
   setWorkspaceRootsState: vi.fn(),
   startThread: vi.fn(),
@@ -91,6 +93,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   gatewayMocks.getThreadQueueState.mockResolvedValue({})
   gatewayMocks.getThreadTitleCache.mockResolvedValue({ titles: {} })
+  gatewayMocks.getPermissionState.mockResolvedValue({ defaultPreset: 'workspace', threadPresets: {} })
+  gatewayMocks.setPermissionState.mockResolvedValue(undefined)
   gatewayMocks.getWorkspaceRootsState.mockRejectedValue(new Error('no workspace roots state'))
 })
 
@@ -1065,6 +1069,7 @@ describe('provider model selection', () => {
     gatewayMocks.getAvailableModels.mockResolvedValue(modelsWithoutReasoning('gpt-5.5', 'gpt-5.4-mini'))
     gatewayMocks.startThread.mockResolvedValue({
       threadId: 'codex-thread',
+      cwd: '/tmp/project',
       model: 'gpt-5.5',
       modelProvider: 'openai',
     })
@@ -1100,6 +1105,16 @@ describe('provider model selection', () => {
       undefined,
       [],
       'default',
+      {
+        approvalPolicy: 'on-request',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: ['/tmp/project'],
+          networkAccess: true,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      },
     )
     expect(state.readModelIdForThread('codex-thread')).toBe('gpt-5.5')
     expect(state.messages.value.some((message) => (
@@ -1145,6 +1160,7 @@ describe('provider model selection', () => {
     gatewayMocks.getAvailableModels.mockResolvedValue(modelsWithoutReasoning('gpt-5.5', 'gpt-5.4-mini'))
     gatewayMocks.startThread.mockResolvedValue({
       threadId: 'mini-thread',
+      cwd: '/tmp/project',
       model: 'gpt-5.4-mini',
       modelProvider: 'openai',
     })

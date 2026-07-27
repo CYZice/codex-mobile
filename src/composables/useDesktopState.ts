@@ -20,9 +20,11 @@ import {
   rollbackThread,
   getThreadGroupsPage,
   getThreadQueueState,
+  getPermissionState,
   getWorkspaceRootsState,
   setCodexSpeedMode,
   setThreadQueueState,
+  setPermissionState,
   setWorkspaceRootsState,
   getThreadTitleCache,
   persistThreadTitle,
@@ -62,6 +64,14 @@ import type {
   UiThread,
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
+import {
+  DEFAULT_PERMISSION_PRESET,
+  inferPermissionPresetFromSettings,
+  normalizePermissionPreset,
+  resolvePermissionPreset,
+  type PermissionPreset,
+  type PermissionState,
+} from '../permissions'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
   return groups.flatMap((group) => group.threads)
@@ -1410,6 +1420,7 @@ export function useDesktopState() {
     skills: Array<{ name: string; path: string }>
     fileAttachments: FileAttachment[]
     collaborationMode: CollaborationModeKind
+    permissionPreset: PermissionPreset
   }
   type PendingTurnRequest = {
     text: string
@@ -1418,6 +1429,7 @@ export function useDesktopState() {
     fileAttachments: FileAttachment[]
     effort: ReasoningEffort | ''
     collaborationMode: CollaborationModeKind
+    permissionPreset: PermissionPreset
     fallbackRetried: boolean
   }
   const queuedMessagesByThreadId = ref<Record<string, QueuedMessage[]>>({})
@@ -1438,6 +1450,15 @@ export function useDesktopState() {
   const selectedCollaborationMode = ref<CollaborationModeKind>(
     readSelectedCollaborationMode(selectedCollaborationModeByContext.value, selectedThreadId.value),
   )
+  const permissionState = ref<PermissionState>({
+    defaultPreset: DEFAULT_PERMISSION_PRESET,
+    threadPresets: {},
+  })
+  let hasLoadedPermissionState = false
+  const selectedPermissionPreset = computed<PermissionPreset>(() => {
+    const threadId = selectedThreadId.value.trim()
+    return threadId ? permissionState.value.threadPresets[threadId] ?? permissionState.value.defaultPreset : permissionState.value.defaultPreset
+  })
   const selectedModelId = ref(readSelectedModel(selectedModelIdByContext.value, selectedThreadId.value))
   const selectedReasoningEffort = ref<ReasoningEffort | ''>('medium')
   const selectedSpeedMode = ref<SpeedMode>('standard')
@@ -1867,6 +1888,82 @@ export function useDesktopState() {
     saveSelectedCollaborationModeMap(selectedCollaborationModeByContext.value)
   }
 
+  function readPermissionPresetForThread(threadId: string): PermissionPreset {
+    const normalizedThreadId = threadId.trim()
+    return normalizedThreadId
+      ? permissionState.value.threadPresets[normalizedThreadId] ?? permissionState.value.defaultPreset
+      : permissionState.value.defaultPreset
+  }
+
+  function findThreadCwd(threadId: string): string {
+    return flattenThreads(sourceGroups.value).find((thread) => thread.id === threadId)?.cwd.trim() ?? ''
+  }
+
+  async function savePermissionState(nextState: PermissionState): Promise<void> {
+    permissionState.value = nextState
+    await setPermissionState(nextState)
+  }
+
+  async function setPermissionPresetForThread(threadId: string, preset: PermissionPreset): Promise<void> {
+    const normalizedThreadId = threadId.trim()
+    const normalizedPreset = normalizePermissionPreset(preset)
+    if (!normalizedThreadId) {
+      await savePermissionState({
+        ...permissionState.value,
+        defaultPreset: normalizedPreset,
+      })
+      return
+    }
+
+    await savePermissionState({
+      ...permissionState.value,
+      threadPresets: {
+        ...permissionState.value.threadPresets,
+        [normalizedThreadId]: normalizedPreset,
+      },
+    })
+  }
+
+  async function setSelectedPermissionPreset(preset: PermissionPreset): Promise<void> {
+    await setPermissionPresetForThread(selectedThreadId.value, preset)
+  }
+
+  function applyReconciledThreadPermissionPreset(
+    threadId: string,
+    resolvedPreset: PermissionPreset | null,
+    options: { force?: boolean } = {},
+  ): void {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId || !resolvedPreset) return
+    if (!options.force && permissionState.value.threadPresets[normalizedThreadId]) return
+    if (permissionState.value.threadPresets[normalizedThreadId] === resolvedPreset) return
+
+    const nextState: PermissionState = {
+      ...permissionState.value,
+      threadPresets: {
+        ...permissionState.value.threadPresets,
+        [normalizedThreadId]: resolvedPreset,
+      },
+    }
+    permissionState.value = nextState
+    void setPermissionState(nextState).catch(() => {
+      // Keep the app-server-confirmed value in memory when its durable state write is temporarily unavailable.
+    })
+  }
+
+  function reconcileThreadPermissionPreset(
+    threadId: string,
+    approvalPolicy: unknown,
+    sandboxPolicy: unknown,
+    options: { force?: boolean } = {},
+  ): void {
+    applyReconciledThreadPermissionPreset(
+      threadId,
+      inferPermissionPresetFromSettings(approvalPolicy, sandboxPolicy),
+      options,
+    )
+  }
+
   function setCodexRateLimit(nextSnapshot: UiRateLimitSnapshot | null): void {
     codexRateLimit.value = nextSnapshot
   }
@@ -1952,6 +2049,7 @@ export function useDesktopState() {
         pending.skills.length > 0 ? pending.skills : undefined,
         pending.fileAttachments,
         pending.collaborationMode,
+        resolvePermissionPreset(pending.permissionPreset, findThreadCwd(threadId)),
       )
 
       scheduleRateLimitRefresh()
@@ -3795,6 +3893,20 @@ export function useDesktopState() {
       }
     }
 
+    if (notification.method === 'thread/settings/updated') {
+      const params = asRecord(notification.params)
+      const threadSettings = asRecord(params?.threadSettings)
+      const threadId = readString(params?.threadId)
+      if (threadId && threadSettings) {
+        reconcileThreadPermissionPreset(
+          threadId,
+          threadSettings.approvalPolicy,
+          threadSettings.sandboxPolicy,
+          { force: true },
+        )
+      }
+    }
+
     if (notification.method === 'account/rateLimits/updated') {
       setCodexRateLimit(pickCodexRateLimitSnapshot(notification.params))
       return
@@ -4235,6 +4347,7 @@ export function useDesktopState() {
           fsPath: attachment.fsPath,
         })),
         collaborationMode: message.collaborationMode,
+        permissionPreset: message.permissionPreset,
       }))
     }
     return next
@@ -4253,6 +4366,16 @@ export function useDesktopState() {
       queuedMessagesByThreadId.value = await getThreadQueueState()
     } catch {
       // Backend queue state is optional during startup.
+    }
+  }
+
+  async function loadPermissionStateIfNeeded(): Promise<void> {
+    if (hasLoadedPermissionState) return
+    hasLoadedPermissionState = true
+    try {
+      permissionState.value = await getPermissionState()
+    } catch {
+      // The in-memory workspace preset remains usable until the local state endpoint recovers.
     }
   }
 
@@ -4456,6 +4579,7 @@ export function useDesktopState() {
         setThreadModelId(threadId, resolveThreadModelForProvider(threadId, detail.model, detail.modelProvider))
       }
       if (resumedThread) {
+        applyReconciledThreadPermissionPreset(threadId, resumedThread.permissionPreset)
         resumedThreadById.value = {
           ...resumedThreadById.value,
           [threadId]: true,
@@ -4654,7 +4778,10 @@ export function useDesktopState() {
     const awaitAncillaryRefreshes = options.awaitAncillaryRefreshes === true
 
     try {
-      await loadPersistedQueueStateIfNeeded()
+      await Promise.all([
+        loadPersistedQueueStateIfNeeded(),
+        loadPermissionStateIfNeeded(),
+      ])
       await loadThreads({ force: options.forceThreadRefresh === true })
       if (includeSelectedThreadMessages) {
         try {
@@ -4760,6 +4887,10 @@ export function useDesktopState() {
 
       insertOptimisticThread(nextThreadId, sourceCwd, sourceTitle)
       setThreadModelId(nextThreadId, forkedThread.model)
+      await setPermissionPresetForThread(
+        nextThreadId,
+        forkedThread.permissionPreset ?? readPermissionPresetForThread(sourceThreadId),
+      ).catch(() => {})
       resumedThreadById.value = {
         ...resumedThreadById.value,
         [nextThreadId]: true,
@@ -4814,6 +4945,7 @@ export function useDesktopState() {
       const forkedThreadTitle = toForkedThreadTitle(sourceThread?.title || sourceThread?.preview || 'Untitled thread')
       insertOptimisticThread(forkedThreadId, forkedCwd, forkedThreadTitle)
       setThreadModelId(forkedThreadId, forked.model)
+      await setPermissionPresetForThread(forkedThreadId, readPermissionPresetForThread(normalizedThreadId)).catch(() => {})
       setPersistedMessagesForThread(forkedThreadId, forked.messages)
       loadedMessagesByThreadId.value = {
         ...loadedMessagesByThreadId.value,
@@ -4888,6 +5020,7 @@ export function useDesktopState() {
     fileAttachments: FileAttachment[] = [],
     queueInsertIndex?: number,
     collaborationModeOverride?: CollaborationModeKind,
+    permissionPresetOverride?: PermissionPreset,
   ): Promise<void> {
     if (isUpdatingSpeedMode.value) return
 
@@ -4900,6 +5033,7 @@ export function useDesktopState() {
     }
 
     const isInProgress = inProgressById.value[threadId] === true
+    const permissionPreset = permissionPresetOverride ?? readPermissionPresetForThread(threadId)
 
     if (isInProgress && mode === 'queue') {
       const queue = queuedMessagesByThreadId.value[threadId] ?? []
@@ -4919,6 +5053,7 @@ export function useDesktopState() {
           : collaborationModeOverride === 'default'
             ? 'default'
             : selectedCollaborationMode.value,
+        permissionPreset,
       })
       queuedMessagesByThreadId.value = {
         ...queuedMessagesByThreadId.value,
@@ -4937,6 +5072,7 @@ export function useDesktopState() {
         skills,
         fileAttachments,
         collaborationModeOverride,
+        permissionPreset,
       ).catch((unknownError) => {
         const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
         setTurnErrorForThread(threadId, errorMessage)
@@ -4974,6 +5110,7 @@ export function useDesktopState() {
         skills,
         fileAttachments,
         collaborationModeOverride,
+        permissionPreset,
       )
     } catch (unknownError) {
       shouldAutoScrollOnNextAgentEvent = false
@@ -4999,16 +5136,19 @@ export function useDesktopState() {
     const targetCwd = cwd.trim()
     const selectedModel = readModelIdForThread(NEW_THREAD_COLLABORATION_MODE_CONTEXT).trim()
     const selectedMode = selectedCollaborationMode.value
+    const selectedPermissionPreset = readPermissionPresetForThread('')
     if (!nextText && imageUrls.length === 0 && fileAttachments.length === 0) return ''
 
     isSendingMessage.value = true
     error.value = ''
     let threadId = ''
+    let resolvedThreadCwd = targetCwd
 
     try {
       try {
         const startedThread = await startThread(targetCwd || undefined, selectedModel || undefined)
         threadId = startedThread.threadId
+        resolvedThreadCwd = targetCwd || startedThread.cwd
         setThreadModelId(threadId, startedThread.model)
         setThreadModelProviderId(threadId, startedThread.modelProvider || activeProviderId.value)
         setSelectedCollaborationModeForThread(threadId, selectedMode)
@@ -5017,6 +5157,7 @@ export function useDesktopState() {
           await applyFallbackModelSelection()
           const fallbackThread = await startThread(targetCwd || undefined, MODEL_FALLBACK_ID)
           threadId = fallbackThread.threadId
+          resolvedThreadCwd = targetCwd || fallbackThread.cwd
           setThreadModelId(threadId, fallbackThread.model)
           setThreadModelProviderId(threadId, fallbackThread.modelProvider || activeProviderId.value)
           setSelectedCollaborationModeForThread(threadId, selectedMode)
@@ -5025,8 +5166,11 @@ export function useDesktopState() {
         }
       }
       if (!threadId) return ''
+      await setPermissionPresetForThread(threadId, selectedPermissionPreset).catch(() => {
+        // The turn still carries this preset even if durable state is temporarily unavailable.
+      })
 
-      insertOptimisticThread(threadId, targetCwd, nextText || '[Image]')
+      insertOptimisticThread(threadId, resolvedThreadCwd, nextText || '[Image]')
       appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
       blockInterruptUntilThreadIsPersisted(threadId)
       resumedThreadById.value = {
@@ -5050,9 +5194,17 @@ export function useDesktopState() {
       setTurnErrorForThread(threadId, null)
       setThreadInProgress(threadId, true)
       const capturedThreadId = threadId
-      const capturedCwd = targetCwd || null
+      const capturedCwd = resolvedThreadCwd || null
       const capturedPrompt = nextText
-      void startTurnForThread(threadId, nextText, imageUrls, skills, fileAttachments, selectedMode)
+      void startTurnForThread(
+        threadId,
+        nextText,
+        imageUrls,
+        skills,
+        fileAttachments,
+        selectedMode,
+        selectedPermissionPreset,
+      )
         .catch((unknownError) => {
           shouldAutoScrollOnNextAgentEvent = false
           setThreadInProgress(threadId, false)
@@ -5089,11 +5241,13 @@ export function useDesktopState() {
     skills: Array<{ name: string; path: string }> = [],
     fileAttachments: FileAttachment[] = [],
     collaborationModeOverride?: CollaborationModeKind,
+    permissionPresetOverride?: PermissionPreset,
   ): Promise<void> {
     const reasoningEffort = selectedReasoningEffort.value
     const collaborationMode = collaborationModeOverride === 'plan' ? 'plan' : collaborationModeOverride === 'default'
       ? 'default'
       : selectedCollaborationMode.value
+    const permissionPreset = permissionPresetOverride ?? readPermissionPresetForThread(threadId)
     const normalizedText = nextText.trim()
     const normalizedImageUrls = [...imageUrls]
     if (
@@ -5115,6 +5269,7 @@ export function useDesktopState() {
       fileAttachments: normalizedFileAttachments,
       effort: reasoningEffort,
       collaborationMode,
+      permissionPreset,
       fallbackRetried: false,
     })
 
@@ -5126,6 +5281,9 @@ export function useDesktopState() {
         }
         if (resumedThread.modelProvider) {
           setThreadModelProviderId(threadId, resumedThread.modelProvider)
+        }
+        if (resumedThread.permissionPreset) {
+          applyReconciledThreadPermissionPreset(threadId, resumedThread.permissionPreset)
         }
         resumedThreadById.value = {
           ...resumedThreadById.value,
@@ -5145,6 +5303,7 @@ export function useDesktopState() {
           skills.length > 0 ? skills : undefined,
           fileAttachments,
           collaborationMode,
+          resolvePermissionPreset(permissionPreset, findThreadCwd(threadId)),
         )
       } catch (unknownError) {
         if (modelId && modelId !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(unknownError)) {
@@ -5156,6 +5315,7 @@ export function useDesktopState() {
             fileAttachments: normalizedFileAttachments,
             effort: reasoningEffort,
             collaborationMode,
+            permissionPreset,
             fallbackRetried: true,
           })
           startedTurnId = await startThreadTurn(
@@ -5167,6 +5327,7 @@ export function useDesktopState() {
             skills.length > 0 ? skills : undefined,
             fileAttachments,
             collaborationMode,
+            resolvePermissionPreset(permissionPreset, findThreadCwd(threadId)),
           )
         } else {
           throw unknownError
@@ -5697,7 +5858,16 @@ export function useDesktopState() {
     if (!msg) return
     removeQueuedMessage(messageId)
     setSelectedCollaborationMode(msg.collaborationMode)
-    void sendMessageToSelectedThread(msg.text, msg.imageUrls, msg.skills, 'steer', msg.fileAttachments)
+    void sendMessageToSelectedThread(
+      msg.text,
+      msg.imageUrls,
+      msg.skills,
+      'steer',
+      msg.fileAttachments,
+      undefined,
+      msg.collaborationMode,
+      msg.permissionPreset,
+    )
   }
 
   function primeSelectedThread(threadId: string, options: { persist?: boolean } = {}): void {
@@ -5719,6 +5889,7 @@ export function useDesktopState() {
     availableModelIds,
     availableModelReasoningEfforts,
     selectedCollaborationMode,
+    selectedPermissionPreset,
     selectedModelId,
     selectedReasoningEffort,
     selectedSpeedMode,
@@ -5759,6 +5930,7 @@ export function useDesktopState() {
     reorderQueuedMessage,
     steerQueuedMessage,
     setSelectedCollaborationMode,
+    setSelectedPermissionPreset,
     readModelIdForThread,
     setSelectedModelIdForThread,
     setSelectedModelId,

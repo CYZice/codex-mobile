@@ -12,7 +12,7 @@ import { createInterface } from 'node:readline'
 import { once } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { handleAccountRoutes } from './accountRoutes.js'
-import { buildAppServerArgs } from './appServerRuntimeConfig.js'
+import { buildAppServerArgs, resolveAppServerRuntimeConfig } from './appServerRuntimeConfig.js'
 import { callRpcWithRateLimitDecodeRecovery } from './rateLimitDecodeRecovery.js'
 import { handleReviewRoutes } from './reviewGit.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
@@ -48,6 +48,14 @@ import {
 } from '../commandResolution.js'
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
 import { isAbsoluteLikePath } from '../pathUtils.js'
+import {
+  DEFAULT_PERMISSION_PRESET,
+  normalizePermissionPreset,
+  normalizePermissionState,
+  resolvePermissionPreset,
+  type PermissionPreset,
+  type PermissionState,
+} from '../permissions.js'
 
 type JsonRpcCall = {
   jsonrpc: '2.0'
@@ -4915,6 +4923,10 @@ function getCodexGlobalStatePath(): string {
   return join(getCodexHomeDir(), '.codex-global-state.json')
 }
 
+function getCodexPermissionsStatePath(): string {
+  return join(getCodexHomeDir(), 'codexapp-permissions.json')
+}
+
 function getTelegramBridgeConfigPath(): string {
   return join(getCodexHomeDir(), 'telegram-bridge.json')
 }
@@ -5565,6 +5577,7 @@ type StoredQueuedMessage = {
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
   collaborationMode: 'default' | 'plan'
+  permissionPreset: PermissionPreset
 }
 
 type ThreadQueueState = Record<string, StoredQueuedMessage[]>
@@ -5621,7 +5634,41 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     skills: normalizeNamedPathItems(record.skills),
     fileAttachments: normalizeFileAttachments(record.fileAttachments),
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
+    permissionPreset: normalizePermissionPreset(record.permissionPreset, resolveDefaultPermissionPreset()),
   }
+}
+
+function resolveDefaultPermissionPreset(): PermissionPreset {
+  const runtime = resolveAppServerRuntimeConfig()
+  return runtime.sandboxMode === 'danger-full-access' && runtime.approvalPolicy === 'never'
+    ? 'fullAccess'
+    : DEFAULT_PERMISSION_PRESET
+}
+
+export async function readPermissionState(): Promise<PermissionState> {
+  const statePath = getCodexPermissionsStatePath()
+  try {
+    const raw = await readFile(statePath, 'utf8')
+    return normalizePermissionState(JSON.parse(raw), resolveDefaultPermissionPreset())
+  } catch {
+    return normalizePermissionState(null, resolveDefaultPermissionPreset())
+  }
+}
+
+let permissionStateMutationChain: Promise<unknown> = Promise.resolve()
+
+export async function writePermissionState(nextState: PermissionState): Promise<void> {
+  const statePath = getCodexPermissionsStatePath()
+  const run = permissionStateMutationChain.then(async () => {
+    await mkdir(dirname(statePath), { recursive: true })
+    await writeFile(
+      statePath,
+      JSON.stringify(normalizePermissionState(nextState, resolveDefaultPermissionPreset())),
+      'utf8',
+    )
+  })
+  permissionStateMutationChain = run.catch(() => {})
+  await run
 }
 
 function normalizeThreadQueueState(value: unknown): ThreadQueueState {
@@ -5742,7 +5789,10 @@ function escapeHeartbeatXmlText(value: string): string {
     .replace(/>/gu, '&gt;')
 }
 
-function buildHeartbeatQueuedMessage(automation: ThreadAutomationRecord): StoredQueuedMessage {
+function buildHeartbeatQueuedMessage(
+  automation: ThreadAutomationRecord,
+  permissionPreset: PermissionPreset,
+): StoredQueuedMessage {
   return {
     id: `automation-${automation.id}-${Date.now()}-${randomBytes(3).toString('hex')}`,
     text: `<heartbeat>
@@ -5756,6 +5806,7 @@ ${escapeHeartbeatXmlText(automation.prompt)}
     skills: [],
     fileAttachments: [],
     collaborationMode: 'default',
+    permissionPreset,
   }
 }
 
@@ -7377,7 +7428,7 @@ export class BackendQueueProcessor {
     throw new Error(`${mode === 'plan' ? 'Plan' : 'Default'} mode requires an available model.`)
   }
 
-  private async buildQueuedTurnParams(turn: BackendQueuedTurn): Promise<Record<string, unknown>> {
+  private async buildQueuedTurnParams(turn: BackendQueuedTurn, cwd?: string): Promise<Record<string, unknown>> {
     const localImageAttachments: StoredQueuedMessage['fileAttachments'] = []
     for (const imageUrl of turn.message.imageUrls) {
       const localImagePath = extractLocalImagePathFromUrl(imageUrl.trim())
@@ -7416,6 +7467,7 @@ export class BackendQueueProcessor {
     const params: Record<string, unknown> = {
       threadId: turn.threadId,
       input,
+      ...resolvePermissionPreset(turn.message.permissionPreset, cwd),
     }
     if (dedupedFileAttachments.length > 0) {
       params.attachments = dedupedFileAttachments.map((f) => ({ label: f.label, path: f.path, fsPath: f.fsPath }))
@@ -7439,8 +7491,9 @@ export class BackendQueueProcessor {
   }
 
   private async startQueuedTurn(turn: BackendQueuedTurn): Promise<void> {
-    await this.appServer.rpc('thread/resume', { threadId: turn.threadId })
-    await this.appServer.rpc('turn/start', await this.buildQueuedTurnParams(turn))
+    const resumed = asRecord(await this.appServer.rpc('thread/resume', { threadId: turn.threadId }))
+    const cwd = readNonEmptyString(resumed?.cwd)
+    await this.appServer.rpc('turn/start', await this.buildQueuedTurnParams(turn, cwd))
   }
 }
 
@@ -8729,6 +8782,11 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      if (req.method === 'GET' && url.pathname === '/codex-api/permission-state') {
+        setJson(res, 200, { data: await readPermissionState() })
+        return
+      }
+
       if (req.method === 'GET' && url.pathname === '/codex-api/home-directory') {
         setJson(res, 200, { data: { path: homedir() } })
         return
@@ -9335,6 +9393,17 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      if (req.method === 'PUT' && url.pathname === '/codex-api/permission-state') {
+        const payload = asRecord(await readJsonBody(req))
+        if (!payload) {
+          setJson(res, 400, { error: 'Invalid body: expected object' })
+          return
+        }
+        await writePermissionState(normalizePermissionState(payload, resolveDefaultPermissionPreset()))
+        setJson(res, 200, { ok: true })
+        return
+      }
+
       if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/codex-api/project-zip') {
         const rawCwd = (url.searchParams.get('cwd') ?? '').trim()
         if (!rawCwd) {
@@ -9759,7 +9828,9 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 404, { error: 'Automation not found for thread' })
           return
         }
-        await appendThreadQueuedMessage(threadId, buildHeartbeatQueuedMessage(automation))
+        const permissionState = await readPermissionState()
+        const permissionPreset = permissionState.threadPresets[threadId] ?? permissionState.defaultPreset
+        await appendThreadQueuedMessage(threadId, buildHeartbeatQueuedMessage(automation, permissionPreset))
         backendQueueProcessor.scheduleThreadQueueDrain(threadId, 0)
         setJson(res, 200, { data: { queued: true } })
         return

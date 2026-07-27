@@ -336,6 +336,49 @@
   @apply text-zinc-300 hover:bg-zinc-700;
 }
 
+:root.dark .permissions-dropdown-trigger {
+  @apply text-zinc-400 hover:text-zinc-200;
+}
+
+:root.dark .permissions-dropdown-menu {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .permissions-dropdown-option:hover,
+:root.dark .permissions-dropdown-option.is-selected {
+  @apply bg-zinc-800;
+}
+
+:root.dark .permissions-dropdown-option-title {
+  @apply text-zinc-100;
+}
+
+:root.dark .permissions-dropdown-option-description,
+:root.dark .permissions-dropdown-selected-mark,
+:root.dark .permissions-dropdown-next-turn {
+  @apply text-zinc-400;
+}
+
+:root.dark .permissions-dropdown-next-turn {
+  @apply border-zinc-800;
+}
+
+:root.dark .full-access-confirmation {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .full-access-confirmation h2 {
+  @apply text-zinc-100;
+}
+
+:root.dark .full-access-confirmation p {
+  @apply text-zinc-300;
+}
+
+:root.dark .full-access-confirmation-cancel {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-100 hover:bg-zinc-700;
+}
+
 :root.dark .composer-dropdown-option.is-selected {
   @apply bg-zinc-700;
 }

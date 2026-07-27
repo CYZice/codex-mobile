@@ -1,0 +1,28 @@
+### Thread permissions
+
+#### Feature/Change Name
+Per-thread Workspace access and Full access selection in the composer.
+
+#### Prerequisites/Setup
+1. Start the app with `pnpm run dev --host 127.0.0.1 --port 4173`.
+2. Open one existing project thread and keep a second project thread available.
+3. Make light and dark themes available from the appearance setting.
+
+#### Steps
+1. In the first thread, open `Permissions: Workspace` and confirm the Workspace access description.
+2. Select Full access and confirm the warning dialog; choose Cancel and verify the selection remains Workspace access.
+3. Select Full access again and choose Enable Full Access.
+4. Send a message, refresh the page, then reopen the thread.
+5. Switch to the second thread and select Workspace access; return to the first thread.
+6. Start a long-running turn, open Permissions, switch its selection, and verify the menu says the change applies to the next message.
+7. Repeat the menu and confirmation checks in dark theme and at a narrow mobile viewport.
+
+#### Expected Results
+- Workspace access uses the current project path as its writable root and asks before broader access.
+- Full access requires confirmation on each selection and only applies to the next submitted turn when a turn is already running.
+- The selected permission persists after refresh and remains scoped to its thread.
+- The second thread can use a different permission without changing the first thread.
+- Both themes and narrow layouts keep the menu and confirmation dialog readable without overlap.
+
+#### Rollback/Cleanup
+- Switch any temporary Full access thread back to Workspace access after the check.

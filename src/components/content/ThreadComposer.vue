@@ -256,7 +256,7 @@
           </div>
         </div>
 
-        <template v-if="!isDictationRecording">
+        <div v-if="!isDictationRecording" class="thread-composer-config-controls">
           <ComposerDropdown
             class="thread-composer-control"
             :model-value="selectedModel"
@@ -295,7 +295,15 @@
             :disabled="isComposerConfigDisabled || reasoningOptions.length === 0"
             @update:model-value="onReasoningEffortSelect"
           />
-        </template>
+
+          <PermissionsDropdown
+            class="thread-composer-control"
+            :model-value="selectedPermissionPreset"
+            :disabled="isComposerConfigDisabled"
+            :is-turn-in-progress="isTurnInProgress"
+            @select="onPermissionPresetSelected"
+          />
+        </div>
 
         <div
           class="thread-composer-actions"
@@ -386,6 +394,11 @@
       :disabled="isInteractionDisabled"
       @change="onFolderPickerChange"
     />
+    <FullAccessConfirmation
+      :open="isFullAccessConfirmationOpen"
+      @cancel="isFullAccessConfirmationOpen = false"
+      @confirm="confirmFullAccess"
+    />
   </form>
 </template>
 
@@ -405,6 +418,7 @@ import type {
 import { useDictation } from '../../composables/useDictation'
 import { useMobile } from '../../composables/useMobile'
 import { useUiLanguage } from '../../composables/useUiLanguage'
+import type { PermissionPreset } from '../../permissions'
 import {
   createComposerPrompt,
   getComposerPrompts,
@@ -424,6 +438,8 @@ import IconTablerMinimize from '../icons/IconTablerMinimize.vue'
 import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
 import ComposerDropdown from './ComposerDropdown.vue'
 import ComposerSearchDropdown from './ComposerSearchDropdown.vue'
+import FullAccessConfirmation from './FullAccessConfirmation.vue'
+import PermissionsDropdown from './PermissionsDropdown.vue'
 
 type SkillSourceBadge = {
   badge: string
@@ -438,6 +454,7 @@ const props = defineProps<{
   cwd?: string
   collaborationModes?: CollaborationModeOption[]
   selectedCollaborationMode: CollaborationModeKind
+  selectedPermissionPreset: PermissionPreset
   models: string[]
   modelReasoningEfforts?: Record<string, ReasoningEffort[]>
   selectedModel: string
@@ -486,11 +503,13 @@ const emit = defineEmits<{
   submit: [payload: SubmitPayload]
   interrupt: []
   'update:selected-collaboration-mode': [mode: CollaborationModeKind]
+  'update:selected-permission-preset': [preset: PermissionPreset]
   'update:selected-model': [modelId: string]
   'update:selected-reasoning-effort': [effort: ReasoningEffort | '']
   'update:selected-speed-mode': [mode: SpeedMode]
 }>()
 const { t } = useUiLanguage()
+const isFullAccessConfirmationOpen = ref(false)
 
 type SelectedImage = {
   id: string
@@ -1138,6 +1157,19 @@ function onModelSelect(value: string): void {
 
 function toggleCollaborationMode(): void {
   emit('update:selected-collaboration-mode', isPlanModeSelected.value ? 'default' : 'plan')
+}
+
+function onPermissionPresetSelected(preset: PermissionPreset): void {
+  if (preset === 'fullAccess') {
+    isFullAccessConfirmationOpen.value = true
+    return
+  }
+  emit('update:selected-permission-preset', preset)
+}
+
+function confirmFullAccess(): void {
+  isFullAccessConfirmationOpen.value = false
+  emit('update:selected-permission-preset', 'fullAccess')
 }
 
 function onReasoningEffortSelect(value: string): void {
@@ -2219,6 +2251,10 @@ watch(
   @apply shrink-1 min-w-0;
 }
 
+.thread-composer-config-controls {
+  @apply flex min-w-0 items-center gap-2 sm:gap-4;
+}
+
 .thread-composer-control :deep(.composer-dropdown-value) {
   @apply truncate;
 }
@@ -2233,6 +2269,24 @@ watch(
 
 .thread-composer-actions--recording {
   @apply ml-0 flex-1;
+}
+
+@media (max-width: 639px) {
+  .thread-composer-controls {
+    @apply grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1;
+  }
+
+  .thread-composer-config-controls {
+    @apply flex-wrap gap-x-3 gap-y-1;
+  }
+
+  .thread-composer-control {
+    @apply shrink-0;
+  }
+
+  .thread-composer-actions {
+    @apply ml-0;
+  }
 }
 
 .thread-composer-mic {

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   migrateWorkspaceRootsStateCompatibility,
+  readPermissionState,
   readWorkspaceRootsState,
+  writePermissionState,
   writeWorkspaceRootsState,
 } from './codexAppServerBridge'
 
@@ -19,6 +21,29 @@ afterEach(() => {
 })
 
 describe('workspace roots Desktop state compatibility', () => {
+  it('stores permission presets separately from shared project state', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-permissions-'))
+    const globalStatePath = join(codexHome, '.codex-global-state.json')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await writeFile(globalStatePath, JSON.stringify({ sentinel: 'preserved' }), 'utf8')
+
+      await writePermissionState({
+        defaultPreset: 'workspace',
+        threadPresets: { 'thread-a': 'fullAccess' },
+      })
+
+      expect(await readPermissionState()).toEqual({
+        defaultPreset: 'workspace',
+        threadPresets: { 'thread-a': 'fullAccess' },
+      })
+      expect(JSON.parse(await readFile(globalStatePath, 'utf8'))).toEqual({ sentinel: 'preserved' })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   it('discovers Desktop local-project roots missing from saved workspace roots', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-local-project-read-'))
     const savedRoot = join(codexHome, 'saved-project')

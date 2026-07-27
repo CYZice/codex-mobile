@@ -75,6 +75,42 @@ describe('startThreadTurn collaboration mode payloads', () => {
       },
     })
   })
+
+  it('sends the thread permission configuration with each turn', async () => {
+    const { requests } = mockRpcFetch()
+
+    await startThreadTurn(
+      'thread-1',
+      'update the project',
+      [],
+      'gpt-5.4',
+      'medium',
+      undefined,
+      [],
+      'default',
+      {
+        approvalPolicy: 'on-request',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: ['D:\\Projects\\LiDAR FPGA'],
+          networkAccess: true,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      },
+    )
+
+    expect(requests[0].params).toMatchObject({
+      approvalPolicy: 'on-request',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['D:\\Projects\\LiDAR FPGA'],
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    })
+  })
 })
 
 describe('getCurrentModelConfig', () => {

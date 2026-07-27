@@ -944,6 +944,7 @@
                   :cwd="composerCwd"
                   :collaboration-modes="availableCollaborationModes"
                   :selected-collaboration-mode="selectedCollaborationMode"
+                  :selected-permission-preset="selectedPermissionPreset"
                   :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts"
                   :selected-model="composerSelectedModelId"
                   :selected-reasoning-effort="selectedReasoningEffort"
@@ -959,6 +960,7 @@
                   :dictation-language="dictationLanguage"
                   @submit="onSubmitThreadMessage"
                   @update:selected-collaboration-mode="onSelectCollaborationMode"
+                  @update:selected-permission-preset="onSelectPermissionPreset"
                   @update:selected-model="onSelectModel"
                   @update:selected-reasoning-effort="onSelectReasoningEffort"
                   @update:selected-speed-mode="onSelectSpeedMode" />
@@ -1027,6 +1029,7 @@
                     :cwd="composerCwd"
                     :collaboration-modes="availableCollaborationModes"
                     :selected-collaboration-mode="selectedCollaborationMode"
+                    :selected-permission-preset="selectedPermissionPreset"
                     :models="availableModelIds"
                     :model-reasoning-efforts="availableModelReasoningEfforts"
                     :selected-model="composerSelectedModelId"
@@ -1044,6 +1047,7 @@
                     :dictation-click-to-toggle="dictationClickToToggle" :dictation-auto-send="dictationAutoSend"
                     :dictation-language="dictationLanguage"
                     @update:selected-collaboration-mode="onSelectCollaborationMode"
+                    @update:selected-permission-preset="onSelectPermissionPreset"
                     @submit="onSubmitThreadMessage" @update:selected-model="onSelectModel"
                     @update:selected-reasoning-effort="onSelectReasoningEffort"
                     @update:selected-speed-mode="onSelectSpeedMode"
@@ -1229,6 +1233,7 @@ import {
 } from './api/codexGateway'
 import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
+import type { PermissionPreset } from './permissions'
 import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
@@ -1422,6 +1427,7 @@ const {
   availableModelIds,
   availableModelReasoningEfforts,
   selectedCollaborationMode,
+  selectedPermissionPreset,
   selectedModelId,
   selectedReasoningEffort,
   selectedSpeedMode,
@@ -1458,6 +1464,7 @@ const {
   reorderQueuedMessage,
   steerQueuedMessage,
   setSelectedCollaborationMode,
+  setSelectedPermissionPreset,
   readModelIdForThread,
   setSelectedModelIdForThread,
 
@@ -4626,6 +4633,12 @@ function normalizeMessageType(rawType: string | undefined, role: string): string
 
 function onSelectCollaborationMode(mode: 'default' | 'plan'): void {
   setSelectedCollaborationMode(mode)
+}
+
+function onSelectPermissionPreset(preset: PermissionPreset): void {
+  void setSelectedPermissionPreset(preset).catch((permissionError: unknown) => {
+    desktopError.value = permissionError instanceof Error ? permissionError.message : 'Failed to save permission setting'
+  })
 }
 
 async function initialize(): Promise<void> {
