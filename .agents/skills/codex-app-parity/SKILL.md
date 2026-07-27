@@ -638,6 +638,12 @@ After each feature implementation session that uses this skill:
 
 ## Findings: Parity Extraction Sanity Check (2026-03-27)
 
+## Findings: Model List First On Mobile (2026-07-27)
+
+- On the Lenovo Codex remote instance, the authenticated `model/list` RPC returned six visible models: GPT-5.6 Sol, Terra, Luna, GPT-5.5, GPT-5.4, and GPT-5.4 Mini.
+- The mobile model trigger should open the real model list directly. Keep GPT-5.6 and GPT-5.5 on the first panel, place older returned models behind an Other models row, and retain thinking-level selection as a secondary row in the same menu.
+- No reusable Codex Desktop CDP endpoint was available on ports 3434, 3435, 9222, or 9223 on this Windows host. The user-provided native mobile screenshot was retained as the visual reference, while the live 5900 Web UI supplied before/after evidence.
+
 - In this environment, `/Applications/Codex.app` may be absent while `/tmp/codex-app-extracted` still exists as an empty directory from a prior session.
 - Before relying on extracted bundle searches, verify both the app bundle path and that the extraction target actually contains files.
 - When both checks fail for a UI change, treat parity inspection as blocked, use existing repository behavior as the fallback baseline, and report that gap explicitly in the final response.

@@ -119,6 +119,7 @@ const zhCN: Record<string, string> = {
   'Plan mode': '规划模式',
   'Agent proposes a plan before acting': '代理在执行前先提出计划',
   'Model': '模型',
+  'Other models': '其他模型',
   'Search models...': '搜索模型...',
   'Skills': '技能',
   'Search skills...': '搜索技能...',

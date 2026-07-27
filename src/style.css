@@ -367,8 +367,7 @@
 }
 
 :root.dark .model-settings-section-label,
-:root.dark .model-settings-navigation-value,
-:root.dark .model-settings-empty {
+:root.dark .model-settings-navigation-value {
   @apply text-zinc-400;
 }
 
@@ -393,10 +392,6 @@
 
 :root.dark .model-settings-divider {
   @apply bg-zinc-800;
-}
-
-:root.dark .model-settings-search {
-  @apply border-zinc-700 bg-zinc-800 text-zinc-100 focus:border-zinc-500;
 }
 
 :root.dark .composer-dropdown-option {

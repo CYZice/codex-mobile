@@ -266,7 +266,7 @@
             :placeholder="t('Model')"
             :model-label="t('Model')"
             :thinking-label="t('Thinking')"
-            :search-placeholder="t('Search models...')"
+            :other-models-label="t('Other models')"
             :disabled="isComposerConfigDisabled || models.length === 0"
             @update:model-value="onModelSelect"
             @update:reasoning-value="onReasoningEffortSelect"

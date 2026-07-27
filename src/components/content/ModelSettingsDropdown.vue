@@ -15,7 +15,67 @@
     <Teleport to="body">
       <div v-if="isOpen" ref="menuWrapRef" class="model-settings-menu-wrap" :style="menuWrapStyle">
         <section ref="menuRef" class="model-settings-menu" :aria-label="modelLabel">
-          <template v-if="activePanel === 'settings'">
+          <template v-if="activePanel === 'models'">
+            <div class="model-settings-model-header">
+              <span>{{ modelLabel }}</span>
+            </div>
+            <div class="model-settings-option-list model-settings-model-list" role="listbox" :aria-label="modelLabel">
+              <button
+                v-for="option in featuredModelOptions"
+                :key="option.value"
+                class="model-settings-option"
+                :class="{ 'is-selected': option.value === modelValue }"
+                type="button"
+                @click="selectModel(option.value)"
+              >
+                <span>{{ option.label }}</span>
+                <span v-if="option.value === modelValue" class="model-settings-selected-mark" aria-label="Selected" />
+              </button>
+            </div>
+
+            <button
+              v-if="otherModelOptions.length > 0"
+              class="model-settings-navigation-row"
+              type="button"
+              @click="openPanel('otherModels')"
+            >
+              <span class="model-settings-navigation-label">{{ otherModelsLabel }}</span>
+              <IconTablerChevronDown class="model-settings-navigation-chevron" />
+            </button>
+
+            <div class="model-settings-divider" />
+            <button class="model-settings-navigation-row" type="button" @click="openPanel('thinking')">
+              <span class="model-settings-navigation-copy">
+                <span class="model-settings-navigation-label">{{ thinkingLabel }}</span>
+                <span class="model-settings-navigation-value">{{ selectedReasoningLabel }}</span>
+              </span>
+              <IconTablerChevronDown class="model-settings-navigation-chevron" />
+            </button>
+          </template>
+
+          <template v-else-if="activePanel === 'otherModels'">
+            <div class="model-settings-model-header">
+              <button class="model-settings-back" type="button" :aria-label="modelLabel" @click="openPanel('models')">
+                <IconTablerChevronDown />
+              </button>
+              <span>{{ otherModelsLabel }}</span>
+            </div>
+            <div class="model-settings-option-list model-settings-model-list" role="listbox" :aria-label="otherModelsLabel">
+              <button
+                v-for="option in otherModelOptions"
+                :key="option.value"
+                class="model-settings-option"
+                :class="{ 'is-selected': option.value === modelValue }"
+                type="button"
+                @click="selectModel(option.value)"
+              >
+                <span>{{ option.label }}</span>
+                <span v-if="option.value === modelValue" class="model-settings-selected-mark" aria-label="Selected" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
             <p class="model-settings-section-label">{{ thinkingLabel }}</p>
             <div class="model-settings-option-list" role="listbox" :aria-label="thinkingLabel">
               <button
@@ -30,9 +90,8 @@
                 <span v-if="option.value === reasoningValue" class="model-settings-selected-mark" aria-label="Selected" />
               </button>
             </div>
-
             <div class="model-settings-divider" />
-            <button class="model-settings-navigation-row" type="button" @click="openModels">
+            <button class="model-settings-navigation-row" type="button" @click="openPanel('models')">
               <span class="model-settings-navigation-copy">
                 <span class="model-settings-navigation-label">{{ modelLabel }}</span>
                 <span class="model-settings-navigation-value">{{ selectedModelLabel }}</span>
@@ -41,36 +100,6 @@
             </button>
           </template>
 
-          <template v-else>
-            <div class="model-settings-model-header">
-              <button class="model-settings-back" type="button" :aria-label="thinkingLabel" @click="activePanel = 'settings'">
-                <IconTablerChevronDown />
-              </button>
-              <span>{{ modelLabel }}</span>
-            </div>
-            <input
-              ref="searchInputRef"
-              v-model="searchQuery"
-              class="model-settings-search"
-              type="text"
-              :placeholder="searchPlaceholder"
-              @keydown.escape.prevent="activePanel = 'settings'"
-            />
-            <div class="model-settings-option-list model-settings-model-list" role="listbox" :aria-label="modelLabel">
-              <button
-                v-for="option in filteredModelOptions"
-                :key="option.value"
-                class="model-settings-option"
-                :class="{ 'is-selected': option.value === modelValue }"
-                type="button"
-                @click="selectModel(option.value)"
-              >
-                <span>{{ option.label }}</span>
-                <span v-if="option.value === modelValue" class="model-settings-selected-mark" aria-label="Selected" />
-              </button>
-              <p v-if="filteredModelOptions.length === 0" class="model-settings-empty">No results</p>
-            </div>
-          </template>
         </section>
       </div>
     </Teleport>
@@ -94,7 +123,7 @@ const props = defineProps<{
   placeholder: string
   modelLabel: string
   thinkingLabel: string
-  searchPlaceholder: string
+  otherModelsLabel: string
   disabled?: boolean
 }>()
 
@@ -106,10 +135,8 @@ const emit = defineEmits<{
 const rootRef = ref<HTMLElement | null>(null)
 const menuWrapRef = ref<HTMLElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
-const searchInputRef = ref<HTMLInputElement | null>(null)
 const isOpen = ref(false)
-const activePanel = ref<'settings' | 'models'>('settings')
-const searchQuery = ref('')
+const activePanel = ref<'models' | 'otherModels' | 'thinking'>('models')
 const menuWrapStyle = ref<Record<string, string>>({})
 let hasLayoutListeners = false
 
@@ -120,13 +147,11 @@ const selectedReasoningLabel = computed(() => (
   props.reasoningOptions.find((option) => option.value === props.reasoningValue)?.label ?? ''
 ))
 const triggerLabel = computed(() => [selectedModelLabel.value, selectedReasoningLabel.value].filter(Boolean).join(' '))
-const filteredModelOptions = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return props.modelOptions
-  return props.modelOptions.filter((option) => (
-    option.label.toLowerCase().includes(query) || option.value.toLowerCase().includes(query)
-  ))
+const featuredModelOptions = computed(() => {
+  const featured = props.modelOptions.filter((option) => /^gpt-5\.[56](?:-|$)/i.test(option.value))
+  return featured.length > 0 ? featured : props.modelOptions
 })
+const otherModelOptions = computed(() => props.modelOptions.filter((option) => !featuredModelOptions.value.includes(option)))
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -180,11 +205,9 @@ function onToggle(): void {
   isOpen.value = !isOpen.value
 }
 
-function openModels(): void {
-  activePanel.value = 'models'
-  searchQuery.value = ''
+function openPanel(panel: 'models' | 'otherModels' | 'thinking'): void {
+  activePanel.value = panel
   void nextTick(() => {
-    searchInputRef.value?.focus()
     updateMenuPosition()
   })
 }
@@ -211,7 +234,7 @@ watch(isOpen, (open) => {
   if (!open) {
     removeLayoutListeners()
     menuWrapStyle.value = {}
-    activePanel.value = 'settings'
+    activePanel.value = 'models'
     return
   }
   addLayoutListeners()
@@ -320,16 +343,8 @@ onBeforeUnmount(() => {
   @apply h-4 w-4 rotate-90;
 }
 
-.model-settings-search {
-  @apply mb-2 w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm text-zinc-800 outline-none transition focus:border-zinc-400;
-}
-
 .model-settings-model-list {
   @apply max-h-64 overflow-y-auto;
-}
-
-.model-settings-empty {
-  @apply px-2 py-3 text-sm text-zinc-500;
 }
 
 @media (max-width: 639px) {
