@@ -33,5 +33,5 @@ Return to the [manual test index](../../tests.md).
 | [Codex.app-style Plugins Directory](codex-app-style-plugins-directory.md) |
 | [Skills tab npx skills search](skills-tab-npx-skills-search.md) |
 | [Feature: Nested skill bundles are grouped in discovery](nested-skill-bundles-are-grouped-in-discovery.md) |
-| [First-launch home card for Plugins and Apps](first-launch-home-card-for-plugins-and-apps.md) |
+| [Home without promotional card](home-without-promotional-card.md) |
 | [Composer prompts inside Skills dropdown](composer-prompts-inside-skills-dropdown.md) |

@@ -270,6 +270,14 @@
             @update:model-value="onModelSelect"
           />
 
+          <PermissionsDropdown
+            class="thread-composer-control"
+            :model-value="selectedPermissionPreset"
+            :disabled="isComposerConfigDisabled"
+            :is-turn-in-progress="isTurnInProgress"
+            @select="onPermissionPresetSelected"
+          />
+
           <ComposerSearchDropdown
             class="thread-composer-control"
             :options="skillDropdownOptions"
@@ -294,14 +302,6 @@
             open-direction="up"
             :disabled="isComposerConfigDisabled || reasoningOptions.length === 0"
             @update:model-value="onReasoningEffortSelect"
-          />
-
-          <PermissionsDropdown
-            class="thread-composer-control"
-            :model-value="selectedPermissionPreset"
-            :disabled="isComposerConfigDisabled"
-            :is-turn-in-progress="isTurnInProgress"
-            @select="onPermissionPresetSelected"
           />
         </div>
 
@@ -2272,20 +2272,87 @@ watch(
 }
 
 @media (max-width: 639px) {
+  .thread-composer-shell {
+    @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
+  }
+
+  .thread-composer-attachments,
+  .thread-composer-folder-chips,
+  .thread-composer-file-chips,
+  .thread-composer-skill-chips {
+    @apply col-span-full mb-0;
+  }
+
+  .thread-composer-input-wrap {
+    @apply order-3 col-start-2 min-w-0 self-end border border-zinc-200 bg-zinc-100;
+    border-radius: 22px;
+  }
+
+  .thread-composer-input {
+    @apply min-h-11 max-h-32 px-3 py-2.5 pr-9 text-base leading-6;
+  }
+
   .thread-composer-controls {
-    @apply grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1;
+    display: contents;
+  }
+
+  .thread-composer-attach {
+    @apply order-2 col-start-1 self-center;
+  }
+
+  .thread-composer-attach-trigger {
+    @apply h-11 w-11 rounded-full border border-zinc-200 bg-zinc-100 text-2xl text-zinc-700 hover:bg-zinc-200;
   }
 
   .thread-composer-config-controls {
-    @apply flex-wrap gap-x-3 gap-y-1;
+    @apply order-1 col-span-full flex-wrap gap-1.5 px-0.5;
   }
 
   .thread-composer-control {
-    @apply shrink-0;
+    @apply min-w-0 shrink-0;
+  }
+
+  .thread-composer-control :deep(.composer-dropdown-trigger),
+  .thread-composer-control :deep(.search-dropdown-trigger),
+  .thread-composer-control :deep(.permissions-dropdown-trigger) {
+    @apply min-h-9 max-w-[12rem] rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1.5 text-zinc-700 hover:bg-zinc-200 hover:text-zinc-900;
   }
 
   .thread-composer-actions {
-    @apply ml-0;
+    @apply order-4 col-start-3 ml-0 self-center gap-1;
+  }
+
+  .thread-composer-mic,
+  .thread-composer-submit,
+  .thread-composer-stop {
+    height: 2.75rem;
+    width: 2.75rem;
+  }
+
+  .thread-composer-submit:disabled {
+    display: none;
+  }
+
+  .thread-composer-actions:has(.thread-composer-submit:not(:disabled)) .thread-composer-mic {
+    display: none;
+  }
+
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-shell {
+    @apply flex border border-zinc-300 bg-white p-3;
+  }
+
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-controls {
+    @apply flex;
+  }
+
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-input-wrap {
+    @apply order-none border-0 bg-transparent;
+  }
+
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-attach,
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-config-controls,
+  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-actions {
+    @apply order-none;
   }
 }
 

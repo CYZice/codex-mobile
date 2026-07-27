@@ -16,6 +16,8 @@ Per-thread Workspace access and Full access selection in the composer.
 5. Switch to the second thread and select Workspace access; return to the first thread.
 6. Start a long-running turn, open Permissions, switch its selection, and verify the menu says the change applies to the next message.
 7. Repeat the menu and confirmation checks in dark theme and at a narrow mobile viewport.
+8. At 375x812, verify the model and permission controls appear as pill buttons above the input row, with the add button on the left and message actions on the right.
+9. Open the permission menu on mobile and verify it uses the available screen width, shows descriptions without clipping, and marks the selected preset with a check.
 
 #### Expected Results
 - Workspace access uses the current project path as its writable root and asks before broader access.
@@ -23,6 +25,7 @@ Per-thread Workspace access and Full access selection in the composer.
 - The selected permission persists after refresh and remains scoped to its thread.
 - The second thread can use a different permission without changing the first thread.
 - Both themes and narrow layouts keep the menu and confirmation dialog readable without overlap.
+- Mobile keeps the model and permission presets first in the control row; Skills and Thinking remain available as secondary controls without squeezing the input row.
 
 #### Rollback/Cleanup
 - Switch any temporary Full access thread back to Workspace access after the check.

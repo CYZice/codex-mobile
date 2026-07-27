@@ -263,6 +263,31 @@
   @apply bg-zinc-700 text-zinc-500;
 }
 
+@media (max-width: 639px) {
+  :root.dark .thread-composer-shell {
+    @apply border-transparent bg-transparent;
+  }
+
+  :root.dark .thread-composer-input-wrap {
+    @apply border-zinc-700 bg-zinc-800;
+  }
+
+  :root.dark .thread-composer-config-controls .composer-dropdown-trigger,
+  :root.dark .thread-composer-config-controls .search-dropdown-trigger,
+  :root.dark .thread-composer-config-controls .permissions-dropdown-trigger,
+  :root.dark .thread-composer-attach-trigger {
+    @apply border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white;
+  }
+
+  :root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-shell {
+    @apply border-zinc-700 bg-zinc-900;
+  }
+
+  :root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-input-wrap {
+    @apply bg-transparent;
+  }
+}
+
 :root.dark .thread-composer-expand {
   @apply bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white;
 }

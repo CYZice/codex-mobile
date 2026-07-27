@@ -9,7 +9,9 @@
       :disabled="disabled"
       @click="isOpen = !isOpen"
     >
-      <span class="permissions-dropdown-value">Permissions: {{ selectedOption.shortLabel }}</span>
+      <span class="permissions-dropdown-value">
+        <span class="permissions-dropdown-prefix">Permissions: </span>{{ selectedOption.shortLabel }}
+      </span>
       <IconTablerChevronDown class="permissions-dropdown-chevron" />
     </button>
 
@@ -34,7 +36,11 @@
             <span class="permissions-dropdown-option-title">{{ option.label }}</span>
             <span class="permissions-dropdown-option-description">{{ option.description }}</span>
           </span>
-          <span v-if="option.value === modelValue" class="permissions-dropdown-selected-mark" aria-hidden="true">Selected</span>
+          <span
+            v-if="option.value === modelValue"
+            class="permissions-dropdown-selected-mark"
+            aria-label="Selected"
+          />
         </button>
         <p v-if="isTurnInProgress" class="permissions-dropdown-next-turn">
           Applies to the next message
@@ -100,13 +106,20 @@ function updateMenuPosition(): void {
   if (!root) return
 
   const rect = root.getBoundingClientRect()
-  const viewportPadding = 8
+  const isMobileViewport = window.innerWidth <= 639
+  const viewportPadding = isMobileViewport ? 16 : 8
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
   const measuredHeight = menuRef.value?.offsetHeight ?? menuWrapRef.value?.offsetHeight ?? 180
-  const width = Math.max(0, Math.min(328, viewportWidth - viewportPadding * 2))
-  const left = clamp(rect.left, viewportPadding, Math.max(viewportPadding, viewportWidth - width - viewportPadding))
-  const top = Math.max(viewportPadding, rect.top - measuredHeight - 8)
+  const width = Math.max(0, Math.min(isMobileViewport ? 520 : 328, viewportWidth - viewportPadding * 2))
+  const left = isMobileViewport
+    ? viewportPadding
+    : clamp(rect.left, viewportPadding, Math.max(viewportPadding, viewportWidth - width - viewportPadding))
+  const top = clamp(
+    rect.top - measuredHeight - (isMobileViewport ? 12 : 8),
+    viewportPadding,
+    Math.max(viewportPadding, viewportHeight - measuredHeight - viewportPadding),
+  )
 
   menuWrapStyle.value = {
     position: 'fixed',
@@ -219,11 +232,43 @@ onBeforeUnmount(() => {
 }
 
 .permissions-dropdown-selected-mark {
-  @apply shrink-0 pt-0.5 text-xs font-medium text-zinc-600;
+  @apply inline-flex h-6 w-6 shrink-0 items-center justify-center text-zinc-700;
+}
+
+.permissions-dropdown-selected-mark::before {
+  content: '\2713';
+  @apply text-xl leading-none;
 }
 
 .permissions-dropdown-next-turn {
   @apply border-t border-zinc-100 px-3 py-2 text-xs leading-snug text-zinc-500;
+}
+
+@media (max-width: 639px) {
+  .permissions-dropdown-prefix {
+    @apply hidden;
+  }
+
+  .permissions-dropdown-menu {
+    @apply p-2;
+    border-radius: 20px;
+  }
+
+  .permissions-dropdown-option {
+    @apply items-center rounded-xl px-3 py-3.5;
+  }
+
+  .permissions-dropdown-option-title {
+    @apply text-[15px];
+  }
+
+  .permissions-dropdown-option-description {
+    @apply text-[13px] leading-5;
+  }
+
+  .permissions-dropdown-next-turn {
+    @apply mx-1 px-2 py-2.5;
+  }
 }
 
 </style>

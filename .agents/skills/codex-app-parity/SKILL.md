@@ -786,3 +786,10 @@ After each feature implementation session that uses this skill:
   - workspace-root/project filtering must preserve projectless thread groups from `thread/list`, otherwise they disappear after the optimistic row is replaced by server state
   - the rendered Projects section must still hide those projectless groups, while the Chats section lists them
 - A projectless thread cwd under `~/Documents/Codex/YYYY-MM-DD/<slug>` should remain in the sidebar Chats section after title generation and thread-list refreshes.
+
+## Findings: Mobile Permission Composer Layout (2026-07-27)
+
+- The native Codex mobile composer presents model and permission presets as compact pill controls above the message input row.
+- The permission picker is a wide floating surface with a title, secondary description, and a check icon for the active option.
+- The input row keeps the add button separate from the rounded message field so configuration controls do not reduce typing width.
+- On Windows, an already-running packaged Codex instance may not expose CDP on the common parity ports. When the user provides an exact native mobile screenshot, preserve it as the reference artifact and document the CDP gap instead of restarting their active Codex session.
