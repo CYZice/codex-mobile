@@ -6807,21 +6807,9 @@ class AppServerProcess {
   }
 
   private buildAppServerConfig(): { args: string[]; env: Record<string, string> } {
-    const args = buildAppServerArgs()
-    let extraEnv: Record<string, string> = {}
-    const serverPort = parseInt(process.env.CODEXUI_SERVER_PORT ?? '', 10) || undefined
-    args.push(...getProviderCompatibilityConfigArgs(serverPort))
-    const statePath = join(getCodexHomeDir(), FREE_MODE_STATE_FILE)
-    try {
-      const state = ensureDefaultFreeModeStateForMissingAuthSync(statePath)
-      if (state) {
-        args.push(...getFreeModeConfigArgs(state, serverPort))
-        extraEnv = getFreeModeEnvVars(state)
-      }
-    } catch {
-      // No free-mode state or invalid — use defaults
-    }
-    return { args, env: extraEnv }
+    // Provider selection is owned by the local Codex configuration (for example,
+    // CC Switch). Do not inject web-only free-mode settings into app-server.
+    return { args: buildAppServerArgs(), env: {} }
   }
 
   private getAppServerConfigSignature(config: { args: string[]; env: Record<string, string> }): string {

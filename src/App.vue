@@ -6002,4 +6002,14 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
   @apply border-t border-zinc-100 px-3 py-2 text-[11px] text-zinc-500;
 }
 
+/* Provider configuration is managed by the local Codex config/CC Switch.
+ * Keep the legacy controls in the source for a future restoration, but do not
+ * expose web-only provider overrides in Settings. */
+.sidebar-settings-row--select[title='Choose the API provider for the Codex backend'],
+.sidebar-settings-row--input:has(.sidebar-settings-provider-info),
+.sidebar-settings-row--input:has(input[type='url']),
+.sidebar-settings-error:has(.visible-error-feedback) {
+  display: none;
+}
+
 </style>

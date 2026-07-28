@@ -12,6 +12,7 @@ Return to the [manual test index](../../tests.md).
 | [Free Mode (OpenRouter)](free-mode-openrouter.md) |
 | [Feature: Codex.app Thread Provider Filter Patch (fix-codex-thread-filter.sh)](codex-app-thread-provider-filter-patch-fix-codex-thread-filter-sh.md) |
 | [Feature: Provider dropdown in settings (replaces free mode toggle)](provider-dropdown-in-settings-replaces-free-mode-toggle.md) |
+| [Local Codex configuration overrides web Provider settings](local-codex-config-overrides-web-provider-settings.md) |
 | [Codex CLI + OpenCode Zen Big Pickle Model](codex-cli-opencode-zen-big-pickle-model.md) |
 | [OpenCode Zen Provider & Wire API Selector in codexui](opencode-zen-provider-and-wire-api-selector-in-codexui.md) |
 | [Provider Switch Model List Isolation](provider-switch-model-list-isolation.md) |
