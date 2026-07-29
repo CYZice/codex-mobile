@@ -1452,6 +1452,14 @@ export async function refreshAccountsFromAuth(): Promise<AccountsListResult> {
   return normalizeAccountsListResult(envelope?.data)
 }
 
+export async function reloadCodexAppServer(): Promise<void> {
+  const response = await fetch('/codex-api/runtime/reload', { method: 'POST' })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to reload Codex app-server'))
+  }
+}
+
 export async function startCodexLogin(): Promise<string> {
   const response = await fetch('/codex-api/accounts/login/start', {
     method: 'POST',

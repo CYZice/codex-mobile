@@ -6796,6 +6796,7 @@ class AppServerProcess {
   private readonly liveStateCache = new Map<string, { data: unknown; turnCount: number; sessionSize: number }>()
   private chatgptAuthRefreshPromise: Promise<ChatgptAuthTokensRefreshResponse> | null = null
   private activeConfigSignature = ''
+  private reloadPromise: Promise<void> | null = null
 
 
   private getCodexCommand(): string {
@@ -7263,6 +7264,19 @@ class AppServerProcess {
     this.disposeIfConfigChanged()
     await this.ensureInitialized()
     return this.call(method, params)
+  }
+
+  async reload(): Promise<void> {
+    if (this.reloadPromise) return await this.reloadPromise
+
+    this.reloadPromise = (async () => {
+      this.dispose()
+      await this.ensureInitialized()
+    })().finally(() => {
+      this.reloadPromise = null
+    })
+
+    return await this.reloadPromise
   }
 
   onNotification(listener: (value: { method: string; params: unknown }) => void): () => void {
@@ -8192,6 +8206,20 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         }
 
         next()
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/runtime/reload') {
+        try {
+          await appServer.reload()
+          const [config, models] = await Promise.all([
+            appServer.rpc('config/read', {}),
+            appServer.rpc('model/list', {}),
+          ])
+          setJson(res, 200, { ok: true, config, models, reloadedAt: new Date().toISOString() })
+        } catch (error) {
+          setJson(res, 503, { error: getErrorMessage(error, 'Failed to reload Codex app-server') })
+        }
         return
       }
 

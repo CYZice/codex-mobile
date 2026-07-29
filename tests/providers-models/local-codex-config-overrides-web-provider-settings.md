@@ -12,15 +12,17 @@ The web Settings panel does not expose Provider, OpenRouter, OpenCode Zen, or Cu
 
 1. Open Settings and confirm no web Provider selector or provider API-key fields are rendered.
 2. Start a new thread and inspect the model list and active provider configuration.
-3. Change the local provider/model through CC Switch, then reload the Codex app-server runtime.
-4. Start another new thread and inspect the resulting provider/model again.
+3. Change the local provider/model through CC Switch, then click **Reload Codex configuration** in web Settings.
+4. If a task is active, confirm the interruption prompt and verify the web page stays connected while that task ends.
+5. Start another new thread and inspect the resulting provider/model again.
 
 #### Expected results
 
 1. Web-only Provider controls are absent from Settings.
 2. The app-server does not use the historical web Provider state as startup arguments.
 3. Both initial and post-reload model/provider data reflect the local Codex configuration.
-4. Existing thread history remains available; no web-server restart is required.
+4. Reloading replaces only the app-server child process; port 5900, the page session, and Desktop remain available.
+5. Existing thread history remains available; no web-server restart is required.
 
 #### Rollback / cleanup
 

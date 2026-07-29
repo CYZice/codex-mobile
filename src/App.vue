@@ -225,6 +225,20 @@
                 <span class="sidebar-settings-label">{{ t('Require ⌘ + enter to send') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': !sendWithEnter }" />
               </button>
+              <button
+                class="sidebar-settings-row"
+                type="button"
+                :disabled="isReloadingCodexConfiguration"
+                :title="t('Reload the local Codex configuration, including changes made by CC Switch.')"
+                @click="onReloadCodexConfiguration"
+              >
+                <span class="sidebar-settings-label">{{ t('Reload Codex configuration') }}</span>
+                <span class="sidebar-settings-value">{{ isReloadingCodexConfiguration ? t('Reloading…') : t('Local') }}</span>
+              </button>
+              <div v-if="codexConfigurationReloadError" class="sidebar-settings-row sidebar-settings-error">
+                <span>{{ codexConfigurationReloadError }}</span>
+                <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, codexConfigurationReloadError)">{{ t('Send feedback') }}</a>
+              </div>
               <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
                 <span class="sidebar-settings-label">{{ t('When busy, send as') }}</span>
                 <span class="sidebar-settings-value">{{ inProgressSendMode === 'steer' ? t('Steer') : t('Queue') }}</span>
@@ -278,7 +292,7 @@
                   @update:model-value="onProviderChange"
                 />
               </div>
-              <div v-if="providerError" class="sidebar-settings-row sidebar-settings-error">
+              <div v-if="providerError" class="sidebar-settings-row sidebar-settings-error sidebar-settings-provider-error">
                 <span>{{ providerError }}</span>
                 <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, providerError)">{{ t('Send feedback') }}</a>
               </div>
@@ -1193,6 +1207,7 @@ import {
   importProjectZip,
   listLocalDirectories,
   openProjectRoot,
+  reloadCodexAppServer,
   removeAccount,
   refreshAccountsFromAuth,
   resetGitBranchToCommit,
@@ -1624,6 +1639,8 @@ const freeModeHasCustomKey = ref(false)
 const freeModeCustomKeyMasked = ref<string | null>(null)
 const freeModeCustomKeySaving = ref(false)
 const providerError = ref('')
+const isReloadingCodexConfiguration = ref(false)
+const codexConfigurationReloadError = ref('')
 const selectedProvider = ref<'codex' | 'openrouter' | 'opencode-zen' | 'custom'>('codex')
 const providerDropdownOptions = computed(() => [
   { value: 'codex', label: t('Codex') },
@@ -1674,6 +1691,7 @@ const visibleFeedbackErrors = [
   threadBranchCommitsError,
   accountActionError,
   providerError,
+  codexConfigurationReloadError,
   telegramConfigError,
   createFolderError,
   projectSetupError,
@@ -2577,6 +2595,29 @@ async function onRefreshAccounts(): Promise<void> {
     accountActionError.value = error instanceof Error ? error.message : t('Failed to refresh accounts')
   } finally {
     isRefreshingAccounts.value = false
+  }
+}
+
+async function onReloadCodexConfiguration(): Promise<void> {
+  if (isReloadingCodexConfiguration.value) return
+  if (!window.confirm(t('Reloading Codex configuration will interrupt any running task. Continue?'))) return
+
+  isReloadingCodexConfiguration.value = true
+  codexConfigurationReloadError.value = ''
+  try {
+    await reloadCodexAppServer()
+    await refreshAll({
+      includeSelectedThreadMessages: false,
+      forceThreadRefresh: true,
+      providerChanged: true,
+      awaitAncillaryRefreshes: true,
+    })
+  } catch (error) {
+    codexConfigurationReloadError.value = error instanceof Error
+      ? error.message
+      : t('Failed to reload Codex configuration')
+  } finally {
+    isReloadingCodexConfiguration.value = false
   }
 }
 
@@ -6008,7 +6049,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 .sidebar-settings-row--select[title='Choose the API provider for the Codex backend'],
 .sidebar-settings-row--input:has(.sidebar-settings-provider-info),
 .sidebar-settings-row--input:has(input[type='url']),
-.sidebar-settings-error:has(.visible-error-feedback) {
+.sidebar-settings-provider-error {
   display: none;
 }
 
