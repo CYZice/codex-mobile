@@ -7,19 +7,19 @@
 
 #### Steps
 1. Open a thread with one or more command execution rows in the conversation.
-2. Verify command label text, grouped command label text, and status text in collapsed rows.
+2. Verify command label text, grouped command label text, and status text appear as transparent, borderless inline rows.
 3. Locate a file-change summary row (for example: `▶ 2 files changed · 2 edited`) and verify the chevron and summary text are readable.
 4. Expand a command row to show output and inspect the output panel border contrast.
 5. Confirm status colors for running/success/error command rows are distinguishable in dark mode.
 6. Toggle back to `Light` theme and confirm command rows still use the existing light styling.
 
 #### Expected Results
-- Command labels and grouped command labels are readable against dark row backgrounds.
+- Command labels and grouped command labels are readable without a dedicated row background or border.
 - File-change summary rows keep readable chevron and summary text in dark mode.
 - Default status text is readable in dark mode.
 - Running/success/error status colors remain visible in dark mode.
-- Expanded command output border is visible without using a bright light-theme border.
-- Light theme command row styling is unchanged.
+- Expanded command output uses a restrained indented rail and readable monospace text.
+- Light theme uses the same cardless structure with theme-appropriate text and divider colors.
 
 #### Rollback/Cleanup
 - Return appearance setting to the previous user preference.

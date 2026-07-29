@@ -333,19 +333,28 @@
                     </li>
                   </ol>
                   <div v-else class="plan-card-markdown" v-html="renderMarkdownBlocksAsHtml(message.text)" />
-                  <div v-if="showImplementPlanButton(message)" class="plan-card-actions">
-                    <template v-if="planConfirmationMessageId === message.id">
-                      <div class="plan-confirmation">
-                        <p>实施此计划？</p>
-                        <div class="plan-confirmation-actions">
-                          <button type="button" class="plan-card-implement-button" @click="implementPlan(message)">是，实施此计划</button>
-                          <button type="button" class="plan-card-dismiss-button" @click="planConfirmationMessageId = ''">跳过</button>
-                        </div>
-                      </div>
-                    </template>
-                    <button v-else type="button" class="plan-card-implement-button" @click="planConfirmationMessageId = message.id">
-                      实施此计划
+                  <div v-if="showPlanActions(message)" class="plan-card-actions">
+                    <button type="button" class="plan-card-implement-button" @click="implementPlan(message)">
+                      执行计划
                     </button>
+                    <form class="plan-revision-form" @submit.prevent="revisePlan(message)">
+                      <input
+                        v-model="planRevisionDraft"
+                        class="plan-revision-input"
+                        type="text"
+                        placeholder="输入修改意见"
+                        aria-label="输入计划修改意见"
+                      />
+                      <button
+                        class="plan-revision-submit"
+                        type="submit"
+                        :disabled="planRevisionDraft.trim().length === 0"
+                        aria-label="提交计划修改意见"
+                        title="提交计划修改意见"
+                      >
+                        <IconTablerArrowUp class="icon-svg" />
+                      </button>
+                    </form>
                   </div>
                 </div>
                 <div
@@ -717,7 +726,6 @@
                   @click="forkResponse(message.id)"
                 >
                   <IconTablerGitFork class="icon-svg message-fork-icon" />
-                  <span class="message-fork-label">Fork</span>
                 </button>
                 <button
                   v-if="showCopyResponseButton(message)"
@@ -729,7 +737,6 @@
                   @click="copyResponse(message.id)"
                 >
                   <IconTablerCopy class="icon-svg message-copy-icon" />
-                  <span class="message-copy-label">{{ copiedResponseAnchorId === message.id ? 'Copied' : 'Copy' }}</span>
                 </button>
               </div>
             </article>
@@ -939,7 +946,7 @@ import IconTablerX from '../icons/IconTablerX.vue'
 type HighlightJsModule = (typeof import('highlight.js/lib/common'))['default']
 
 const expandedCommandIds = ref<Set<string>>(new Set())
-const planConfirmationMessageId = ref('')
+const planRevisionDraft = ref('')
 const collapsedAutoCommandIds = ref<Set<string>>(new Set())
 const expandedCommandGroupIds = ref<Set<string>>(new Set())
 const expandedWorkedIds = ref<Set<string>>(new Set())
@@ -1044,18 +1051,43 @@ function buildPlanMessageText(explanation: string, steps: UiPlanStep[]): string 
   return lines.join('\n').trim()
 }
 
-function showImplementPlanButton(message: UiMessage): boolean {
-  return isPlanMessage(message)
-    && message.messageType !== 'plan.live'
-    && message.role === 'assistant'
-    && Boolean(message.turnId)
+function showPlanActions(message: UiMessage): boolean {
+  if (
+    !isPlanMessage(message)
+    || message.messageType === 'plan.live'
+    || message.role !== 'assistant'
+    || !message.turnId
+    || props.liveOverlay
+  ) {
+    return false
+  }
+
+  const messageIndex = props.messages.findIndex((candidate) => candidate.id === message.id)
+  if (messageIndex < 0) return false
+  return !props.messages.slice(messageIndex + 1).some((candidate) => (
+    candidate.role === 'user'
+    || (
+      candidate.role === 'assistant'
+      && candidate.messageType !== 'commandExecution'
+      && candidate.messageType !== 'fileChange'
+      && candidate.messageType !== 'worked'
+    )
+  ))
 }
 
 function implementPlan(message: UiMessage): void {
   const turnId = message.turnId?.trim() ?? ''
   if (!turnId) return
-  planConfirmationMessageId.value = ''
+  planRevisionDraft.value = ''
   emit('implementPlan', { turnId })
+}
+
+function revisePlan(message: UiMessage): void {
+  const turnId = message.turnId?.trim() ?? ''
+  const text = planRevisionDraft.value.trim()
+  if (!turnId || !text) return
+  planRevisionDraft.value = ''
+  emit('revisePlan', { turnId, text })
 }
 
 function isFileChangeMessage(message: UiMessage): boolean {
@@ -1328,6 +1360,7 @@ const emit = defineEmits<{
   forkThread: [payload: { threadId: string; turnIndex: number }]
   rollback: [payload: { turnId: string }]
   implementPlan: [payload: { turnId: string }]
+  revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
 }>()
 
@@ -4683,16 +4716,16 @@ onBeforeUnmount(() => {
 }
 
 .message-copy-button {
-  @apply inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white/90 px-1.25 py-0.5 text-[9px] font-medium leading-none text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-900;
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent p-0 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
 }
 
 .message-fork-button {
-  @apply inline-flex items-center gap-0.5 px-0.5 py-0 text-[9px] font-medium leading-none text-slate-500 transition hover:text-slate-900;
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent p-0 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
 }
 
 
 .message-copy-button[data-copied='true'] {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-700;
+  @apply bg-emerald-50 text-emerald-700;
 }
 
 .message-edit-button {
@@ -4705,8 +4738,6 @@ onBeforeUnmount(() => {
   @apply text-[10px];
 }
 
-.message-fork-label,
-.message-copy-label,
 .message-edit-label {
   @apply leading-none;
 }
@@ -4780,7 +4811,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card {
-  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 shadow-sm;
+  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-zinc-900;
 }
 
 .plan-card-header {
@@ -4788,15 +4819,15 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-title {
-  @apply m-0 text-sm font-semibold leading-5 text-zinc-100;
+  @apply m-0 text-sm font-semibold leading-5 text-zinc-800;
 }
 
 .plan-card-badge {
-  @apply inline-flex items-center rounded-full bg-zinc-700 px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-200;
+  @apply inline-flex items-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-600;
 }
 
 .plan-card-explanation {
-  @apply text-zinc-300;
+  @apply text-zinc-700;
 }
 
 .plan-card-markdown {
@@ -4814,7 +4845,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-markdown :deep(.message-text) {
-  @apply text-sm leading-relaxed whitespace-pre-wrap text-zinc-200;
+  @apply text-sm leading-relaxed whitespace-pre-wrap text-zinc-700;
 }
 
 .plan-card-markdown :deep(.message-heading) {
@@ -4914,27 +4945,27 @@ onBeforeUnmount(() => {
 }
 
 .plan-step-item {
-  @apply flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-relaxed text-zinc-200;
+  @apply flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-relaxed text-zinc-700;
 }
 
 .plan-step-item[data-status='completed'] {
-  @apply text-zinc-500;
+  @apply text-zinc-400;
 }
 
 .plan-step-item[data-status='inProgress'] {
-  @apply bg-zinc-700/50;
+  @apply bg-zinc-200/70;
 }
 
 .plan-step-status {
-  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-700 text-xs font-semibold text-zinc-300;
+  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-500;
 }
 
 .plan-step-status[data-status='completed'] {
-  @apply bg-zinc-700 text-zinc-500;
+  @apply bg-zinc-200 text-zinc-400;
 }
 
 .plan-step-status[data-status='inProgress'] {
-  @apply bg-zinc-600 text-zinc-100;
+  @apply bg-zinc-300 text-zinc-800;
 }
 
 .plan-step-text {
@@ -4942,27 +4973,23 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-actions {
-  @apply mt-3 flex justify-end;
+  @apply mt-2 flex flex-col gap-2 border-t border-zinc-200 pt-3;
 }
 
 .plan-card-implement-button {
-  @apply inline-flex items-center rounded-full border border-zinc-600 bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:border-zinc-500 hover:bg-zinc-600;
+  @apply inline-flex w-fit items-center rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-100;
 }
 
-.plan-confirmation {
-  @apply w-full rounded-xl border border-zinc-600 bg-zinc-900/70 p-3 text-sm text-zinc-200;
+.plan-revision-form {
+  @apply flex min-w-0 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-2 py-1.5 transition focus-within:border-zinc-500;
 }
 
-.plan-confirmation p {
-  @apply m-0 font-medium;
+.plan-revision-input {
+  @apply min-w-0 flex-1 border-0 bg-transparent px-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-400;
 }
 
-.plan-confirmation-actions {
-  @apply mt-3 flex flex-wrap items-center gap-2;
-}
-
-.plan-card-dismiss-button {
-  @apply inline-flex items-center rounded-full border border-transparent px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100;
+.plan-revision-submit {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-700 disabled:cursor-default disabled:bg-zinc-200 disabled:text-zinc-400;
 }
 
 .message-text {
@@ -5233,8 +5260,8 @@ onBeforeUnmount(() => {
 
 .cmd-row.cmd-compact {
   gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: 0.625rem;
+  padding: 0.25rem 0;
+  border-radius: 0.375rem;
 }
 
 .cmd-row.cmd-compact .cmd-chevron {
@@ -5287,17 +5314,14 @@ onBeforeUnmount(() => {
 }
 
 .cmd-output-wrap {
-  @apply rounded-b-lg bg-zinc-900;
+  @apply ml-4 border-l border-zinc-200 bg-transparent pl-3;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 300ms ease-out, border-color 300ms ease-out;
-  border: 1px solid transparent;
-  border-top: none;
 }
 
 .cmd-output-wrap.cmd-output-visible {
   grid-template-rows: 1fr;
-  border-color: #e4e4e7;
 }
 
 .cmd-group-wrap {
@@ -5320,7 +5344,7 @@ onBeforeUnmount(() => {
 }
 
 .cmd-output {
-  @apply m-0 px-3 py-2 text-xs font-mono text-zinc-200 whitespace-pre-wrap break-words max-h-60 overflow-y-auto;
+  @apply m-0 py-2 pr-3 text-xs font-mono text-zinc-600 whitespace-pre-wrap break-words max-h-60 overflow-y-auto;
 }
 
 .cmd-output.cmd-output-condensed {
@@ -5328,7 +5352,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-summary-block {
-  @apply mt-3 flex flex-col gap-0 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-800;
+  @apply mt-3 flex flex-col gap-0;
 }
 
 .file-change-summary-block-inline {
@@ -5336,15 +5360,15 @@ onBeforeUnmount(() => {
 }
 
 .file-change-summary-row {
-  @apply rounded-none border-0 bg-transparent px-4 py-3 hover:bg-zinc-700/40;
+  @apply rounded-md border-0 bg-transparent px-0 py-1 hover:text-zinc-950;
 }
 
 .file-change-summary-label {
-  @apply flex-1 min-w-0 truncate text-sm font-semibold text-zinc-100;
+  @apply flex-1 min-w-0 truncate text-xs font-medium text-zinc-600;
 }
 
 .file-change-summary-status {
-  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-sm font-semibold text-zinc-300 flex-shrink-0;
+  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-xs font-medium text-zinc-500 flex-shrink-0;
 }
 
 .file-change-panel-inner {
@@ -5352,11 +5376,11 @@ onBeforeUnmount(() => {
 }
 
 .file-change-list {
-  @apply m-0 flex list-none flex-col gap-0 border-t border-zinc-700 bg-zinc-800 p-0;
+  @apply m-0 ml-4 flex list-none flex-col gap-0 border-l border-zinc-200 bg-transparent py-1 pl-3;
 }
 
 .file-change-item {
-  @apply flex flex-wrap items-center gap-1.5 border-b border-zinc-700/70 px-4 py-2 text-sm text-zinc-200 last:border-b-0;
+  @apply flex flex-wrap items-center gap-1.5 px-0 py-1 text-sm text-zinc-600;
 }
 
 .file-change-badge {

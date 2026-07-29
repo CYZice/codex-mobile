@@ -3001,11 +3001,11 @@ onBeforeUnmount(() => {
 @reference "tailwindcss";
 
 .thread-tree-root {
-  @apply flex flex-col;
+  @apply mt-2 flex flex-col gap-1;
 }
 
 .pinned-section {
-  @apply order-1 mb-1;
+  @apply order-1 mb-2;
 }
 
 .projects-section {
@@ -3013,7 +3013,7 @@ onBeforeUnmount(() => {
 }
 
 .chats-section {
-  @apply order-3 mt-1;
+  @apply order-3 mt-2;
 }
 
 .thread-tree-root.chats-first .chats-section {
@@ -3029,11 +3029,11 @@ onBeforeUnmount(() => {
 }
 
 .section-toggle-row {
-  @apply hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400;
+  @apply min-h-7 px-2.5 py-1 hover:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400;
 }
 
 .thread-tree-header {
-  @apply text-sm font-normal text-zinc-500 select-none;
+  @apply text-xs font-medium text-zinc-500 select-none;
 }
 
 .chats-section-actions {
@@ -3105,7 +3105,7 @@ onBeforeUnmount(() => {
 }
 
 .project-header-row {
-  @apply hover:bg-zinc-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400;
+  @apply hover:bg-zinc-200/80 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-400;
 }
 
 .project-main-button {
@@ -3129,7 +3129,7 @@ onBeforeUnmount(() => {
 }
 
 .project-title {
-  @apply min-w-0 flex-1 text-sm font-normal text-zinc-700 truncate select-none;
+  @apply min-w-0 flex-1 text-sm font-medium text-zinc-700 truncate select-none;
 }
 
 .project-menu-wrap {
@@ -3183,7 +3183,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-list {
-  @apply list-none m-0 p-0 flex flex-col gap-0.5;
+  @apply list-none m-0 p-0 flex flex-col gap-px;
 }
 
 .thread-list-global {
@@ -3191,7 +3191,7 @@ onBeforeUnmount(() => {
 }
 
 .project-group > .thread-list {
-  @apply mt-0.5;
+  @apply mt-px pl-6;
 }
 
 .thread-row-item {
@@ -3203,7 +3203,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-row {
-  @apply hover:bg-zinc-200;
+  @apply hover:bg-zinc-200/80;
 }
 
 .thread-row[data-menu-open='true'] {
@@ -3239,7 +3239,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-row-title {
-  @apply min-w-0 block flex-1 text-sm leading-5 font-normal text-zinc-800 truncate whitespace-nowrap;
+  @apply min-w-0 block flex-1 text-sm leading-5 font-normal text-zinc-700 truncate whitespace-nowrap;
 }
 
 .thread-row-worktree-icon {
@@ -3263,7 +3263,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-row-time {
-  @apply block text-sm font-normal text-zinc-500;
+  @apply block text-xs font-normal text-zinc-400;
 }
 
 .thread-menu-wrap {
@@ -3337,7 +3337,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-row[data-active='true'] {
-  @apply bg-zinc-200;
+  @apply bg-zinc-200 text-zinc-950;
 }
 
 .thread-row:hover .thread-delete-button,

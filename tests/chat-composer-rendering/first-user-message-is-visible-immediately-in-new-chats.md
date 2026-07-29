@@ -1,7 +1,7 @@
-### First user message is visible immediately in new chats
+### User messages are visible immediately in new and existing chats
 
 #### Feature/Change Name
-New-thread sends render the submitted user message immediately, even when the backend thread read lags behind the assistant response.
+New-thread and existing-thread sends render the submitted user message immediately, even when backend persistence lags behind the live activity overlay.
 
 #### Prerequisites/Setup
 1. Create a fresh isolated `CODEX_HOME`.
@@ -17,6 +17,8 @@ New-thread sends render the submitted user message immediately, even when the ba
 6. Confirm the conversation pane immediately shows the user row `hi`, then wait for the assistant response.
 7. Select `GPT-5.4-mini` in a post-auth new chat, send `hi`, and confirm the user row appears before the assistant response finishes.
 8. Repeat in dark theme and confirm the user row remains visible before and after the assistant response.
+9. Open an existing idle thread, send a unique message, and confirm its user bubble appears before the `Thinking` activity row.
+10. Wait for persistence/refresh and confirm the optimistic row is replaced without a duplicate.
 
 #### Expected Results
 - The submitted first user message appears in the conversation pane immediately after send.
@@ -25,6 +27,7 @@ New-thread sends render the submitted user message immediately, even when the ba
 - Completion events refresh the selected thread even when it was already marked loaded by an optimistic first message.
 - Delayed GPT-5.4-mini replies appear automatically when the completion notification arrives; no manual refresh is required.
 - Light and dark theme message rows remain readable.
+- Existing threads never show `Thinking` in place of the just-submitted user message.
 
 #### Rollback/Cleanup
 - Stop the temporary Vite server.

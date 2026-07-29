@@ -1172,6 +1172,73 @@ describe('provider model selection', () => {
     ])
   })
 
+  it('shows an optimistic user message before Thinking in an existing thread', async () => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{ projectName: 'Project', threads: [thread('existing-thread', '/tmp/project')] }],
+      nextCursor: null,
+    })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.5',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue(modelsWithoutReasoning('gpt-5.5'))
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      messages: [
+        {
+          id: 'assistant-existing',
+          role: 'assistant',
+          text: 'Ready.',
+          messageType: 'agentMessage',
+        },
+      ],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+
+    let resolveTurnStart: ((turnId: string) => void) | undefined
+    gatewayMocks.startThreadTurn.mockImplementation(() => new Promise<string>((resolve) => {
+      resolveTurnStart = resolve
+    }))
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+    state.primeSelectedThread('existing-thread')
+    await state.loadMessages('existing-thread')
+
+    const sendPromise = state.sendMessageToSelectedThread('Run the checks')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(state.messages.value.filter((message) => (
+      message.role === 'user' && message.text === 'Run the checks'
+    ))).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        text: 'Run the checks',
+        messageType: 'userMessage.optimistic',
+      }),
+    ])
+    expect(state.selectedLiveOverlay.value).toMatchObject({
+      activityLabel: 'Thinking',
+      reasoningText: '',
+      errorText: '',
+    })
+
+    resolveTurnStart?.('turn-existing')
+    await sendPromise
+  })
+
   it('refreshes a loaded optimistic thread when completion events arrive', async () => {
     installTestWindow()
     vi.mocked(window.setTimeout).mockImplementation(((callback: TimerHandler) => {

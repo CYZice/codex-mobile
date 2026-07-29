@@ -41,6 +41,18 @@
   @apply bg-zinc-900;
 }
 
+:root.dark .sidebar-thread-controls-brand {
+  @apply text-zinc-100;
+}
+
+:root.dark .sidebar-thread-controls-button {
+  @apply text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
+:root.dark .sidebar-thread-controls-new-thread {
+  @apply text-zinc-200 hover:bg-zinc-800;
+}
+
 :root.dark .sidebar-settings-area {
   @apply bg-zinc-900 border-zinc-700;
 }
@@ -59,6 +71,11 @@
 
 :root.dark .sidebar-settings-row + .sidebar-settings-row {
   @apply border-zinc-700;
+}
+
+:root.dark .sidebar-settings-panel .composer-dropdown-trigger,
+:root.dark .sidebar-settings-provider-dropdown .composer-dropdown-trigger {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
 }
 
 :root.dark .sidebar-settings-context-value {
@@ -119,6 +136,10 @@
   @apply border-zinc-700 bg-zinc-900/70;
 }
 
+:root.dark .sidebar-settings-account-collapse {
+  @apply bg-zinc-700 text-zinc-200 hover:bg-zinc-600;
+}
+
 :root.dark .sidebar-settings-account-item.is-active {
   @apply border-emerald-500/35 bg-emerald-500/10;
 }
@@ -176,11 +197,11 @@
 }
 
 :root.dark .sidebar-skills-link {
-  @apply border-emerald-900/70 bg-[linear-gradient(135deg,_rgba(6,78,59,0.42),_rgba(24,24,27,0.96))] text-zinc-100 hover:border-emerald-700 hover:bg-emerald-950;
+  @apply border-transparent bg-transparent text-zinc-200 hover:border-transparent hover:bg-zinc-800 hover:text-zinc-50;
 }
 
 :root.dark .sidebar-skills-link.is-active {
-  @apply border-emerald-700 bg-emerald-950/80 text-zinc-50;
+  @apply border-transparent bg-zinc-800 text-zinc-50;
 }
 
 :root.dark .sidebar-search-toggle {
@@ -771,11 +792,15 @@
 }
 
 :root.dark .message-copy-button {
-  @apply border-zinc-700 bg-zinc-800/90 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
 }
 
 :root.dark .message-copy-button[data-copied='true'] {
-  @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-200;
+  @apply border-0 bg-emerald-500/10 text-emerald-200;
+}
+
+:root.dark .message-fork-button {
+  @apply bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
 }
 
 :root.dark .message-rollback-button {
@@ -829,11 +854,11 @@
 }
 
 :root.dark .cmd-row {
-  @apply border-zinc-700 bg-zinc-800 hover:bg-zinc-700;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-transparent hover:text-zinc-100;
 }
 
 :root.dark .cmd-row.cmd-row-group {
-  @apply border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-transparent hover:text-zinc-100;
 }
 
 :root.dark .cmd-chevron {
@@ -868,6 +893,10 @@
   @apply border-zinc-700;
 }
 
+:root.dark .cmd-output {
+  @apply text-zinc-400;
+}
+
 :root.dark .file-change-summary-label {
   @apply text-zinc-200;
 }
@@ -881,7 +910,7 @@
 }
 
 :root.dark .file-change-list {
-  @apply border-zinc-700 bg-zinc-900/70;
+  @apply border-zinc-700 bg-transparent;
 }
 
 :root.dark .file-change-item {
@@ -1407,15 +1436,15 @@
 }
 
 :root.dark .plan-card {
-  @apply border-sky-700/70 bg-slate-900/78;
+  @apply border-zinc-700 bg-zinc-900 text-zinc-100;
 }
 
 :root.dark .plan-card-title {
-  @apply text-sky-200;
+  @apply text-zinc-100;
 }
 
 :root.dark .plan-card-badge {
-  @apply bg-sky-800 text-sky-100;
+  @apply bg-zinc-800 text-zinc-300;
 }
 
 :root.dark .plan-card-explanation {
@@ -1450,15 +1479,15 @@
 }
 
 :root.dark .plan-step-item {
-  @apply border-zinc-700 bg-zinc-800/72 text-zinc-100;
+  @apply bg-transparent text-zinc-200;
 }
 
 :root.dark .plan-step-item[data-status='completed'] {
-  @apply border-emerald-900 bg-emerald-950/40;
+  @apply bg-transparent text-zinc-500;
 }
 
 :root.dark .plan-step-item[data-status='inProgress'] {
-  @apply border-amber-900 bg-amber-950/40;
+  @apply bg-zinc-800/70 text-zinc-100;
 }
 
 :root.dark .plan-step-status {
@@ -1466,15 +1495,31 @@
 }
 
 :root.dark .plan-step-status[data-status='completed'] {
-  @apply bg-emerald-900 text-emerald-200;
+  @apply bg-zinc-800 text-zinc-500;
 }
 
 :root.dark .plan-step-status[data-status='inProgress'] {
-  @apply bg-amber-900 text-amber-200;
+  @apply bg-zinc-700 text-zinc-100;
 }
 
 :root.dark .plan-card-implement-button {
   @apply border-zinc-600 bg-zinc-800 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-700;
+}
+
+:root.dark .plan-card-actions {
+  @apply border-zinc-700;
+}
+
+:root.dark .plan-revision-form {
+  @apply border-zinc-600 bg-zinc-800 focus-within:border-zinc-400;
+}
+
+:root.dark .plan-revision-input {
+  @apply text-zinc-100 placeholder-zinc-500;
+}
+
+:root.dark .plan-revision-submit {
+  @apply bg-zinc-100 text-zinc-900 hover:bg-white disabled:bg-zinc-700 disabled:text-zinc-500;
 }
 
 :root.dark .message-image-button {

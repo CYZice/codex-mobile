@@ -12,6 +12,7 @@
             class="sidebar-thread-controls-host"
             :is-sidebar-collapsed="isSidebarCollapsed"
             :show-new-thread-button="true"
+            :show-brand="true"
             @toggle-sidebar="setSidebarCollapsed(!isSidebarCollapsed)"
             @start-new-thread="onStartNewThreadFromToolbar"
           >
@@ -58,10 +59,7 @@
             <span class="sidebar-skills-link-icon" aria-hidden="true">
               <IconTablerBolt />
             </span>
-            <span class="sidebar-skills-link-copy">
-              <span class="sidebar-skills-link-title">{{ t('Skills') }}</span>
-              <span class="sidebar-skills-link-subtitle">{{ t('Plugins, apps, MCPs') }}</span>
-            </span>
+            <span class="sidebar-skills-link-title">{{ t('Skills') }}</span>
           </button>
 
           <button
@@ -74,10 +72,7 @@
             <span class="sidebar-skills-link-icon sidebar-automations-link-icon" aria-hidden="true">
               <IconTablerBolt />
             </span>
-            <span class="sidebar-skills-link-copy">
-              <span class="sidebar-skills-link-title">{{ t('Automations') }}</span>
-              <span class="sidebar-skills-link-subtitle">{{ t('Scheduled work') }}</span>
-            </span>
+            <span class="sidebar-skills-link-title">{{ t('Automations') }}</span>
           </button>
 
           <SidebarThreadTree ref="sidebarThreadTreeRef" :groups="projectGroups" :project-display-name-by-id="projectDisplayNameById"
@@ -976,6 +971,7 @@
                     @fork-thread="onForkThreadFromMessage"
                     @rollback="onRollback"
                     @implement-plan="onImplementPlan"
+                    @revise-plan="onRevisePlan"
                     @respond-server-request="onRespondServerRequest" />
                 </div>
 
@@ -4200,6 +4196,15 @@ function onImplementPlan(payload: { turnId: string }): void {
   void sendMessageToSelectedThread('Implement', [], [], 'steer', [], undefined, 'default')
 }
 
+function onRevisePlan(payload: { turnId: string; text: string }): void {
+  if (isHomeRoute.value || !selectedThreadId.value) return
+  const revision = payload.text.trim()
+  if (!payload.turnId.trim() || !revision) return
+  setSelectedCollaborationMode('plan')
+  scheduleMobileConversationJumpToLatest()
+  void sendMessageToSelectedThread(revision, [], [], 'steer', [], undefined, 'plan')
+}
+
 
 async function copySelectedThreadChat(): Promise<void> {
   if (isHomeRoute.value || isSkillsRoute.value || isAutomationsRoute.value) return
@@ -4998,7 +5003,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .sidebar-scrollable {
-  @apply flex-1 min-h-0 overflow-y-auto py-4 px-2 flex flex-col gap-2;
+  @apply flex-1 min-h-0 overflow-y-auto px-2 pb-4 pt-3 flex flex-col gap-1;
 }
 
 .content-root {
@@ -5012,7 +5017,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .sidebar-thread-controls-host {
-  @apply mt-1 -translate-y-px px-2 pb-1;
+  @apply px-1 pb-2;
 }
 
 .sidebar-search-toggle {
@@ -5048,35 +5053,27 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .sidebar-skills-link {
-  @apply mx-2 flex items-center gap-3 rounded-2xl border border-transparent bg-transparent px-3 py-2.5 text-left text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950 cursor-pointer;
+  @apply mx-1 flex min-h-8 items-center gap-2 rounded-lg border border-transparent bg-transparent px-2.5 py-1.5 text-left text-zinc-700 transition hover:bg-zinc-200/80 hover:text-zinc-950 cursor-pointer;
 }
 
 .sidebar-skills-link.is-active {
-  @apply border-transparent bg-zinc-100 text-zinc-950;
+  @apply border-transparent bg-zinc-200 text-zinc-950;
 }
 
 .sidebar-skills-link-icon {
-  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white;
+  @apply flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500;
 }
 
 .sidebar-automations-link-icon {
-  @apply bg-amber-500;
+  @apply text-zinc-500;
 }
 
 .sidebar-skills-link-icon :deep(svg) {
-  @apply h-5 w-5;
-}
-
-.sidebar-skills-link-copy {
-  @apply flex min-w-0 flex-col;
+  @apply h-4 w-4;
 }
 
 .sidebar-skills-link-title {
-  @apply truncate text-sm font-semibold leading-5 tracking-[-0.01em];
-}
-
-.sidebar-skills-link-subtitle {
-  @apply truncate text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500;
+  @apply min-w-0 truncate text-sm font-normal leading-5 tracking-[-0.01em];
 }
 
 .sidebar-thread-controls-header-host {
@@ -5097,10 +5094,6 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 :global(:root.dark) .sidebar-skills-link-title {
   @apply text-zinc-50;
-}
-
-:global(:root.dark) .sidebar-skills-link-subtitle {
-  @apply text-zinc-400;
 }
 
 .content-body {
