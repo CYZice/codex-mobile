@@ -4075,6 +4075,8 @@ export function useDesktopState() {
     const shouldRefreshThreads =
       method.startsWith('thread/') ||
       method === 'turn/completed'
+    const requiresForcedThreadRefresh =
+      method.startsWith('thread/')
 
     if (!shouldRefreshMessages && !shouldRefreshThreads) return
 
@@ -4085,7 +4087,7 @@ export function useDesktopState() {
 
     if (shouldRefreshThreads) {
       pendingThreadsRefresh = true
-      pendingThreadsRefreshForce = true
+      pendingThreadsRefreshForce = pendingThreadsRefreshForce || requiresForcedThreadRefresh
     }
 
     if (eventSyncTimer !== null || typeof window === 'undefined') return
@@ -4282,6 +4284,18 @@ export function useDesktopState() {
     } catch {
       // Backend queue state is optional during startup.
     }
+  }
+
+  function applySharedUnreadState(notification: RpcNotification): boolean {
+    if (notification.method !== 'bridge/threadUnreadStateChanged') return false
+    const payload = notification.params && typeof notification.params === 'object'
+      ? notification.params as { threadIds?: unknown }
+      : null
+    if (!Array.isArray(payload?.threadIds)) return true
+    unreadThreadIdSet.value = new Set(payload.threadIds.filter((threadId): threadId is string => typeof threadId === 'string'))
+    hasLoadedThreadUnreadState = true
+    applyThreadFlags()
+    return true
   }
 
   async function loadPermissionStateIfNeeded(): Promise<void> {
@@ -5368,20 +5382,20 @@ export function useDesktopState() {
     }
   }
 
-  async function rollbackSelectedThread(turnId: string): Promise<void> {
+  async function rollbackSelectedThread(turnId: string): Promise<boolean> {
     const threadId = selectedThreadId.value
-    if (!threadId) return
-    if (isRollingBack.value) return
-    if (!turnId.trim()) return
+    if (!threadId) return false
+    if (isRollingBack.value) return false
+    if (!turnId.trim()) return false
 
     const persisted = persistedMessagesByThreadId.value[threadId] ?? []
     const matchedMessage = persisted.find((message) => message.turnId === turnId)
     const turnIndex = typeof matchedMessage?.turnIndex === 'number' ? matchedMessage.turnIndex : -1
-    if (turnIndex < 0) return
+    if (turnIndex < 0) return false
     const maxTurnIndex = persisted.reduce((max, m) => (typeof m.turnIndex === 'number' && m.turnIndex > max ? m.turnIndex : max), -1)
-    if (maxTurnIndex < 0 || turnIndex > maxTurnIndex) return
+    if (maxTurnIndex < 0 || turnIndex > maxTurnIndex) return false
     const numTurns = maxTurnIndex - turnIndex + 1
-    if (numTurns < 1) return
+    if (numTurns < 1) return false
 
     isRollingBack.value = true
     error.value = ''
@@ -5402,8 +5416,10 @@ export function useDesktopState() {
       setTurnErrorForThread(threadId, null)
       pendingThreadsRefresh = true
       await syncFromNotifications()
+      return true
     } catch (unknownError) {
       error.value = unknownError instanceof Error ? unknownError.message : 'Failed to rollback thread'
+      return false
     } finally {
       isRollingBack.value = false
     }
@@ -5646,6 +5662,7 @@ export function useDesktopState() {
         void recoverBridgeState()
         return
       }
+      if (applySharedUnreadState(notification)) return
       applyRealtimeUpdates(notification)
       queueEventDrivenSync(notification)
     })

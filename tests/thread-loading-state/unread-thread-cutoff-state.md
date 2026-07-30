@@ -13,7 +13,7 @@ Unread state is shared through the Codex host so opening a thread on one device 
 1. Load both clients in light theme and confirm existing threads are not all marked unread.
 2. Complete a turn in an unselected thread and confirm it shows a blue unread indicator.
 3. Open that thread from the first client.
-4. Refresh the second client and confirm the indicator is cleared there too.
+4. Without refreshing the second client, confirm the indicator is cleared there too.
 5. Create or receive an update in a second unselected thread, then confirm only that thread is unread.
 6. Switch to dark theme and repeat steps 2 through 5.
 
@@ -21,6 +21,7 @@ Unread state is shared through the Codex host so opening a thread on one device 
 - Existing threads do not become unread merely because of a list refresh or timestamp migration.
 - A completed background turn marks only its own thread unread.
 - Opening a thread clears only that thread and persists the shared read state for other clients.
+- Connected clients receive the shared unread-state update without a full thread-list refresh.
 - Unread indicators remain readable in both light theme and dark theme.
 
 #### Rollback/Cleanup

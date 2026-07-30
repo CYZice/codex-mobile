@@ -707,7 +707,7 @@
                 :data-role="message.role"
               >
                 <button
-                  v-if="showEditMessageButton(message)"
+                v-if="showEditMessageButton(message)"
                   type="button"
                   class="message-edit-button"
                   aria-label="Edit this message"
@@ -716,6 +716,17 @@
                 >
                   <IconTablerFilePencil class="icon-svg message-edit-icon" />
                   <span class="message-edit-label">Edit message</span>
+                </button>
+                <button
+                  v-if="showEditMessageButton(message)"
+                  type="button"
+                  class="message-edit-button"
+                  aria-label="Retry this message"
+                  title="Retry this message"
+                  @click="retryMessage(message.id)"
+                >
+                  <IconTablerArrowBackUp class="icon-svg message-edit-icon" />
+                  <span class="message-edit-label">Retry</span>
                 </button>
                 <button
                   v-if="showForkResponseButton(message)"
@@ -1358,7 +1369,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   forkThread: [payload: { threadId: string; turnIndex: number }]
-  rollback: [payload: { turnId: string }]
+  editMessage: [payload: { turnId: string; message: UiMessage }]
+  retryMessage: [payload: { turnId: string; message: UiMessage }]
   implementPlan: [payload: { turnId: string }]
   revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
@@ -2437,8 +2449,16 @@ function showEditMessageButton(message: UiMessage): boolean {
 
 function editMessage(messageId: string): void {
   const turnId = editableTurnIdByMessageId.value[messageId]
-  if (!turnId) return
-  emit('rollback', { turnId })
+  const message = props.messages.find((item) => item.id === messageId)
+  if (!turnId || !message) return
+  emit('editMessage', { turnId, message })
+}
+
+function retryMessage(messageId: string): void {
+  const turnId = editableTurnIdByMessageId.value[messageId]
+  const message = props.messages.find((item) => item.id === messageId)
+  if (!turnId || !message) return
+  emit('retryMessage', { turnId, message })
 }
 
 function splitPlainTextByLinks(

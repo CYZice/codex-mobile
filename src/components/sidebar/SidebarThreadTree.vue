@@ -1415,6 +1415,20 @@ const unpinnedThreadsByProjectName = computed(() => {
   }
   return map
 })
+const visibleThreadsByProjectName = computed(() => {
+  const map = new Map<string, UiThread[]>()
+  for (const group of filteredGroups.value) {
+    const rows = unpinnedThreadsByProjectName.value.get(group.projectName) ?? []
+    if (isSearchActive.value) {
+      map.set(group.projectName, rows.filter(threadMatchesSearch))
+    } else if (isCollapsed(group.projectName)) {
+      map.set(group.projectName, [])
+    } else {
+      map.set(group.projectName, isExpanded(group.projectName) ? rows : rows.slice(0, 10))
+    }
+  }
+  return map
+})
 const threadTimestampById = computed(() => {
   const map = new Map<string, number>()
   for (const group of props.groups) {
@@ -2893,11 +2907,7 @@ function projectThreads(group: UiProjectGroup): UiThread[] {
 }
 
 function visibleThreads(group: UiProjectGroup): UiThread[] {
-  if (isSearchActive.value) return projectThreads(group)
-  if (isCollapsed(group.projectName)) return []
-
-  const rows = projectThreads(group)
-  return isExpanded(group.projectName) ? rows : rows.slice(0, 10)
+  return visibleThreadsByProjectName.value.get(group.projectName) ?? []
 }
 
 function hasHiddenThreads(group: UiProjectGroup): boolean {

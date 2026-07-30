@@ -440,6 +440,31 @@
                   @update:model-value="onDictationLanguageChange"
                 />
               </div>
+              <button class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
+                <span class="sidebar-settings-label">{{ t('Archived chats') }}</span>
+                <span class="sidebar-settings-value">{{ isArchivedChatsOpen ? t('Hide') : t('Manage') }}</span>
+              </button>
+              <div v-if="isArchivedChatsOpen" class="sidebar-settings-archived-panel">
+                <p v-if="archivedThreadsError" class="sidebar-settings-telegram-error">{{ archivedThreadsError }}</p>
+                <p v-else-if="isLoadingArchivedThreads && archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('Loading archived chats…') }}</p>
+                <p v-else-if="archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('No archived chats') }}</p>
+                <div v-else class="sidebar-settings-archived-list">
+                  <article v-for="thread in archivedThreads" :key="thread.id" class="sidebar-settings-archived-item">
+                    <span class="sidebar-settings-archived-title">{{ thread.title }}</span>
+                    <span v-if="thread.preview" class="sidebar-settings-archived-preview">{{ thread.preview }}</span>
+                    <button type="button" :disabled="isLoadingArchivedThreads" @click="restoreArchivedThread(thread.id)">{{ t('Restore') }}</button>
+                  </article>
+                </div>
+                <button
+                  v-if="archivedThreadCursor"
+                  class="sidebar-settings-telegram-save"
+                  type="button"
+                  :disabled="isLoadingArchivedThreads"
+                  @click="loadArchivedThreads()"
+                >
+                  {{ isLoadingArchivedThreads ? t('Loading…') : t('Load more') }}
+                </button>
+              </div>
               <button class="sidebar-settings-row" type="button" aria-live="polite" @click="isTelegramConfigOpen = !isTelegramConfigOpen">
                 <span class="sidebar-settings-label">{{ t('Telegram') }}</span>
                 <span class="sidebar-settings-value">{{ telegramStatusText }}</span>
@@ -969,7 +994,8 @@
                     :is-loading-persisted-above="isLoadingOlderMessages"
                     :load-earlier-messages="loadOlderMessages"
                     @fork-thread="onForkThreadFromMessage"
-                    @rollback="onRollback"
+                    @edit-message="onEditMessage"
+                    @retry-message="onRetryMessage"
                     @implement-plan="onImplementPlan"
                     @revise-plan="onRevisePlan"
                     @respond-server-request="onRespondServerRequest" />
@@ -1191,6 +1217,7 @@ import {
   getReviewSummary,
   getWorktreeBranchOptions,
   getAccounts,
+  getArchivedThreadGroupsPage,
   completeCodexLogin,
   createLocalDirectory,
   getHomeDirectory,
@@ -1210,8 +1237,9 @@ import {
   startCodexLogin,
   searchThreads,
   switchAccount,
+  unarchiveThread,
 } from './api/codexGateway'
-import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
+import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiMessage, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { PermissionPreset } from './permissions'
 import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
@@ -1558,7 +1586,44 @@ let threadWorktreeSummaryRequestId = 0
 const defaultNewProjectName = ref('New Project (1)')
 const homeDirectory = ref('')
 const isSettingsOpen = ref(false)
+const isArchivedChatsOpen = ref(false)
+const archivedThreads = ref<Array<{ id: string; title: string; preview: string; updatedAtIso: string }>>([])
+const archivedThreadCursor = ref<string | null>(null)
+const isLoadingArchivedThreads = ref(false)
+const archivedThreadsError = ref('')
 const isAccountsSectionCollapsed = ref(loadAccountsSectionCollapsed())
+
+async function loadArchivedThreads(reset = false): Promise<void> {
+  if (isLoadingArchivedThreads.value) return
+  if (!reset && archivedThreadCursor.value === null && archivedThreads.value.length > 0) return
+  isLoadingArchivedThreads.value = true
+  archivedThreadsError.value = ''
+  try {
+    const page = await getArchivedThreadGroupsPage(reset ? null : archivedThreadCursor.value, 50)
+    const rows = page.groups.flatMap((group) => group.threads)
+    archivedThreads.value = reset ? rows : [...archivedThreads.value, ...rows]
+    archivedThreadCursor.value = page.nextCursor
+  } catch (error) {
+    archivedThreadsError.value = error instanceof Error ? error.message : 'Failed to load archived chats'
+  } finally {
+    isLoadingArchivedThreads.value = false
+  }
+}
+
+function toggleArchivedChats(): void {
+  isArchivedChatsOpen.value = !isArchivedChatsOpen.value
+  if (isArchivedChatsOpen.value) void loadArchivedThreads(true)
+}
+
+async function restoreArchivedThread(threadId: string): Promise<void> {
+  try {
+    await unarchiveThread(threadId)
+    archivedThreads.value = archivedThreads.value.filter((thread) => thread.id !== threadId)
+    void refreshAll({ forceThreadRefresh: true })
+  } catch (error) {
+    archivedThreadsError.value = error instanceof Error ? error.message : 'Failed to restore archived chat'
+  }
+}
 const isReviewPaneOpen = ref(false)
 const reviewInitialFilePath = ref('')
 const reviewInitialCommitSha = ref('')
@@ -4175,21 +4240,38 @@ function onInterruptTurn(): void {
   void interruptSelectedThreadTurn()
 }
 
-function onRollback(payload: { turnId: string }): void {
-  const targetTurnId = payload.turnId.trim()
-  if (targetTurnId.length > 0) {
-    const rollbackUserMessage = [...filteredMessages.value]
-      .reverse()
-      .find((message) => (
-        message.role === 'user'
-        && (message.turnId?.trim() ?? '') === targetTurnId
-        && message.text.trim().length > 0
-      ))
-    if (rollbackUserMessage?.text && threadComposerRef.value) {
-      threadComposerRef.value.appendTextToDraft(rollbackUserMessage.text)
-    }
-  }
-  void rollbackSelectedThread(payload.turnId)
+async function onEditMessage(payload: { turnId: string; message: UiMessage }): Promise<void> {
+  const message = payload.message
+  const rolledBack = await rollbackSelectedThread(payload.turnId)
+  if (!rolledBack || !threadComposerRef.value) return
+  threadComposerRef.value.hydrateDraft({
+    text: message.text,
+    imageUrls: message.images ?? [],
+    skills: message.skills ?? [],
+    fileAttachments: (message.fileAttachments ?? []).map((attachment) => ({
+      label: attachment.label,
+      path: attachment.path,
+      fsPath: attachment.path,
+    })),
+  })
+}
+
+async function onRetryMessage(payload: { turnId: string; message: UiMessage }): Promise<void> {
+  const message = payload.message
+  const rolledBack = await rollbackSelectedThread(payload.turnId)
+  if (!rolledBack || isHomeRoute.value || !selectedThreadId.value) return
+  scheduleMobileConversationJumpToLatest()
+  await sendMessageToSelectedThread(
+    message.text,
+    message.images ?? [],
+    message.skills ?? [],
+    'steer',
+    (message.fileAttachments ?? []).map((attachment) => ({
+      label: attachment.label,
+      path: attachment.path,
+      fsPath: attachment.path,
+    })),
+  )
 }
 
 function onImplementPlan(payload: { turnId: string }): void {
@@ -6044,6 +6126,27 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-settings-build-label {
   @apply border-t border-zinc-100 px-3 py-2 text-[11px] text-zinc-500;
+}
+
+.sidebar-settings-archived-panel {
+  @apply flex flex-col gap-2 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700;
+}
+
+.sidebar-settings-archived-list {
+  @apply flex max-h-52 flex-col gap-1 overflow-y-auto;
+}
+
+.sidebar-settings-archived-item {
+  @apply grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 rounded-md bg-zinc-100 px-2 py-1.5 text-sm dark:bg-zinc-800;
+}
+
+.sidebar-settings-archived-title,
+.sidebar-settings-archived-preview {
+  @apply truncate;
+}
+
+.sidebar-settings-archived-preview {
+  @apply col-span-2 text-xs text-zinc-500 dark:text-zinc-400;
 }
 
 /* Provider configuration is managed by the local Codex config/CC Switch.

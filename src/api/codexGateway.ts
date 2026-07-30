@@ -371,6 +371,8 @@ export type GitRepositoryStatus = {
 export type ThreadSearchResult = {
   threadIds: string[]
   indexedThreadCount: number
+  totalThreadCount: number
+  isIndexing: boolean
 }
 
 export type TelegramStatus = {
@@ -745,9 +747,9 @@ export type ThreadTurnPage = {
   turnIndexByTurnId: ThreadTurnIndexById
 }
 
-async function getThreadGroupsPageV2(cursor: string | null, limit: number): Promise<ThreadGroupsPage> {
+async function getThreadGroupsPageV2(cursor: string | null, limit: number, archived = false): Promise<ThreadGroupsPage> {
   const payload = await callRpc<ThreadListResponse>('thread/list', {
-    archived: false,
+    archived,
     limit,
     sortKey: 'updated_at',
     modelProviders: [],
@@ -1452,6 +1454,17 @@ export async function refreshAccountsFromAuth(): Promise<AccountsListResult> {
   return normalizeAccountsListResult(envelope?.data)
 }
 
+export async function getArchivedThreadGroupsPage(
+  cursor: string | null = null,
+  limit = INITIAL_THREAD_LIST_LIMIT,
+): Promise<ThreadGroupsPage> {
+  try {
+    return await getThreadGroupsPageV2(cursor, limit, true)
+  } catch (error) {
+    throw normalizeCodexApiError(error, 'Failed to load archived thread groups', 'thread/list')
+  }
+}
+
 export async function reloadCodexAppServer(): Promise<void> {
   const response = await fetch('/codex-api/runtime/reload', { method: 'POST' })
   const payload = (await response.json()) as unknown
@@ -1577,6 +1590,10 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
 
 export async function archiveThread(threadId: string): Promise<void> {
   await callRpc('thread/archive', { threadId })
+}
+
+export async function unarchiveThread(threadId: string): Promise<void> {
+  await callRpc('thread/unarchive', { threadId })
 }
 
 export async function renameThread(threadId: string, threadName: string): Promise<void> {
@@ -3466,7 +3483,7 @@ export async function searchThreads(
   if (!response.ok) {
     throw new Error(payload.error || 'Failed to search threads')
   }
-  return payload.data ?? { threadIds: [], indexedThreadCount: 0 }
+  return payload.data ?? { threadIds: [], indexedThreadCount: 0, totalThreadCount: 0, isIndexing: false }
 }
 
 export async function configureTelegramBot(
