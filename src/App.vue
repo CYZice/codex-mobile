@@ -1508,6 +1508,7 @@ const terminalStoredQuickCommands = ref<TerminalHeaderQuickCommand[]>(loadTermin
 const terminalHeaderDropdownValue = ref('')
 const editingQueuedMessageState = ref<{ threadId: string; queueIndex: number } | null>(null)
 const isRouteSyncInProgress = ref(false)
+const pendingSidebarThreadId = ref('')
 const directoryTryInFlightKey = ref('')
 let hasPendingRouteSync = false
 const hasInitialized = ref(false)
@@ -2392,6 +2393,8 @@ function onSidebarSearchKeydown(event: KeyboardEvent): void {
 function onSelectThread(threadId: string): void {
   if (!threadId) return
   if (route.name === 'thread' && routeThreadId.value === threadId) return
+  pendingSidebarThreadId.value = threadId
+  void selectThread(threadId)
   void router.push({ name: 'thread', params: { threadId } })
   if (isMobile.value) setSidebarCollapsed(true)
 }
@@ -4679,6 +4682,10 @@ async function syncThreadSelectionWithRoute(): Promise<void> {
         const threadId = routeThreadId.value
         if (!threadId) continue
 
+        if (pendingSidebarThreadId.value && pendingSidebarThreadId.value !== threadId) {
+          continue
+        }
+
         if (selectedThreadId.value !== threadId) {
           const result = await selectThread(threadId)
           if (result === 'not-found') {
@@ -4688,6 +4695,9 @@ async function syncThreadSelectionWithRoute(): Promise<void> {
           void ensureThreadMessagesLoaded(threadId, { silent: true }).catch(() => {
             // The conversation overlay receives the error from useDesktopState.
           })
+        }
+        if (pendingSidebarThreadId.value === threadId) {
+          pendingSidebarThreadId.value = ''
         }
       }
     } while (hasPendingRouteSync)

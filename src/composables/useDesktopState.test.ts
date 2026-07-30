@@ -5,7 +5,6 @@ import {
   filterGroupsByWorkspaceRoots,
   findAdjacentThreadId,
   removeThreadFromGroups,
-  isThreadUnreadByLastRead,
   useDesktopState,
 } from './useDesktopState'
 import type { UiProjectGroup } from '../types/codex'
@@ -24,6 +23,7 @@ const gatewayMocks = vi.hoisted(() => ({
   getThreadDetail: vi.fn(),
   getThreadGroupsPage: vi.fn(),
   getThreadQueueState: vi.fn(),
+  getThreadUnreadState: vi.fn(),
   getThreadTitleCache: vi.fn(),
   getWorkspaceRootsState: vi.fn(),
   removeWorkspaceRootPaths: vi.fn(),
@@ -39,6 +39,7 @@ const gatewayMocks = vi.hoisted(() => ({
   setCodexSpeedMode: vi.fn(),
   setPermissionState: vi.fn(),
   setThreadQueueState: vi.fn(),
+  setThreadUnreadState: vi.fn(),
   setWorkspaceProjectOrder: vi.fn(),
   startThread: vi.fn(),
   startThreadTurn: vi.fn(),
@@ -98,6 +99,7 @@ beforeEach(() => {
   gatewayMocks.getPermissionState.mockResolvedValue({ defaultPreset: 'workspace', threadPresets: {} })
   gatewayMocks.setPermissionState.mockResolvedValue(undefined)
   gatewayMocks.getWorkspaceRootsState.mockRejectedValue(new Error('no workspace roots state'))
+  gatewayMocks.getThreadUnreadState.mockResolvedValue({ threadIds: [] })
 })
 
 afterEach(() => {
@@ -383,25 +385,20 @@ describe('workspace roots project persistence helpers', () => {
   })
 })
 
-describe('thread unread state helpers', () => {
-  const cutoffIso = '2026-05-01T12:00:00.000Z'
+describe('thread unread state', () => {
+  it('uses the shared unread state instead of a local timestamp cutoff', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{ projectName: 'Project', threads: [thread('read', '/tmp/project'), thread('unread', '/tmp/project')] }],
+      nextCursor: null,
+    })
+    gatewayMocks.getThreadUnreadState.mockResolvedValue({ threadIds: ['unread'] })
 
-  it('uses the initialization cutoff when a thread has no read state', () => {
-    expect(isThreadUnreadByLastRead('2026-05-01T11:59:59.000Z', undefined, cutoffIso)).toBe(false)
-    expect(isThreadUnreadByLastRead('2026-05-01T12:00:01.000Z', undefined, cutoffIso)).toBe(true)
-  })
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false })
 
-  it('uses per-thread read state instead of the global cutoff after a thread is read', () => {
-    expect(isThreadUnreadByLastRead(
-      '2026-05-01T12:30:00.000Z',
-      '2026-05-01T12:45:00.000Z',
-      cutoffIso,
-    )).toBe(false)
-    expect(isThreadUnreadByLastRead(
-      '2026-05-01T12:50:00.000Z',
-      '2026-05-01T12:45:00.000Z',
-      cutoffIso,
-    )).toBe(true)
+    expect(state.projectGroups.value[0]?.threads.find((item) => item.id === 'read')?.unread).toBe(false)
+    expect(state.projectGroups.value[0]?.threads.find((item) => item.id === 'unread')?.unread).toBe(true)
   })
 })
 
@@ -629,6 +626,50 @@ describe('startup request deduplication', () => {
     } finally {
       nowSpy.mockRestore()
     }
+  })
+})
+
+describe('forking from a completed response', () => {
+  it('allows a historical fork while the source thread is streaming and removes newer turns from the child', async () => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      messages: [
+        { id: 'user-0', role: 'user', text: 'first request', messageType: 'userMessage', turnIndex: 0 },
+        { id: 'assistant-0', role: 'assistant', text: 'first response', messageType: 'agentMessage', turnIndex: 0 },
+      ],
+      inProgress: true,
+      activeTurnId: 'turn-1',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+    gatewayMocks.forkThread.mockResolvedValue({
+      threadId: 'forked-thread',
+      cwd: '/tmp/project',
+      model: 'gpt-5.5',
+      messages: [
+        { id: 'user-0', role: 'user', text: 'first request', messageType: 'userMessage', turnIndex: 0 },
+        { id: 'assistant-0', role: 'assistant', text: 'first response', messageType: 'agentMessage', turnIndex: 0 },
+        { id: 'user-1', role: 'user', text: 'second request', messageType: 'userMessage', turnIndex: 1 },
+        { id: 'assistant-1', role: 'assistant', text: 'second response', messageType: 'agentMessage', turnIndex: 1 },
+      ],
+    })
+    gatewayMocks.rollbackThread.mockResolvedValue([
+      { id: 'user-0', role: 'user', text: 'first request', messageType: 'userMessage', turnIndex: 0 },
+      { id: 'assistant-0', role: 'assistant', text: 'first response', messageType: 'agentMessage', turnIndex: 0 },
+    ])
+
+    const state = useDesktopState()
+    state.primeSelectedThread('source-thread')
+    await state.loadMessages('source-thread')
+
+    await expect(state.forkThreadFromTurn('source-thread', 0)).resolves.toBe('forked-thread')
+
+    expect(gatewayMocks.forkThread).toHaveBeenCalledWith('source-thread')
+    expect(gatewayMocks.rollbackThread).toHaveBeenCalledWith('forked-thread', 1)
+    expect(state.selectedThreadId.value).toBe('forked-thread')
+    expect(state.messages.value.every((message) => message.turnIndex === undefined || message.turnIndex <= 0)).toBe(true)
   })
 })
 

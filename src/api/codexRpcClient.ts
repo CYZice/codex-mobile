@@ -6,6 +6,10 @@ type RpcRequestBody = {
   params?: unknown
 }
 
+type RpcCallOptions = {
+  timeoutMs?: number
+}
+
 export type RpcNotification = {
   method: string
   params: unknown
@@ -27,8 +31,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-export async function rpcCall<T>(method: string, params?: unknown): Promise<T> {
+export async function rpcCall<T>(method: string, params?: unknown, options: RpcCallOptions = {}): Promise<T> {
   const body: RpcRequestBody = { method, params: params ?? null }
+  const timeoutMs = options.timeoutMs ?? 0
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timeout = controller ? globalThis.setTimeout(() => controller.abort(), timeoutMs) : null
 
   let response: Response
   try {
@@ -38,12 +45,15 @@ export async function rpcCall<T>(method: string, params?: unknown): Promise<T> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: controller?.signal,
     })
   } catch (error) {
     throw new CodexApiError(
       error instanceof Error ? error.message : `RPC ${method} failed before request was sent`,
       { code: 'network_error', method },
     )
+  } finally {
+    if (timeout !== null) globalThis.clearTimeout(timeout)
   }
 
   let payload: unknown = null

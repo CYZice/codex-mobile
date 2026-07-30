@@ -42,4 +42,5 @@ Return to the [manual test index](../../tests.md).
 | [Persisted idle queue recovery](persisted-idle-queue-recovery.md) |
 | [First user message is visible immediately in new chats](first-user-message-is-visible-immediately-in-new-chats.md) |
 | [New chat live thinking and stop controls](new-chat-live-thinking-and-stop-controls.md) |
+| [Fork a completed response while the next turn streams](fork-completed-response-while-next-turn-streams.md) |
 | [Bold URL trailing punctuation parsing](bold-url-trailing-punctuation-parsing.md) |

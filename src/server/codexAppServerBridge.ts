@@ -5411,6 +5411,7 @@ type ThreadTitleCache = { titles: Record<string, string>; order: string[] }
 const MAX_THREAD_TITLES = 500
 const EMPTY_THREAD_TITLE_CACHE: ThreadTitleCache = { titles: {}, order: [] }
 const PINNED_THREAD_IDS_KEY = 'pinned-thread-ids'
+const THREAD_UNREAD_STATE_KEY = 'thread-unread-state'
 
 type SessionIndexThreadTitleCacheState = {
   fileSignature: string | null
@@ -5443,6 +5444,10 @@ function normalizeThreadTitleCache(value: unknown): ThreadTitleCache {
 }
 
 function normalizePinnedThreadIds(value: unknown): string[] {
+  return normalizeStringArray(value)
+}
+
+function normalizeThreadUnreadState(value: unknown): string[] {
   return normalizeStringArray(value)
 }
 
@@ -5565,6 +5570,35 @@ async function writePinnedThreadIds(threadIds: string[]): Promise<void> {
 
   payload[PINNED_THREAD_IDS_KEY] = normalizePinnedThreadIds(threadIds)
   await writeFile(statePath, JSON.stringify(payload), 'utf8')
+}
+
+async function readThreadUnreadState(): Promise<string[]> {
+  const statePath = getCodexGlobalStatePath()
+  try {
+    const raw = await readFile(statePath, 'utf8')
+    const payload = asRecord(JSON.parse(raw)) ?? {}
+    return normalizeThreadUnreadState(payload[THREAD_UNREAD_STATE_KEY])
+  } catch {
+    return []
+  }
+}
+
+async function setThreadUnreadState(threadId: string, unread: boolean): Promise<string[]> {
+  const statePath = getCodexGlobalStatePath()
+  let payload: Record<string, unknown> = {}
+  try {
+    const raw = await readFile(statePath, 'utf8')
+    payload = asRecord(JSON.parse(raw)) ?? {}
+  } catch {
+    payload = {}
+  }
+  const current = new Set(normalizeThreadUnreadState(payload[THREAD_UNREAD_STATE_KEY]))
+  if (unread) current.add(threadId)
+  else current.delete(threadId)
+  const next = [...current]
+  payload[THREAD_UNREAD_STATE_KEY] = next
+  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+  return next
 }
 
 const FIRST_LAUNCH_PLUGINS_CARD_DISMISSED_KEY = 'first-launch-plugins-card-dismissed'
@@ -9859,6 +9893,22 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       if (req.method === 'GET' && url.pathname === '/codex-api/thread-pins') {
         const threadIds = await readPinnedThreadIds()
         setJson(res, 200, { data: { threadIds } })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/thread-unread-state') {
+        setJson(res, 200, { data: { threadIds: await readThreadUnreadState() } })
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/thread-unread-state') {
+        const payload = asRecord(await readJsonBody(req))
+        const threadId = typeof payload?.threadId === 'string' ? payload.threadId.trim() : ''
+        if (!threadId || typeof payload?.unread !== 'boolean') {
+          setJson(res, 400, { error: 'threadId and unread are required' })
+          return
+        }
+        setJson(res, 200, { data: { threadIds: await setThreadUnreadState(threadId, payload.unread) } })
         return
       }
 

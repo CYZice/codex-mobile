@@ -565,9 +565,9 @@ export function pickCodexRateLimitSnapshot(payload: unknown): UiRateLimitSnapsho
   return normalizeRateLimitSnapshot(record.rateLimits ?? record.rate_limits)
 }
 
-async function callRpc<T>(method: string, params?: unknown): Promise<T> {
+async function callRpc<T>(method: string, params?: unknown, options?: { timeoutMs?: number }): Promise<T> {
   try {
-    return await rpcCall<T>(method, params)
+    return await rpcCall<T>(method, params, options)
   } catch (error) {
     throw normalizeCodexApiError(error, `RPC ${method} failed`, method)
   }
@@ -792,7 +792,7 @@ async function getThreadDetailV2(threadId: string): Promise<{
   const payload = await callRpc<ThreadReadResponse>('thread/read', {
     threadId,
     includeTurns: true,
-  })
+  }, { timeoutMs: 15_000 })
   const startTurnIndex = readThreadTurnStartIndex(payload)
   const normalized = normalizeThreadMessagesV2(payload, startTurnIndex)
   return {
@@ -1543,7 +1543,7 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
   if (existing) return existing
 
   const promise = (async () => {
-    const payload = await callRpc<ThreadResumeResponse>('thread/resume', { threadId })
+    const payload = await callRpc<ThreadResumeResponse>('thread/resume', { threadId }, { timeoutMs: 15_000 })
     const startTurnIndex = readThreadTurnStartIndex(payload)
     const messages = normalizeThreadMessagesV2(payload, startTurnIndex)
     return {
@@ -3560,6 +3560,7 @@ function getErrorMessageFromPayload(payload: unknown, fallback: string): string 
 
 export type ThreadTitleCache = { titles: Record<string, string>; order: string[] }
 export type ThreadPinnedState = { threadIds: string[] }
+export type ThreadUnreadState = { threadIds: string[] }
 export type FirstLaunchPluginsCardPreference = { dismissed: boolean }
 
 export async function getThreadTitleCache(): Promise<ThreadTitleCache> {
@@ -3606,6 +3607,27 @@ export async function persistPinnedThreadIds(threadIds: string[]): Promise<void>
   } catch {
     // Best-effort persist
   }
+}
+
+export async function getThreadUnreadState(): Promise<ThreadUnreadState> {
+  try {
+    const response = await fetch('/codex-api/thread-unread-state', { cache: 'no-store' })
+    if (!response.ok) return { threadIds: [] }
+    const envelope = (await response.json()) as { data?: ThreadUnreadState }
+    return { threadIds: Array.isArray(envelope.data?.threadIds) ? envelope.data.threadIds.filter((id): id is string => typeof id === 'string') : [] }
+  } catch {
+    return { threadIds: [] }
+  }
+}
+
+export async function setThreadUnreadState(threadId: string, unread: boolean): Promise<void> {
+  const normalizedThreadId = threadId.trim()
+  if (!normalizedThreadId) return
+  await fetch('/codex-api/thread-unread-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId: normalizedThreadId, unread }),
+  })
 }
 
 export async function getFirstLaunchPluginsCardPreference(): Promise<FirstLaunchPluginsCardPreference> {

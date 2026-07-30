@@ -702,7 +702,7 @@
               </section>
 
               <div
-                v-if="showCopyResponseButton(message) || showEditMessageButton(message)"
+                v-if="showCopyResponseButton(message) || showEditMessageButton(message) || showForkResponseButton(message)"
                 class="message-toolbar"
                 :data-role="message.role"
               >
@@ -1911,7 +1911,7 @@ function showCopyResponseButton(message: UiMessage): boolean {
 }
 
 function showForkResponseButton(message: UiMessage): boolean {
-  return !isLiveTurnRuntime.value && typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
+  return typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
 }
 
 function mergeFileChangeDiff(first: string, second: string): string {
@@ -4713,6 +4713,16 @@ onBeforeUnmount(() => {
 
 .message-row:hover .message-toolbar {
   @apply opacity-100;
+}
+
+.message-toolbar:focus-within {
+  @apply opacity-100;
+}
+
+@media (hover: none) {
+  .message-toolbar {
+    @apply opacity-100;
+  }
 }
 
 .message-copy-button {
