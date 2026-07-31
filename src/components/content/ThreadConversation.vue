@@ -214,7 +214,11 @@
 
         <div v-else class="message-row" :data-role="message.role" :data-message-type="message.messageType || ''">
           <div class="message-stack" :data-role="message.role">
-            <article class="message-body" :data-role="message.role">
+            <article
+              class="message-body"
+              :class="{ 'message-body--editing': isInlineEditingMessage(message) }"
+              :data-role="message.role"
+            >
               <ul
                 v-if="message.images && message.images.length > 0"
                 class="message-image-list"
@@ -263,6 +267,37 @@
               </div>
 
               <article v-if="message.text.length > 0" class="message-card" :data-role="message.role">
+                <div v-if="isInlineEditingMessage(message)" class="message-inline-editor">
+                  <textarea
+                    v-model="inlineEditDraft"
+                    class="message-inline-editor-input"
+                    :aria-label="t('Edit message')"
+                    :disabled="isInlineEditSubmitting"
+                    @keydown.ctrl.enter.prevent="submitInlineEdit(message)"
+                    @keydown.meta.enter.prevent="submitInlineEdit(message)"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                  />
+                  <div class="message-inline-editor-actions">
+                    <button
+                      type="button"
+                      class="message-inline-editor-cancel"
+                      :disabled="isInlineEditSubmitting"
+                      @click="cancelInlineEdit"
+                    >
+                      {{ t('Cancel') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="message-inline-editor-send"
+                      :disabled="isInlineEditSubmitting || inlineEditDraft.trim().length === 0"
+                      @click="submitInlineEdit(message)"
+                    >
+                      <span v-if="isInlineEditSubmitting" class="message-inline-editor-spinner" aria-hidden="true" />
+                      {{ t('Send') }}
+                    </button>
+                  </div>
+                </div>
+                <template v-else>
                 <div v-if="message.isAutomationRun" class="automation-message-label">
                   <span>Sent via automation</span>
                   <code v-if="message.automationDisplayName">{{ message.automationDisplayName }}</code>
@@ -613,6 +648,7 @@
                 >
                   Send feedback
                 </a>
+                </template>
               </article>
 
               <section v-if="readAnchoredFileChangeSummary(message)" class="file-change-summary-block file-change-summary-block-inline">
@@ -702,7 +738,7 @@
               </section>
 
               <div
-                v-if="showCopyResponseButton(message) || showEditMessageButton(message) || showForkResponseButton(message)"
+                v-if="!isInlineEditingMessage(message) && (showCopyResponseButton(message) || showEditMessageButton(message) || showForkResponseButton(message))"
                 class="message-toolbar"
                 :data-role="message.role"
               >
@@ -945,6 +981,7 @@ import type { UiFileChange, UiLiveOverlay, UiMessage, UiPlanStep, UiServerReques
 import { updateThreadFileChanges } from '../../api/codexGateway'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
 import { useMobile } from '../../composables/useMobile'
+import { useUiLanguage } from '../../composables/useUiLanguage'
 import { copyTextToClipboard, copyTextWithSelectionFallback } from '../../utils/clipboard'
 
 import IconTablerArrowBackUp from '../icons/IconTablerArrowBackUp.vue'
@@ -972,6 +1009,7 @@ const fileLinkContextMenuY = ref(0)
 const fileLinkContextBrowseUrl = ref('')
 const fileLinkContextEditUrl = ref('')
 const { isMobile } = useMobile()
+const { t } = useUiLanguage()
 const { buildFeedbackMailto, feedbackMailtoBase, recordVisibleFailure } = useFeedbackDiagnostics()
 const feedbackMailto = feedbackMailtoBase()
 
@@ -1369,7 +1407,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   forkThread: [payload: { threadId: string; turnIndex: number }]
-  editMessage: [payload: { turnId: string; message: UiMessage }]
+  editMessage: [payload: {
+    turnId: string
+    message: UiMessage
+    text: string
+    onComplete: (success: boolean) => void
+  }]
   retryMessage: [payload: { turnId: string; message: UiMessage }]
   implementPlan: [payload: { turnId: string }]
   revisePlan: [payload: { turnId: string; text: string }]
@@ -1380,6 +1423,9 @@ const conversationListRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const modalImageUrl = ref('')
 const copiedResponseAnchorId = ref('')
+const inlineEditingMessageId = ref('')
+const inlineEditDraft = ref('')
+const isInlineEditSubmitting = ref(false)
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
 const fileChangeActionError = ref<Record<string, string>>({})
 const fileChangeRedoPatchIds = ref<Record<string, string[]>>({})
@@ -2451,7 +2497,44 @@ function editMessage(messageId: string): void {
   const turnId = editableTurnIdByMessageId.value[messageId]
   const message = props.messages.find((item) => item.id === messageId)
   if (!turnId || !message) return
-  emit('editMessage', { turnId, message })
+  inlineEditingMessageId.value = message.id
+  inlineEditDraft.value = message.text
+  void nextTick(() => {
+    window.requestAnimationFrame(() => {
+      const input = conversationListRef.value?.querySelector<HTMLTextAreaElement>('.message-inline-editor-input')
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+  })
+}
+
+function isInlineEditingMessage(message: UiMessage): boolean {
+  return inlineEditingMessageId.value === message.id
+}
+
+function cancelInlineEdit(): void {
+  if (isInlineEditSubmitting.value) return
+  inlineEditingMessageId.value = ''
+  inlineEditDraft.value = ''
+}
+
+function submitInlineEdit(message: UiMessage): void {
+  const turnId = editableTurnIdByMessageId.value[message.id]
+  const text = inlineEditDraft.value.trim()
+  if (!turnId || !text || isInlineEditSubmitting.value) return
+  isInlineEditSubmitting.value = true
+  emit('editMessage', {
+    turnId,
+    message,
+    text,
+    onComplete: (success) => {
+      isInlineEditSubmitting.value = false
+      if (!success) return
+      inlineEditingMessageId.value = ''
+      inlineEditDraft.value = ''
+    },
+  })
 }
 
 function retryMessage(messageId: string): void {
@@ -4727,6 +4810,11 @@ onBeforeUnmount(() => {
   align-self: flex-end;
 }
 
+.message-body[data-role='user'].message-body--editing {
+  width: 100%;
+  align-self: stretch;
+}
+
 .message-toolbar {
   @apply mt-1 self-start flex items-center gap-1 opacity-[0.01] transition-opacity duration-200;
 }
@@ -5195,6 +5283,47 @@ onBeforeUnmount(() => {
   width: fit-content;
   margin-left: auto;
   align-self: flex-end;
+}
+
+.message-card[data-role='user']:has(.message-inline-editor) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.message-inline-editor {
+  @apply flex min-w-0 flex-col gap-3;
+}
+
+.message-inline-editor-input {
+  @apply min-h-28 w-full resize-y border-0 bg-transparent p-0 text-base leading-relaxed text-zinc-950 outline-none;
+}
+
+.message-inline-editor-actions {
+  @apply flex items-center justify-end gap-2;
+}
+
+.message-inline-editor-cancel,
+.message-inline-editor-send {
+  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.message-inline-editor-cancel {
+  @apply border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50;
+}
+
+.message-inline-editor-send {
+  @apply border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800;
+}
+
+.message-inline-editor-spinner {
+  @apply h-4 w-4 rounded-full border-2 border-white/40 border-t-white;
+  animation: message-inline-editor-spin 0.8s linear infinite;
+}
+
+@keyframes message-inline-editor-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .automation-message-label {

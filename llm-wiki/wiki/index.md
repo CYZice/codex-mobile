@@ -21,6 +21,7 @@
 - [../raw/features/integrated-terminal.md](../raw/features/integrated-terminal.md): source facts for the integrated terminal implementation and follow-up tests.
 - [../raw/features/directory-hub-composio-skills-search.md](../raw/features/directory-hub-composio-skills-search.md): source facts for Directory Hub, Composio connectors, Skills search/install, and edge-case tests.
 - [../raw/features/realtime-chat-rendering-inline-media.md](../raw/features/realtime-chat-rendering-inline-media.md): source facts for realtime chat rendering and inline media sanitization.
+- [../raw/features/inline-user-message-edit.md](../raw/features/inline-user-message-edit.md): source facts for Codex Desktop-style inline user-message editing and direct retry.
 - [../raw/features/skills-route-ui-and-first-launch-card.md](../raw/features/skills-route-ui-and-first-launch-card.md): source facts for the Skills route rename, first-launch Plugins card, dark-theme fix, and dev-server workflow adjustment.
 - [../raw/features/thread-heartbeat-automations.md](../raw/features/thread-heartbeat-automations.md): source facts for thread heartbeat automations, multiple automations per thread, and Run now queue behavior.
 - [../raw/features/project-cron-automations.md](../raw/features/project-cron-automations.md): source facts for project cron automations in the sidebar.

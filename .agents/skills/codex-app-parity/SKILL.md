@@ -806,3 +806,11 @@ After each feature implementation session that uses this skill:
 - Native Codex mobile keeps the active model and thinking level in one compact composer pill instead of giving the level a separate row.
 - Its menu exposes the thinking levels directly, then provides a secondary Model row that enters model selection; this keeps the two settings logically grouped while preserving independent values.
 - A horizontally scrollable control row is preferable to wrapping a standalone thinking chip below the model on narrow browsers.
+
+## Findings: Inline User Message Editing (2026-07-31)
+
+- Codex Desktop edits a persisted user message in place by replacing the original message bubble with an inline text editor and Cancel/Send actions.
+- Entering or cancelling edit mode is local UI state and should not roll back the thread or hydrate the bottom composer.
+- Confirming an edit rolls the thread back to the selected user turn and resends the edited text with the original attachments and skill selections.
+- Retry remains a direct rollback-and-resend action; it does not need to expose the original text in the bottom composer.
+- On Windows, when no reusable Codex CDP endpoint is available, a user-provided native screenshot can serve as the preserved reference artifact without restarting their active Desktop session.

@@ -11,6 +11,7 @@ The current implementation optimizes both enough for browser delivery: unchanged
 
 Sources:
 - [Realtime chat rendering and inline media notes](../../raw/features/realtime-chat-rendering-inline-media.md)
+- [Inline user-message editing reference](../../raw/features/inline-user-message-edit.md)
 - [Integrated terminal source](../../raw/features/integrated-terminal.md)
 
 ## Frontend Rendering Model
@@ -61,6 +62,15 @@ Review-bot comments on this path should be verified against current code before 
 
 Source:
 - [Codex thread link rendering and PR #174 review follow-up](../../raw/fixes/codex-thread-link-pr174.md)
+
+## Persisted User-Message Actions
+
+Persisted user messages use two rollback-backed actions:
+
+- Edit first opens an editor inside the original message bubble. Cancel is local-only; Send rolls the thread back from that turn and immediately resends the edited text with the original attachments.
+- Retry does not open an editor. It rolls back from the selected turn and immediately resends the original message.
+
+The bottom composer is not used for either flow. A rollback failure keeps the inline draft available; a resend failure after rollback is surfaced through the existing thread error state.
 
 ## Verification Notes
 

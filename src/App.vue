@@ -4260,20 +4260,35 @@ function onInterruptTurn(): void {
   void interruptSelectedThreadTurn()
 }
 
-async function onEditMessage(payload: { turnId: string; message: UiMessage }): Promise<void> {
+async function onEditMessage(payload: {
+  turnId: string
+  message: UiMessage
+  text: string
+  onComplete: (success: boolean) => void
+}): Promise<void> {
   const message = payload.message
   const rolledBack = await rollbackSelectedThread(payload.turnId)
-  if (!rolledBack || !threadComposerRef.value) return
-  threadComposerRef.value.hydrateDraft({
-    text: message.text,
-    imageUrls: message.images ?? [],
-    skills: message.skills ?? [],
-    fileAttachments: (message.fileAttachments ?? []).map((attachment) => ({
-      label: attachment.label,
-      path: attachment.path,
-      fsPath: attachment.path,
-    })),
-  })
+  if (!rolledBack || isHomeRoute.value || !selectedThreadId.value) {
+    payload.onComplete(false)
+    return
+  }
+  try {
+    scheduleMobileConversationJumpToLatest()
+    await sendMessageToSelectedThread(
+      payload.text,
+      message.images ?? [],
+      message.skills ?? [],
+      'steer',
+      (message.fileAttachments ?? []).map((attachment) => ({
+        label: attachment.label,
+        path: attachment.path,
+        fsPath: attachment.path,
+      })),
+    )
+    payload.onComplete(true)
+  } catch {
+    payload.onComplete(false)
+  }
 }
 
 async function onRetryMessage(payload: { turnId: string; message: UiMessage }): Promise<void> {

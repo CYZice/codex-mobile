@@ -783,6 +783,22 @@
   @apply bg-zinc-700;
 }
 
+:root.dark .message-inline-editor-input {
+  @apply text-zinc-100;
+}
+
+:root.dark .message-inline-editor-cancel {
+  @apply border-zinc-500 bg-zinc-700 text-zinc-100 hover:bg-zinc-600;
+}
+
+:root.dark .message-inline-editor-send {
+  @apply border-zinc-100 bg-zinc-100 text-zinc-950 hover:bg-white;
+}
+
+:root.dark .message-inline-editor-spinner {
+  @apply border-zinc-500 border-t-zinc-950;
+}
+
 :root.dark .automation-message-label {
   @apply text-zinc-400;
 }
