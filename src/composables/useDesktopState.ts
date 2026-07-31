@@ -1956,7 +1956,7 @@ export function useDesktopState() {
       error.value = ''
       setTurnSummaryForThread(threadId, null)
       setTurnActivityForThread(threadId, {
-        label: 'Thinking',
+        label: 'Sending message',
         details: buildPendingTurnDetails(MODEL_FALLBACK_ID, pending.effort, pending.collaborationMode),
       })
       setThreadInProgress(threadId, true)
@@ -3234,7 +3234,7 @@ export function useDesktopState() {
       return {
         threadId,
         activity: {
-          label: 'Thinking',
+          label: 'Starting turn',
           details: [],
         },
       }
@@ -5032,19 +5032,22 @@ export function useDesktopState() {
 
     if (isInProgress) {
       shouldAutoScrollOnNextAgentEvent = true
-      void startTurnForThread(
-        threadId,
-        nextText,
-        imageUrls,
-        skills,
-        fileAttachments,
-        collaborationModeOverride,
-        permissionPreset,
-      ).catch((unknownError) => {
+      try {
+        await startTurnForThread(
+          threadId,
+          nextText,
+          imageUrls,
+          skills,
+          fileAttachments,
+          collaborationModeOverride,
+          permissionPreset,
+        )
+      } catch (unknownError) {
         const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
         setTurnErrorForThread(threadId, errorMessage)
         error.value = errorMessage
-      })
+        throw unknownError
+      }
       return
     }
 
@@ -5054,7 +5057,7 @@ export function useDesktopState() {
     setTurnActivityForThread(
       threadId,
       {
-        label: 'Thinking',
+        label: 'Sending message',
         details: buildPendingTurnDetails(
           readModelIdForThread(threadId),
           selectedReasoningEffort.value,
@@ -5150,7 +5153,7 @@ export function useDesktopState() {
       setTurnActivityForThread(
         threadId,
         {
-          label: 'Thinking',
+          label: 'Starting turn',
           details: buildPendingTurnDetails(
             readModelIdForThread(threadId),
             selectedReasoningEffort.value,
@@ -5310,7 +5313,7 @@ export function useDesktopState() {
       }
 
       pendingThreadMessageRefresh.add(threadId)
-      await syncFromNotifications()
+      void syncFromNotifications()
       scheduleDelayedTurnSync(threadId)
     } catch (unknownError) {
       throw unknownError

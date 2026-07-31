@@ -1271,7 +1271,7 @@ describe('provider model selection', () => {
       }),
     ])
     expect(state.selectedLiveOverlay.value).toMatchObject({
-      activityLabel: 'Thinking',
+      activityLabel: 'Sending message',
       reasoningText: '',
       errorText: '',
     })

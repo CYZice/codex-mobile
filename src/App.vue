@@ -959,6 +959,7 @@
                   :thread-token-usage="selectedThreadTokenUsage"
                   :codex-quota="codexQuota"
                   :is-turn-in-progress="false"
+                  :is-submitting="isHomeComposerSubmitting"
                   :is-stop-pending="false"
                   :is-interrupting-turn="false" :send-with-enter="sendWithEnter" :in-progress-submit-mode="inProgressSendMode"
                   :dictation-click-to-toggle="dictationClickToToggle" :dictation-auto-send="dictationAutoSend"
@@ -1047,6 +1048,7 @@
                     :thread-token-usage="selectedThreadTokenUsage"
                     :codex-quota="codexQuota"
                     :is-turn-in-progress="isSelectedThreadInProgress"
+                    :is-submitting="isThreadComposerSubmitting"
                     :is-stop-pending="isSelectedThreadInterruptPending"
                     :is-interrupting-turn="isInterruptingTurn"
                     :has-queue-above="selectedThreadQueuedMessages.length > 0"
@@ -1524,6 +1526,8 @@ function prepareFeedbackLink(event: MouseEvent, message?: string): void {
 }
 const homeThreadComposerRef = ref<ThreadComposerExposed | null>(null)
 const threadComposerRef = ref<ThreadComposerExposed | null>(null)
+const isHomeComposerSubmitting = ref(false)
+const isThreadComposerSubmitting = ref(false)
 const threadConversationRef = ref<{ jumpToLatest: () => void } | null>(null)
 const homeTerminalPanelRef = ref<ThreadTerminalPanelExposed | null>(null)
 const threadTerminalPanelRef = ref<ThreadTerminalPanelExposed | null>(null)
@@ -3478,7 +3482,7 @@ async function syncAfterMobileResume(): Promise<void> {
   }
 }
 
-function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fileAttachments: Array<{ label: string; path: string; fsPath: string }>; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): void {
+async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fileAttachments: Array<{ label: string; path: string; fsPath: string }>; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): Promise<void> {
   const text = payload.text
   scheduleMobileConversationJumpToLatest()
   const editingState = editingQueuedMessageState.value
@@ -3490,10 +3494,26 @@ function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fil
       : undefined
   editingQueuedMessageState.value = null
   if (isHomeRoute.value) {
-    void submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills, payload.fileAttachments)
+    isHomeComposerSubmitting.value = true
+    try {
+      await submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills, payload.fileAttachments)
+      if (!isHomeRoute.value) {
+        homeThreadComposerRef.value?.completeSubmission()
+      }
+    } finally {
+      isHomeComposerSubmitting.value = false
+    }
     return
   }
-  void sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
+  isThreadComposerSubmitting.value = true
+  try {
+    await sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
+    threadComposerRef.value?.completeSubmission()
+  } catch {
+    // Keep the draft intact so the user can correct or resend it.
+  } finally {
+    isThreadComposerSubmitting.value = false
+  }
 }
 
 function onEditQueuedMessage(messageId: string): void {

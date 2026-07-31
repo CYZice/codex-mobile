@@ -349,12 +349,13 @@
             class="thread-composer-submit"
             :class="{ 'thread-composer-submit--queue': isTurnInProgress && activeInProgressMode === 'queue' }"
             type="button"
-            :aria-label="isTurnInProgress && activeInProgressMode === 'queue' ? t('Queue message') : t('Send message')"
-            :title="isTurnInProgress ? `${t('Send')} ${activeInProgressMode === 'queue' ? t('Queue') : t('Steer')}` : t('Send')"
+            :aria-label="isSubmitting ? t('Sending message') : (isTurnInProgress && activeInProgressMode === 'queue' ? t('Queue message') : t('Send message'))"
+            :title="isSubmitting ? t('Sending message') : (isTurnInProgress ? `${t('Send')} ${activeInProgressMode === 'queue' ? t('Queue') : t('Steer')}` : t('Send'))"
             :disabled="!canSubmit"
             @click="onSubmit(isTurnInProgress ? activeInProgressMode : 'steer')"
           >
-            <IconTablerArrowUp class="thread-composer-submit-icon" />
+            <span v-if="isSubmitting" class="thread-composer-stop-spinner" aria-hidden="true" />
+            <IconTablerArrowUp v-else class="thread-composer-submit-icon" />
           </button>
         </div>
       </div>
@@ -460,6 +461,7 @@ const props = defineProps<{
   isStopPending?: boolean
   isInterruptingTurn?: boolean
   isUpdatingSpeedMode?: boolean
+  isSubmitting?: boolean
   disabled?: boolean
   hasQueueAbove?: boolean
   sendWithEnter?: boolean
@@ -490,6 +492,7 @@ export type ThreadComposerExposed = {
   hydrateDraft: (payload: ComposerDraftPayload) => void
   appendTextToDraft: (text: string) => void
   hasUnsavedDraft: () => boolean
+  completeSubmission: () => void
 }
 
 const emit = defineEmits<{
@@ -656,6 +659,7 @@ const skillDropdownOptions = computed(() =>
 
 const canSubmit = computed(() => {
   if (props.disabled) return false
+  if (props.isSubmitting) return false
   if (props.isUpdatingSpeedMode) return false
   if (!props.activeThreadId) return false
   if (isPlanModeWaitingForModel.value) return false
@@ -676,8 +680,8 @@ const standaloneFileAttachments = computed(() => {
   }
   return fileAttachments.value.filter((att) => !grouped.has(att.fsPath))
 })
-const isInteractionDisabled = computed(() => props.disabled || !props.activeThreadId)
-const isComposerConfigDisabled = computed(() => props.disabled || !props.activeThreadId)
+const isInteractionDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
+const isComposerConfigDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
 const isFastModeSupported = computed(() => /^gpt-5\.(?:4|5)(?:$|-)/.test(props.selectedModel.trim()))
 const showFastModeModelIcon = computed(() =>
   props.selectedSpeedMode === 'fast' && isFastModeSupported.value,
@@ -983,17 +987,6 @@ function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
     skills: selectedSkills.value.map((s) => ({ name: s.name, path: s.path })),
     mode,
   })
-  clearPersistedDraftForThread(props.activeThreadId)
-  clearDraftState()
-  isComposerExpanded.value = false
-  folderUploadGroups.value = []
-  isAttachMenuOpen.value = false
-  closeFileMention()
-  if (isAndroid || isMobile.value) {
-    inputRef.value?.blur()
-    return
-  }
-  nextTick(() => inputRef.value?.focus())
 }
 
 function setActiveInProgressMode(mode: 'steer' | 'queue'): void {
@@ -1150,6 +1143,19 @@ function onModelSelect(value: string): void {
 
 function toggleCollaborationMode(): void {
   emit('update:selected-collaboration-mode', isPlanModeSelected.value ? 'default' : 'plan')
+}
+
+function completeSubmission(): void {
+  clearPersistedDraftForThread(props.activeThreadId)
+  clearDraftState()
+  folderUploadGroups.value = []
+  isAttachMenuOpen.value = false
+  closeFileMention()
+  if (isAndroid || isMobile.value) {
+    inputRef.value?.blur()
+    return
+  }
+  nextTick(() => inputRef.value?.focus())
 }
 
 function onPermissionPresetSelected(preset: PermissionPreset): void {
@@ -1852,6 +1858,7 @@ defineExpose<ThreadComposerExposed>({
   hydrateDraft,
   appendTextToDraft,
   hasUnsavedDraft: () => hasUnsavedDraft.value,
+  completeSubmission,
 })
 
 onBeforeUnmount(() => {
