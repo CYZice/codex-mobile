@@ -57,8 +57,15 @@ function Invoke-CodexAppTask([string]$Action) {
 }
 
 function Install-Package([string]$Path) {
-  & npm.cmd install -g $Path *>> $LogPath
-  if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE." }
+  $previous = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & npm.cmd install -g $Path *>> $LogPath
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+  if ($exitCode -ne 0) { throw "npm install failed with exit code $exitCode." }
 }
 
 function Read-PackageVersion([string]$Path) {
@@ -104,8 +111,15 @@ try {
   New-Item -ItemType Directory -Force -Path $RollbackDir | Out-Null
   Push-Location $InstalledModule
   try {
-    & npm.cmd pack --ignore-scripts --pack-destination $RollbackDir *>> $LogPath
-    if ($LASTEXITCODE -ne 0) { throw "npm pack failed with exit code $LASTEXITCODE." }
+    $previous = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = 'Continue'
+      & npm.cmd pack --ignore-scripts --pack-destination $RollbackDir *>> $LogPath
+      $exitCode = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previous
+    }
+    if ($exitCode -ne 0) { throw "npm pack failed with exit code $exitCode." }
   } finally {
     Pop-Location
   }
