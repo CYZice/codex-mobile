@@ -2593,10 +2593,11 @@ export function useDesktopState() {
     imageUrls: string[] = [],
     skills: Array<{ name: string; path: string }> = [],
     fileAttachments: FileAttachment[] = [],
-  ): void {
+  ): string {
     const existing = persistedMessagesByThreadId.value[threadId] ?? []
+    const messageId = `optimistic-user:${threadId}:${Date.now()}`
     const nextMessage: UiMessage = {
-      id: `optimistic-user:${threadId}:${Date.now()}`,
+      id: messageId,
       role: 'user',
       text,
       images: imageUrls.length > 0 ? [...imageUrls] : undefined,
@@ -2605,6 +2606,15 @@ export function useDesktopState() {
       messageType: 'userMessage.optimistic',
     }
     setPersistedMessagesForThread(threadId, [...existing, nextMessage])
+    return messageId
+  }
+
+  function removeOptimisticUserMessage(threadId: string, messageId: string): void {
+    if (!threadId || !messageId) return
+    const existing = persistedMessagesByThreadId.value[threadId] ?? []
+    const nextMessages = existing.filter((message) => message.id !== messageId)
+    if (nextMessages.length === existing.length) return
+    setPersistedMessagesForThread(threadId, nextMessages)
   }
 
   function setLiveAgentMessagesForThread(threadId: string, nextMessages: UiMessage[]): void {
@@ -5028,7 +5038,7 @@ export function useDesktopState() {
     // Keep the submitted prompt visible while the app-server persists the next
     // turn. New threads already do this; selected threads must follow the same
     // optimistic path so Thinking never replaces the user's message.
-    appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+    const optimisticMessageId = appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
 
     if (isInProgress) {
       shouldAutoScrollOnNextAgentEvent = true
@@ -5043,6 +5053,7 @@ export function useDesktopState() {
           permissionPreset,
         )
       } catch (unknownError) {
+        removeOptimisticUserMessage(threadId, optimisticMessageId)
         const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
         setTurnErrorForThread(threadId, errorMessage)
         error.value = errorMessage
@@ -5084,6 +5095,7 @@ export function useDesktopState() {
       )
     } catch (unknownError) {
       shouldAutoScrollOnNextAgentEvent = false
+      removeOptimisticUserMessage(threadId, optimisticMessageId)
       setThreadInProgress(threadId, false)
       setTurnActivityForThread(threadId, null)
       const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'

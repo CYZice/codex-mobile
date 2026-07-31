@@ -77,6 +77,7 @@
             class="thread-composer-skill-chip-remove"
             type="button"
             :aria-label="`Remove skill ${skill.displayName || skill.name}`"
+            :disabled="isInteractionDisabled"
             @click="removeSkill(skill.path)"
           >×</button>
         </span>
