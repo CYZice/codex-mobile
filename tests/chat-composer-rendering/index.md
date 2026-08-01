@@ -13,6 +13,7 @@ Return to the [manual test index](../../tests.md).
 | [Composer expands long drafts to full screen](composer-expands-long-drafts-to-full-screen.md) |
 | [Composer mode scoping and Fast mode support](composer-mode-scoping-and-fast-mode-support.md) |
 | [Composer controls stay editable during responses](composer-controls-stay-editable-during-responses.md) |
+| [Native steer during an active turn and draft recovery](native-steer-active-turn-and-draft-recovery.md) |
 | [Thread permissions](thread-permissions.md) |
 | [Feature: Markdown file links with backticked filename labels render correctly](markdown-file-links-with-backticked-filename-labels-render-correctly.md) |
 | [Feature: Sandbox approval requests recognize newer Codex payloads](sandbox-approval-requests-recognize-newer-codex-payloads.md) |

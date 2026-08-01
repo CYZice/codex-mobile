@@ -38,6 +38,7 @@ import {
   startThread,
   subscribeCodexNotifications,
   startThreadTurn,
+  steerThreadTurn,
   type RpcNotification,
   type AvailableModel,
   type SkillInfo,
@@ -121,6 +122,11 @@ function isThreadNotFoundError(error: unknown): boolean {
   if (error instanceof CodexApiError && error.status === 404) return true
   const message = error instanceof Error ? error.message : String(error ?? '')
   return /\b404\b|thread.*not found|conversation.*not found|no such thread|no rollout found for thread id/i.test(message)
+}
+
+function isActiveTurnNoLongerAvailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /expectedturnid|expected turn|active turn|in.?flight turn|no active turn/i.test(message)
 }
 
 function normalizeCollaborationMode(value: unknown): CollaborationModeKind {
@@ -1343,6 +1349,7 @@ export function useDesktopState() {
   const persistedMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const livePlanMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const liveAgentMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
+  const liveSteerMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const liveReasoningTextByThreadId = ref<Record<string, string>>({})
   const liveCommandsByThreadId = ref<Record<string, UiMessage[]>>({})
   const liveFileChangeMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
@@ -1569,9 +1576,10 @@ export function useDesktopState() {
     const persisted = persistedMessagesByThreadId.value[threadId] ?? []
     const livePlan = livePlanMessagesByThreadId.value[threadId] ?? []
     const liveAgent = liveAgentMessagesByThreadId.value[threadId] ?? []
+    const liveSteers = liveSteerMessagesByThreadId.value[threadId] ?? []
     const liveCommands = liveCommandsByThreadId.value[threadId] ?? []
     const liveFileChanges = liveFileChangeMessagesByThreadId.value[threadId] ?? []
-    const combined = [...persisted, ...livePlan, ...liveCommands, ...liveFileChanges, ...liveAgent]
+    const combined = [...persisted, ...livePlan, ...liveCommands, ...liveFileChanges, ...liveAgent, ...liveSteers]
 
     const summary = turnSummaryByThreadId.value[threadId]
     if (!summary) return combined
@@ -2630,6 +2638,48 @@ export function useDesktopState() {
     if (!threadId) return
     if (!(threadId in liveAgentMessagesByThreadId.value)) return
     liveAgentMessagesByThreadId.value = omitKey(liveAgentMessagesByThreadId.value, threadId)
+  }
+
+  function appendLiveSteerMessage(
+    threadId: string,
+    text: string,
+    imageUrls: string[] = [],
+    skills: Array<{ name: string; path: string }> = [],
+    fileAttachments: FileAttachment[] = [],
+  ): string {
+    const messageId = `optimistic-steer:${threadId}:${Date.now()}`
+    const message: UiMessage = {
+      id: messageId,
+      role: 'user',
+      text,
+      images: imageUrls.length > 0 ? [...imageUrls] : undefined,
+      skills: skills.length > 0 ? skills.map((skill) => ({ ...skill })) : undefined,
+      fileAttachments: fileAttachments.length > 0 ? fileAttachments.map((file) => ({ ...file })) : undefined,
+      messageType: 'userMessage.optimistic',
+    }
+    liveSteerMessagesByThreadId.value = {
+      ...liveSteerMessagesByThreadId.value,
+      [threadId]: [...(liveSteerMessagesByThreadId.value[threadId] ?? []), message],
+    }
+    return messageId
+  }
+
+  function removeLiveSteerMessage(threadId: string, messageId: string): void {
+    const existing = liveSteerMessagesByThreadId.value[threadId] ?? []
+    const next = existing.filter((message) => message.id !== messageId)
+    if (next.length === existing.length) return
+    liveSteerMessagesByThreadId.value = next.length > 0
+      ? { ...liveSteerMessagesByThreadId.value, [threadId]: next }
+      : omitKey(liveSteerMessagesByThreadId.value, threadId)
+  }
+
+  function removeLiveSteersPersistedIn(threadId: string, persisted: UiMessage[]): void {
+    const existing = liveSteerMessagesByThreadId.value[threadId] ?? []
+    const next = existing.filter((message) => !hasEquivalentUserMessage(message, persisted))
+    if (next.length === existing.length) return
+    liveSteerMessagesByThreadId.value = next.length > 0
+      ? { ...liveSteerMessagesByThreadId.value, [threadId]: next }
+      : omitKey(liveSteerMessagesByThreadId.value, threadId)
   }
 
   function setLiveFileChangeMessagesForThread(threadId: string, nextMessages: UiMessage[]): void {
@@ -4552,6 +4602,7 @@ export function useDesktopState() {
         preserveMissing: options.silent === true || hasOptimisticUserMessages(previousPersisted),
       })
       setPersistedMessagesForThread(threadId, mergedMessages)
+      removeLiveSteersPersistedIn(threadId, nextMessages)
 
       const previousLiveAgent = liveAgentMessagesByThreadId.value[threadId] ?? []
       if (inProgress) {
@@ -5033,6 +5084,34 @@ export function useDesktopState() {
       }
       persistQueueState()
       return
+    }
+
+    if (isInProgress && mode === 'steer') {
+      const liveSteerMessageId = appendLiveSteerMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+      const expectedTurnId = activeTurnIdByThreadId.value[threadId]?.trim() ?? ''
+      if (expectedTurnId) {
+        try {
+          await steerThreadTurn(threadId, expectedTurnId, nextText, imageUrls, skills, fileAttachments)
+          return
+        } catch (unknownError) {
+          removeLiveSteerMessage(threadId, liveSteerMessageId)
+          if (!isActiveTurnNoLongerAvailableError(unknownError)) {
+            const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
+            setTurnErrorForThread(threadId, errorMessage)
+            error.value = errorMessage
+            throw unknownError
+          }
+        }
+      } else {
+        removeLiveSteerMessage(threadId, liveSteerMessageId)
+      }
+
+      // The turn completed after the UI observed it as active. Start a normal
+      // turn so the follow-up is sent instead of forcing the user to retry.
+      setThreadInProgress(threadId, false)
+      if (activeTurnIdByThreadId.value[threadId]) {
+        activeTurnIdByThreadId.value = omitKey(activeTurnIdByThreadId.value, threadId)
+      }
     }
 
     // Keep the submitted prompt visible while the app-server persists the next
@@ -5741,6 +5820,7 @@ export function useDesktopState() {
     persistedMessagesByThreadId.value = {}
     livePlanMessagesByThreadId.value = {}
     liveAgentMessagesByThreadId.value = {}
+    liveSteerMessagesByThreadId.value = {}
     liveReasoningTextByThreadId.value = {}
     liveCommandsByThreadId.value = {}
     liveFileChangeMessagesByThreadId.value = {}

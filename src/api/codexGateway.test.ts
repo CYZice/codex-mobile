@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, startThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -128,6 +128,33 @@ describe('startThreadTurn collaboration mode payloads', () => {
         excludeSlashTmp: false,
       },
     })
+  })
+})
+
+describe('steerThreadTurn', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('appends input to the active turn without turn-level overrides', async () => {
+    const requests: Array<{ method: string, params: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { method: string, params: Record<string, unknown> })
+      return new Response(JSON.stringify({ result: { turnId: 'turn-active' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(steerThreadTurn('thread-1', 'turn-active', 'Focus on tests first.')).resolves.toBe('turn-active')
+    expect(requests).toEqual([{
+      method: 'turn/steer',
+      params: {
+        threadId: 'thread-1',
+        expectedTurnId: 'turn-active',
+        input: [{ type: 'text', text: 'Focus on tests first.' }],
+      },
+    }])
   })
 })
 

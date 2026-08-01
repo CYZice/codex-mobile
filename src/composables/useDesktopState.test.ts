@@ -43,6 +43,7 @@ const gatewayMocks = vi.hoisted(() => ({
   setWorkspaceProjectOrder: vi.fn(),
   startThread: vi.fn(),
   startThreadTurn: vi.fn(),
+  steerThreadTurn: vi.fn(),
   subscribeCodexNotifications: vi.fn(),
 }))
 
@@ -1278,6 +1279,82 @@ describe('provider model selection', () => {
 
     resolveTurnStart?.('turn-existing')
     await sendPromise
+  })
+
+  it('steers an active turn without starting another turn', async () => {
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      messages: [{ id: 'assistant-active', role: 'assistant', text: 'Working.', messageType: 'agentMessage' }],
+      inProgress: true,
+      activeTurnId: 'turn-active',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+    gatewayMocks.steerThreadTurn.mockResolvedValue('turn-active')
+
+    const state = useDesktopState()
+    state.primeSelectedThread('active-thread')
+    await state.loadMessages('active-thread')
+
+    await state.sendMessageToSelectedThread('Focus on tests first.', [], [], 'steer')
+
+    expect(gatewayMocks.steerThreadTurn).toHaveBeenCalledWith(
+      'active-thread',
+      'turn-active',
+      'Focus on tests first.',
+      [],
+      [],
+      [],
+    )
+    expect(gatewayMocks.startThreadTurn).not.toHaveBeenCalled()
+    expect(state.messages.value.at(-1)).toMatchObject({
+      role: 'user',
+      text: 'Focus on tests first.',
+      messageType: 'userMessage.optimistic',
+    })
+  })
+
+  it('starts a normal turn when an active steer no longer has a turn id', async () => {
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        model: 'gpt-5.5',
+        modelProvider: 'openai',
+        permissionPreset: null,
+        messages: [],
+        inProgress: false,
+        activeTurnId: '',
+        hasMoreOlder: false,
+        turnIndexByTurnId: {},
+      })
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      messages: [{ id: 'assistant-finished', role: 'assistant', text: 'Finished.', messageType: 'agentMessage' }],
+      inProgress: true,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+    gatewayMocks.startThreadTurn.mockResolvedValue('turn-next')
+
+    const state = useDesktopState()
+    state.primeSelectedThread('racing-thread')
+    await state.loadMessages('racing-thread')
+
+    await state.sendMessageToSelectedThread('Continue with the next task.', [], [], 'steer')
+
+    expect(gatewayMocks.steerThreadTurn).not.toHaveBeenCalled()
+    expect(gatewayMocks.startThreadTurn).toHaveBeenCalled()
+    expect(state.messages.value.at(-1)).toMatchObject({
+      role: 'user',
+      text: 'Continue with the next task.',
+      messageType: 'userMessage.optimistic',
+    })
   })
 
   it('refreshes a loaded optimistic thread when completion events arrive', async () => {

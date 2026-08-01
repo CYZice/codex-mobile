@@ -3505,6 +3505,21 @@ async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[
     }
     return
   }
+  const isActiveSteer = payload.mode === 'steer' && isSelectedThreadInProgress.value
+  if (isActiveSteer) {
+    const draft: ComposerDraftPayload = {
+      text,
+      imageUrls: [...payload.imageUrls],
+      fileAttachments: payload.fileAttachments.map((attachment) => ({ ...attachment })),
+      skills: payload.skills.map((skill) => ({ ...skill })),
+    }
+    threadComposerRef.value?.completeSubmission()
+    void sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
+      .catch(() => {
+        threadComposerRef.value?.hydrateDraft(draft)
+      })
+    return
+  }
   isThreadComposerSubmitting.value = true
   try {
     await sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
