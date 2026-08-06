@@ -362,6 +362,9 @@
       </div>
 
     </div>
+    <p v-if="!dictationErrorText && attachmentFeedbackText" class="thread-composer-attachment-feedback">
+      {{ attachmentFeedbackText }}
+    </p>
     <input
       ref="photoLibraryInputRef"
       class="thread-composer-hidden-input"
@@ -1444,7 +1447,8 @@ function resetDragState(): void {
 
 function hasFilePayload(dataTransfer: DataTransfer | null): boolean {
   if (!dataTransfer) return false
-  return Array.from(dataTransfer.types ?? []).includes('Files')
+  if (dataTransfer.files.length > 0) return true
+  return Array.from(dataTransfer.types ?? []).some((type) => type.toLowerCase() === 'files')
 }
 
 async function addFolderFiles(files: FileList | null): Promise<void> {
@@ -2390,6 +2394,10 @@ watch(
 
 .thread-composer-dictation-error {
   @apply mb-2 px-1 text-xs text-amber-700;
+}
+
+.thread-composer-attachment-feedback {
+  @apply mt-2 px-1 text-xs text-zinc-500;
 }
 
 .thread-composer-submit {
