@@ -383,6 +383,41 @@ describe('resumeThread', () => {
     vi.unstubAllGlobals()
   })
 
+  it('reads the reasoning effort reported by thread/resume', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as { method: string; params: Record<string, unknown> }
+        : { method: '', params: {} }
+      expect(body).toEqual({
+        method: 'thread/resume',
+        params: { threadId: 'thread-with-ultra-effort' },
+      })
+      return new Response(JSON.stringify({
+        result: {
+          approvalPolicy: 'on-request',
+          cwd: '/workspace',
+          model: 'gpt-5.6-sol',
+          modelProvider: 'openai',
+          reasoningEffort: 'ultra',
+          sandbox: { type: 'workspace-write' },
+          thread: {
+            id: 'thread-with-ultra-effort',
+            turns: [],
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(resumeThread('thread-with-ultra-effort')).resolves.toMatchObject({
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      reasoningEffort: 'ultra',
+    })
+  })
+
   it('coalesces repeated resume failures for the same thread', async () => {
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

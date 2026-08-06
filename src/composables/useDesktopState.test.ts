@@ -1032,6 +1032,64 @@ describe('provider model selection', () => {
     expect(state.selectedReasoningEffort.value).toBe('medium')
   })
 
+  it('preserves a selected reasoning effort across model preference refreshes', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.6-sol',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue([{
+      id: 'gpt-5.6-sol',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      defaultReasoningEffort: 'low',
+    }])
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+    state.setSelectedReasoningEffort('max')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.selectedReasoningEffort.value).toBe('max')
+    expect(JSON.parse(window.localStorage.getItem('codex-web-local.selected-reasoning-effort-by-context.v1') ?? '{}')).toEqual({
+      '__new-thread__': 'max',
+    })
+  })
+
+  it('restores the reasoning effort reported by a resumed thread', async () => {
+    installTestWindow()
+    gatewayMocks.getAvailableModels.mockResolvedValue([{
+      id: 'gpt-5.6-sol',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      defaultReasoningEffort: 'low',
+    }])
+    gatewayMocks.resumeThread.mockResolvedValue({
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      reasoningEffort: 'max',
+      permissionPreset: null,
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-with-max-effort')
+    await state.loadMessages('thread-with-max-effort')
+
+    expect(state.selectedReasoningEffort.value).toBe('max')
+    expect(JSON.parse(window.localStorage.getItem('codex-web-local.selected-reasoning-effort-by-context.v1') ?? '{}')).toEqual({
+      'thread-with-max-effort': 'max',
+    })
+  })
+
   it('keeps an existing OpenCode Zen thread locked to Zen models after Codex auth becomes active', async () => {
     installTestWindow()
     gatewayMocks.getThreadGroupsPage.mockResolvedValue({

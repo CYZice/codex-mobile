@@ -1540,6 +1540,7 @@ export async function removeAccount(storageId: string): Promise<AccountsListResu
 export type ResumedThread = {
   model: string
   modelProvider: string
+  reasoningEffort: ReasoningEffort | null
   permissionPreset: PermissionPreset | null
   messages: UiMessage[]
   inProgress: boolean
@@ -1562,6 +1563,7 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
     return {
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      reasoningEffort: normalizeThreadReasoningEffortFromPayload(payload),
       permissionPreset: readPermissionPresetFromThreadPayload(payload),
       messages,
       inProgress: readThreadInProgressFromResponse(payload),
@@ -1699,6 +1701,13 @@ function normalizeThreadModelProviderFromPayload(payload: unknown): string {
   if (modelProvider) return modelProvider
   const thread = asRecord(record.thread)
   return readString(thread?.modelProvider)?.trim() ?? ''
+}
+
+function normalizeThreadReasoningEffortFromPayload(payload: unknown): ReasoningEffort | null {
+  const record = asRecord(payload)
+  if (!record) return null
+  const value = record.reasoningEffort ?? record.reasoning_effort
+  return isReasoningEffort(value) ? value : null
 }
 
 function readPermissionPresetFromThreadPayload(payload: unknown): PermissionPreset | null {
