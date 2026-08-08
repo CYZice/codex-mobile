@@ -5127,10 +5127,11 @@ export function useDesktopState() {
     queueInsertIndex?: number,
     collaborationModeOverride?: CollaborationModeKind,
     permissionPresetOverride?: PermissionPreset,
+    targetThreadId?: string,
   ): Promise<void> {
     if (isUpdatingSpeedMode.value) return
 
-    const threadId = selectedThreadId.value
+    const threadId = targetThreadId?.trim() || selectedThreadId.value
     const nextText = text.trim()
     if (!threadId || (!nextText && imageUrls.length === 0 && fileAttachments.length === 0)) return
 
@@ -5559,13 +5560,14 @@ export function useDesktopState() {
     }
   }
 
-  async function rollbackSelectedThread(turnId: string): Promise<boolean> {
-    const threadId = selectedThreadId.value
+  async function rollbackThreadInThread(threadId: string, turnId: string): Promise<boolean> {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return false
     if (!threadId) return false
     if (isRollingBack.value) return false
     if (!turnId.trim()) return false
 
-    const persisted = persistedMessagesByThreadId.value[threadId] ?? []
+    const persisted = persistedMessagesByThreadId.value[normalizedThreadId] ?? []
     const matchedMessage = persisted.find((message) => message.turnId === turnId)
     const turnIndex = typeof matchedMessage?.turnIndex === 'number' ? matchedMessage.turnIndex : -1
     if (turnIndex < 0) return false
@@ -5577,20 +5579,20 @@ export function useDesktopState() {
     isRollingBack.value = true
     error.value = ''
     try {
-      const threadCwd = selectedThread.value?.cwd?.trim() ?? ''
+      const threadCwd = flattenThreads(sourceGroups.value).find((thread) => thread.id === normalizedThreadId)?.cwd?.trim() ?? ''
       if (threadCwd) {
-        await revertThreadFileChanges(threadId, turnId, threadCwd)
+        await revertThreadFileChanges(normalizedThreadId, turnId, threadCwd)
       }
-      const nextMessages = await rollbackThread(threadId, numTurns)
-      setPersistedMessagesForThread(threadId, nextMessages)
-      setLiveAgentMessagesForThread(threadId, [])
-      clearLiveReasoningForThread(threadId)
-      if (liveCommandsByThreadId.value[threadId]) {
-        liveCommandsByThreadId.value = omitKey(liveCommandsByThreadId.value, threadId)
+      const nextMessages = await rollbackThread(normalizedThreadId, numTurns)
+      setPersistedMessagesForThread(normalizedThreadId, nextMessages)
+      setLiveAgentMessagesForThread(normalizedThreadId, [])
+      clearLiveReasoningForThread(normalizedThreadId)
+      if (liveCommandsByThreadId.value[normalizedThreadId]) {
+        liveCommandsByThreadId.value = omitKey(liveCommandsByThreadId.value, normalizedThreadId)
       }
-      setTurnSummaryForThread(threadId, null)
-      setTurnActivityForThread(threadId, null)
-      setTurnErrorForThread(threadId, null)
+      setTurnSummaryForThread(normalizedThreadId, null)
+      setTurnActivityForThread(normalizedThreadId, null)
+      setTurnErrorForThread(normalizedThreadId, null)
       pendingThreadsRefresh = true
       await syncFromNotifications()
       return true
@@ -5600,6 +5602,10 @@ export function useDesktopState() {
     } finally {
       isRollingBack.value = false
     }
+  }
+
+  async function rollbackSelectedThread(turnId: string): Promise<boolean> {
+    return rollbackThreadInThread(selectedThreadId.value, turnId)
   }
 
   let renameProjectTimer: ReturnType<typeof setTimeout> | null = null
@@ -6032,6 +6038,7 @@ export function useDesktopState() {
     forkThreadById,
     forkThreadFromTurn,
     rollbackSelectedThread,
+    rollbackThreadInThread,
 
     sendMessageToSelectedThread,
     sendMessageToNewThread,

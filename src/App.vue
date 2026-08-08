@@ -618,6 +618,10 @@
           </template>
         </ContentHeader>
 
+        <div v-if="contentActionFeedback" class="content-action-feedback" :data-kind="contentActionFeedback.kind" role="status" aria-live="polite">
+          {{ contentActionFeedback.text }}
+        </div>
+
         <section class="content-body">
           <template v-if="isSkillsRoute">
             <DirectoryHub
@@ -1489,6 +1493,7 @@ const {
   stopPolling,
   primeSelectedThread,
   rollbackSelectedThread,
+  rollbackThreadInThread,
 } = useDesktopState()
 
 const route = useRoute()
@@ -1564,6 +1569,8 @@ const projectZipExportStatus = ref<{ phase: 'idle' | 'exporting' | 'ready'; load
   fileName: '',
   error: '',
 })
+const contentActionFeedback = ref<{ text: string; kind: 'success' | 'error' } | null>(null)
+let contentActionFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: string; message: string }>({
   phase: 'idle',
   title: '',
@@ -2223,6 +2230,10 @@ onUnmounted(() => {
   if (threadSearchTimer) {
     clearTimeout(threadSearchTimer)
     threadSearchTimer = null
+  }
+  if (contentActionFeedbackTimer) {
+    clearTimeout(contentActionFeedbackTimer)
+    contentActionFeedbackTimer = null
   }
   clearTerminalKeyboardFocusFallbackTimer()
   stopPolling()
@@ -3135,14 +3146,26 @@ async function handleServerRequestResponse(payload: UiServerRequestReply): Promi
   }
 }
 
-async function onForkThreadFromMessage(payload: { threadId: string; turnIndex: number }): Promise<void> {
-  const forkedThreadId = await forkThreadFromTurn(payload.threadId, payload.turnIndex)
-  if (!forkedThreadId) return
-  await router.push({ name: 'thread', params: { threadId: forkedThreadId } })
-  if (selectedThreadId.value !== forkedThreadId) {
-    await selectThread(forkedThreadId)
+async function onForkThreadFromMessage(payload: {
+  threadId: string
+  turnIndex: number
+  onComplete: (success: boolean) => void
+}): Promise<void> {
+  try {
+    const forkedThreadId = await forkThreadFromTurn(payload.threadId, payload.turnIndex)
+    if (!forkedThreadId) {
+      payload.onComplete(false)
+      return
+    }
+    await router.push({ name: 'thread', params: { threadId: forkedThreadId } })
+    if (selectedThreadId.value !== forkedThreadId) {
+      await selectThread(forkedThreadId)
+    }
+    if (isMobile.value) setSidebarCollapsed(true)
+    payload.onComplete(true)
+  } catch {
+    payload.onComplete(false)
   }
-  if (isMobile.value) setSidebarCollapsed(true)
 }
 
 function setSidebarCollapsed(nextValue: boolean): void {
@@ -4276,19 +4299,20 @@ function onInterruptTurn(): void {
 }
 
 async function onEditMessage(payload: {
+  threadId: string
   turnId: string
   message: UiMessage
   text: string
-  onComplete: (success: boolean) => void
+  onComplete: (success: boolean, errorMessage?: string) => void
 }): Promise<void> {
   const message = payload.message
-  const rolledBack = await rollbackSelectedThread(payload.turnId)
-  if (!rolledBack || isHomeRoute.value || !selectedThreadId.value) {
-    payload.onComplete(false)
+  const rolledBack = await rollbackThreadInThread(payload.threadId, payload.turnId)
+  if (!rolledBack) {
+    payload.onComplete(false, 'Edit failed. The original message was kept.')
     return
   }
   try {
-    scheduleMobileConversationJumpToLatest()
+    if (selectedThreadId.value === payload.threadId) scheduleMobileConversationJumpToLatest()
     await sendMessageToSelectedThread(
       payload.text,
       message.images ?? [],
@@ -4299,29 +4323,45 @@ async function onEditMessage(payload: {
         path: attachment.path,
         fsPath: attachment.path,
       })),
+      undefined,
+      undefined,
+      undefined,
+      payload.threadId,
     )
     payload.onComplete(true)
   } catch {
-    payload.onComplete(false)
+    payload.onComplete(false, 'Edit failed. The original message was kept.')
   }
 }
 
-async function onRetryMessage(payload: { turnId: string; message: UiMessage }): Promise<void> {
+async function onRetryMessage(payload: {
+  threadId: string
+  turnId: string
+  message: UiMessage
+  onComplete: (success: boolean, errorMessage?: string) => void
+}): Promise<void> {
   const message = payload.message
-  const rolledBack = await rollbackSelectedThread(payload.turnId)
-  if (!rolledBack || isHomeRoute.value || !selectedThreadId.value) return
-  scheduleMobileConversationJumpToLatest()
-  await sendMessageToSelectedThread(
-    message.text,
-    message.images ?? [],
-    message.skills ?? [],
-    'steer',
-    (message.fileAttachments ?? []).map((attachment) => ({
-      label: attachment.label,
-      path: attachment.path,
-      fsPath: attachment.path,
-    })),
-  )
+  try {
+    if (selectedThreadId.value === payload.threadId) scheduleMobileConversationJumpToLatest()
+    await sendMessageToSelectedThread(
+      message.text,
+      message.images ?? [],
+      message.skills ?? [],
+      'steer',
+      (message.fileAttachments ?? []).map((attachment) => ({
+        label: attachment.label,
+        path: attachment.path,
+        fsPath: attachment.path,
+      })),
+      undefined,
+      undefined,
+      undefined,
+      payload.threadId,
+    )
+    payload.onComplete(true)
+  } catch {
+    payload.onComplete(false, 'Retry failed. The original message was kept.')
+  }
 }
 
 function onImplementPlan(payload: { turnId: string }): void {
@@ -4347,9 +4387,19 @@ async function copySelectedThreadChat(): Promise<void> {
   const markdown = buildThreadMarkdown()
   try {
     await copyTextToClipboard(markdown)
+    showContentActionFeedback('Chat copied', 'success')
   } catch {
-    // Clipboard writes can be blocked by browser permissions; keep the menu action best-effort.
+    showContentActionFeedback('Copy failed. Allow clipboard access and try again.', 'error')
   }
+}
+
+function showContentActionFeedback(text: string, kind: 'success' | 'error' = 'success'): void {
+  contentActionFeedback.value = { text, kind }
+  if (contentActionFeedbackTimer) clearTimeout(contentActionFeedbackTimer)
+  contentActionFeedbackTimer = setTimeout(() => {
+    contentActionFeedback.value = null
+    contentActionFeedbackTimer = null
+  }, 2600)
 }
 
 function buildThreadMarkdown(): string {
@@ -6176,6 +6226,26 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-settings-build-label {
   @apply border-t border-zinc-100 px-3 py-2 text-[11px] text-zinc-500;
+}
+
+.content-action-feedback {
+  @apply mx-2 mt-1 w-fit rounded-full border px-3 py-1 text-xs font-medium shadow-sm sm:mx-6;
+}
+
+.content-action-feedback[data-kind='success'] {
+  @apply border-emerald-200 bg-emerald-50 text-emerald-700;
+}
+
+.content-action-feedback[data-kind='error'] {
+  @apply border-rose-200 bg-rose-50 text-rose-700;
+}
+
+:global(:root.dark) .content-action-feedback[data-kind='success'] {
+  @apply border-emerald-800 bg-emerald-950/60 text-emerald-200;
+}
+
+:global(:root.dark) .content-action-feedback[data-kind='error'] {
+  @apply border-rose-800 bg-rose-950/60 text-rose-200;
 }
 
 .sidebar-settings-archived-panel {

@@ -214,6 +214,12 @@
 
         <div v-else class="message-row" :data-role="message.role" :data-message-type="message.messageType || ''">
           <div class="message-stack" :data-role="message.role">
+              <div v-if="isRetryingMessage(message)" class="message-action-status" aria-live="polite">
+              <span v-if="retryStatus === 'pending'" class="message-action-spinner" aria-hidden="true" />
+              <span v-else aria-hidden="true">{{ retryStatus === 'success' ? '✓' : '!' }}</span>
+              {{ retryStatus === 'pending' ? 'Retrying in this thread…' : retryStatus === 'success' ? 'Retry sent' : 'Retry failed' }}
+              <span v-if="retryStatus === 'error' && retryErrorMessage">{{ retryErrorMessage }}</span>
+            </div>
             <article
               class="message-body"
               :class="{ 'message-body--editing': isInlineEditingMessage(message) }"
@@ -296,6 +302,7 @@
                       {{ t('Send') }}
                     </button>
                   </div>
+                  <p v-if="inlineEditError" class="message-inline-editor-error" role="alert">{{ inlineEditError }}</p>
                 </div>
                 <template v-else>
                 <div v-if="message.isAutomationRun" class="automation-message-label">
@@ -759,32 +766,43 @@
                   class="message-edit-button"
                   aria-label="Retry this message"
                   title="Retry this message"
+                  :disabled="isRetryingMessage(message)"
                   @click="retryMessage(message.id)"
                 >
                   <IconTablerArrowBackUp class="icon-svg message-edit-icon" />
-                  <span class="message-edit-label">Retry</span>
+                  <span class="message-edit-label">{{ retryLabel(message) }}</span>
                 </button>
                 <button
                   v-if="showForkResponseButton(message)"
                   type="button"
                   class="message-fork-button"
+                  :disabled="isForkingMessage(message)"
                   aria-label="Fork thread from this response"
                   title="Fork thread from this response"
                   @click="forkResponse(message.id)"
                 >
-                  <IconTablerGitFork class="icon-svg message-fork-icon" />
+                  <span v-if="isForkingMessage(message)" class="message-action-spinner" aria-hidden="true" />
+                  <IconTablerGitFork v-else class="icon-svg message-fork-icon" />
                 </button>
                 <button
                   v-if="showCopyResponseButton(message)"
                   type="button"
                   class="message-copy-button"
                   :data-copied="copiedResponseAnchorId === message.id"
-                  :aria-label="copiedResponseAnchorId === message.id ? 'Response copied' : 'Copy response'"
-                  :title="copiedResponseAnchorId === message.id ? 'Response copied' : 'Copy response'"
+                  :disabled="copyingResponseAnchorId === message.id"
+                  :aria-label="copyResponseLabel(message)"
+                  :title="copyResponseLabel(message)"
                   @click="copyResponse(message.id)"
                 >
-                  <IconTablerCopy class="icon-svg message-copy-icon" />
+                  <span v-if="copyingResponseAnchorId === message.id" class="message-action-spinner" aria-hidden="true" />
+                  <IconTablerCopy v-else class="icon-svg message-copy-icon" />
                 </button>
+              </div>
+              <div v-if="forkErrorMessageId === message.id" class="message-action-status message-action-status-error" role="alert">
+                Fork failed. Try again.
+              </div>
+              <div v-if="copyErrorAnchorId === message.id" class="message-action-status message-action-status-error" role="alert">
+                Copy failed. Try again.
               </div>
             </article>
           </div>
@@ -1406,14 +1424,20 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  forkThread: [payload: { threadId: string; turnIndex: number }]
+  forkThread: [payload: { threadId: string; turnIndex: number; onComplete: (success: boolean) => void }]
   editMessage: [payload: {
+    threadId: string
     turnId: string
     message: UiMessage
     text: string
-    onComplete: (success: boolean) => void
+    onComplete: (success: boolean, errorMessage?: string) => void
   }]
-  retryMessage: [payload: { turnId: string; message: UiMessage }]
+  retryMessage: [payload: {
+    threadId: string
+    turnId: string
+    message: UiMessage
+    onComplete: (success: boolean, errorMessage?: string) => void
+  }]
   implementPlan: [payload: { turnId: string }]
   revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
@@ -1423,9 +1447,17 @@ const conversationListRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const modalImageUrl = ref('')
 const copiedResponseAnchorId = ref('')
+const copyingResponseAnchorId = ref('')
+const copyErrorAnchorId = ref('')
 const inlineEditingMessageId = ref('')
 const inlineEditDraft = ref('')
 const isInlineEditSubmitting = ref(false)
+const inlineEditError = ref('')
+const retryingMessageId = ref('')
+const retryStatus = ref<'pending' | 'success' | 'error'>('pending')
+const retryErrorMessage = ref('')
+const forkingMessageId = ref('')
+const forkErrorMessageId = ref('')
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
 const fileChangeActionError = ref<Record<string, string>>({})
 const fileChangeRedoPatchIds = ref<Record<string, string[]>>({})
@@ -1483,6 +1515,7 @@ let conversationScrollFrame = 0
 let bottomLockFrame = 0
 let bottomLockFramesLeft = 0
 let copiedMessageResetTimer: ReturnType<typeof setTimeout> | null = null
+let retryStatusResetTimer: ReturnType<typeof setTimeout> | null = null
 let conversationScrollPromise: Promise<void> | null = null
 const trackedPendingImages = new WeakSet<HTMLImageElement>()
 const highlightJsModule = ref<HighlightJsModule | null>(null)
@@ -2442,6 +2475,7 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
   const content = copyableResponseContentByAnchorId.value[anchorMessageId] ?? ''
   if (!content) return
 
+  copyingResponseAnchorId.value = anchorMessageId
   let copied = false
   try {
     await copyTextToClipboard(content)
@@ -2454,7 +2488,15 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
     copied = copyTextWithSelectionFallback(content)
   }
 
-  if (!copied) return
+  copyingResponseAnchorId.value = ''
+  if (!copied) {
+    copyErrorAnchorId.value = anchorMessageId
+    window.setTimeout(() => {
+      if (copyErrorAnchorId.value === anchorMessageId) copyErrorAnchorId.value = ''
+    }, 2600)
+    return
+  }
+  copyErrorAnchorId.value = ''
 
   copiedResponseAnchorId.value = anchorMessageId
   if (copiedMessageResetTimer) {
@@ -2468,14 +2510,35 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
   }, 1800)
 }
 
+function copyResponseLabel(message: UiMessage): string {
+  if (copyingResponseAnchorId.value === message.id) return 'Copying response…'
+  return copiedResponseAnchorId.value === message.id ? 'Response copied' : 'Copy response'
+}
+
 function forkResponse(anchorMessageId: string): void {
   const turnIndex = forkableTurnIndexByAnchorId.value[anchorMessageId]
   if (typeof turnIndex !== 'number') return
   if (!props.activeThreadId) return
+  if (forkingMessageId.value) return
+  forkingMessageId.value = anchorMessageId
+  forkErrorMessageId.value = ''
   emit('forkThread', {
     threadId: props.activeThreadId,
     turnIndex,
+    onComplete: (success) => {
+      forkingMessageId.value = ''
+      if (!success) {
+        forkErrorMessageId.value = anchorMessageId
+        window.setTimeout(() => {
+          if (forkErrorMessageId.value === anchorMessageId) forkErrorMessageId.value = ''
+        }, 2600)
+      }
+    },
   })
+}
+
+function isForkingMessage(message: UiMessage): boolean {
+  return forkingMessageId.value === message.id
 }
 
 const editableTurnIdByMessageId = computed<Record<string, string>>(() => {
@@ -2499,6 +2562,7 @@ function editMessage(messageId: string): void {
   if (!turnId || !message) return
   inlineEditingMessageId.value = message.id
   inlineEditDraft.value = message.text
+  inlineEditError.value = ''
   void nextTick(() => {
     window.requestAnimationFrame(() => {
       const input = conversationListRef.value?.querySelector<HTMLTextAreaElement>('.message-inline-editor-input')
@@ -2517,6 +2581,7 @@ function cancelInlineEdit(): void {
   if (isInlineEditSubmitting.value) return
   inlineEditingMessageId.value = ''
   inlineEditDraft.value = ''
+  inlineEditError.value = ''
 }
 
 function submitInlineEdit(message: UiMessage): void {
@@ -2524,24 +2589,60 @@ function submitInlineEdit(message: UiMessage): void {
   const text = inlineEditDraft.value.trim()
   if (!turnId || !text || isInlineEditSubmitting.value) return
   isInlineEditSubmitting.value = true
+  inlineEditError.value = ''
   emit('editMessage', {
+    threadId: props.activeThreadId,
     turnId,
     message,
     text,
-    onComplete: (success) => {
+    onComplete: (success, errorMessage) => {
       isInlineEditSubmitting.value = false
-      if (!success) return
+      if (!success) {
+        inlineEditError.value = errorMessage || 'Edit failed. Try again.'
+        return
+      }
       inlineEditingMessageId.value = ''
       inlineEditDraft.value = ''
+      inlineEditError.value = ''
     },
   })
+}
+
+function isRetryingMessage(message: UiMessage): boolean {
+  return retryingMessageId.value === message.id
+}
+
+function retryLabel(message: UiMessage): string {
+  return isRetryingMessage(message) ? 'Retrying…' : 'Retry'
 }
 
 function retryMessage(messageId: string): void {
   const turnId = editableTurnIdByMessageId.value[messageId]
   const message = props.messages.find((item) => item.id === messageId)
-  if (!turnId || !message) return
-  emit('retryMessage', { turnId, message })
+  if (!turnId || !message || !props.activeThreadId || retryingMessageId.value) return
+  retryingMessageId.value = messageId
+  retryStatus.value = 'pending'
+  retryErrorMessage.value = ''
+  emit('retryMessage', {
+    threadId: props.activeThreadId,
+    turnId,
+    message,
+    onComplete: (success, errorMessage) => {
+      retryStatus.value = success ? 'success' : 'error'
+      if (retryStatusResetTimer) clearTimeout(retryStatusResetTimer)
+      retryStatusResetTimer = setTimeout(() => {
+        if (retryingMessageId.value === messageId) {
+          retryingMessageId.value = ''
+          retryStatus.value = 'pending'
+          retryErrorMessage.value = ''
+        }
+        retryStatusResetTimer = null
+      }, success ? 1800 : 3200)
+      if (!success) {
+        retryErrorMessage.value = errorMessage || 'Try again.'
+      }
+    },
+  })
 }
 
 function splitPlainTextByLinks(
@@ -4618,6 +4719,10 @@ onBeforeUnmount(() => {
     clearTimeout(copiedMessageResetTimer)
     copiedMessageResetTimer = null
   }
+  if (retryStatusResetTimer) {
+    clearTimeout(retryStatusResetTimer)
+    retryStatusResetTimer = null
+  }
   window.removeEventListener('pointerdown', onWindowPointerDownForFileLinkContextMenu)
   window.removeEventListener('blur', onWindowBlurForFileLinkContextMenu)
   window.removeEventListener('keydown', onWindowKeydownForFileLinkContextMenu)
@@ -4844,6 +4949,34 @@ onBeforeUnmount(() => {
 
 .message-copy-button[data-copied='true'] {
   @apply bg-emerald-50 text-emerald-700;
+}
+
+.message-copy-button:disabled,
+.message-fork-button:disabled,
+.message-edit-button:disabled {
+  @apply cursor-wait opacity-70;
+}
+
+.message-action-spinner,
+.message-inline-editor-spinner {
+  @apply inline-block h-3 w-3 rounded-full border-2 border-current border-r-transparent;
+  animation: message-action-spin 0.8s linear infinite;
+}
+
+.message-action-status {
+  @apply mt-1 flex items-center gap-1 text-[10px] text-sky-600;
+}
+
+.message-action-status-error {
+  @apply text-rose-600;
+}
+
+.message-inline-editor-error {
+  @apply mt-1 text-[11px] text-red-600;
+}
+
+@keyframes message-action-spin {
+  to { transform: rotate(360deg); }
 }
 
 .message-edit-button {
