@@ -1503,6 +1503,24 @@ export function useDesktopState() {
     }
   }
 
+  function withLocalImageAttachments(
+    imageUrls: string[],
+    fileAttachments: FileAttachment[],
+  ): FileAttachment[] {
+    const attachments = [...fileAttachments]
+    for (const imageUrl of imageUrls) {
+      const imagePath = extractLocalImagePathFromUrl(imageUrl)
+      if (!imagePath || attachments.some((file) => file.fsPath === imagePath)) continue
+      const normalizedPath = imagePath.replace(/\\/g, '/')
+      attachments.push({
+        label: normalizedPath.split('/').filter(Boolean).at(-1) ?? imagePath,
+        path: imagePath,
+        fsPath: imagePath,
+      })
+    }
+    return attachments
+  }
+
   function shouldReuseAttachedImageFromPrompt(promptText: string): boolean {
     const normalized = promptText.trim().toLowerCase()
     if (!normalized) return false
@@ -2681,13 +2699,14 @@ export function useDesktopState() {
   ): string {
     const existing = persistedMessagesByThreadId.value[threadId] ?? []
     const messageId = `optimistic-user:${threadId}:${Date.now()}`
+    const optimisticFileAttachments = withLocalImageAttachments(imageUrls, fileAttachments)
     const nextMessage: UiMessage = {
       id: messageId,
       role: 'user',
       text,
       images: imageUrls.length > 0 ? [...imageUrls] : undefined,
       skills: skills.length > 0 ? skills.map((skill) => ({ name: skill.name, path: skill.path })) : undefined,
-      fileAttachments: fileAttachments.length > 0 ? fileAttachments.map((file) => ({ ...file })) : undefined,
+      fileAttachments: optimisticFileAttachments.length > 0 ? optimisticFileAttachments.map((file) => ({ ...file })) : undefined,
       messageType: 'userMessage.optimistic',
     }
     setPersistedMessagesForThread(threadId, [...existing, nextMessage])
@@ -2725,13 +2744,14 @@ export function useDesktopState() {
     fileAttachments: FileAttachment[] = [],
   ): string {
     const messageId = `optimistic-steer:${threadId}:${Date.now()}`
+    const optimisticFileAttachments = withLocalImageAttachments(imageUrls, fileAttachments)
     const message: UiMessage = {
       id: messageId,
       role: 'user',
       text,
       images: imageUrls.length > 0 ? [...imageUrls] : undefined,
       skills: skills.length > 0 ? skills.map((skill) => ({ ...skill })) : undefined,
-      fileAttachments: fileAttachments.length > 0 ? fileAttachments.map((file) => ({ ...file })) : undefined,
+      fileAttachments: optimisticFileAttachments.length > 0 ? optimisticFileAttachments.map((file) => ({ ...file })) : undefined,
       messageType: 'userMessage.optimistic',
     }
     liveSteerMessagesByThreadId.value = {

@@ -1316,7 +1316,8 @@ describe('provider model selection', () => {
     state.primeSelectedThread('existing-thread')
     await state.loadMessages('existing-thread')
 
-    const sendPromise = state.sendMessageToSelectedThread('Run the checks')
+    const imageUrl = '/codex-local-image?path=C%3A%5Cuploads%5Cscreen.png'
+    const sendPromise = state.sendMessageToSelectedThread('Run the checks', [imageUrl])
     await Promise.resolve()
     await Promise.resolve()
 
@@ -1326,6 +1327,13 @@ describe('provider model selection', () => {
       expect.objectContaining({
         role: 'user',
         text: 'Run the checks',
+        images: [imageUrl],
+        fileAttachments: [
+          expect.objectContaining({
+            label: 'screen.png',
+            path: 'C:\\uploads\\screen.png',
+          }),
+        ],
         messageType: 'userMessage.optimistic',
       }),
     ])
@@ -1357,13 +1365,14 @@ describe('provider model selection', () => {
     state.primeSelectedThread('active-thread')
     await state.loadMessages('active-thread')
 
-    await state.sendMessageToSelectedThread('Focus on tests first.', [], [], 'steer')
+    const imageUrl = '/codex-local-image?path=C%3A%5Cuploads%5Cscreen.png'
+    await state.sendMessageToSelectedThread('Focus on tests first.', [imageUrl], [], 'steer')
 
     expect(gatewayMocks.steerThreadTurn).toHaveBeenCalledWith(
       'active-thread',
       'turn-active',
       'Focus on tests first.',
-      [],
+      [imageUrl],
       [],
       [],
     )
@@ -1371,6 +1380,13 @@ describe('provider model selection', () => {
     expect(state.messages.value.at(-1)).toMatchObject({
       role: 'user',
       text: 'Focus on tests first.',
+      images: [imageUrl],
+      fileAttachments: [
+        expect.objectContaining({
+          label: 'screen.png',
+          path: 'C:\\uploads\\screen.png',
+        }),
+      ],
       messageType: 'userMessage.optimistic',
     })
   })
