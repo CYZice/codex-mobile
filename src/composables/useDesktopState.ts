@@ -3953,6 +3953,13 @@ export function useDesktopState() {
       return
     }
 
+    if (notification.method === 'bridge/threadQueueStateChanged') {
+      const params = asRecord(notification.params)
+      const threadId = readString(params?.threadId)
+      if (threadId) scheduleQueueStateRefresh(threadId)
+      return
+    }
+
     if (notification.method === 'account/rateLimits/updated') {
       scheduleRateLimitRefresh()
     }

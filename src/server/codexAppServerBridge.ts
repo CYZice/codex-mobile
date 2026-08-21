@@ -80,8 +80,60 @@ type RpcProxyRequest = {
   params?: unknown
 }
 
-type RpcExecutor = {
+export type RpcExecutor = {
   rpc: (method: string, params: unknown) => Promise<unknown>
+}
+
+export type DevCodexTurnState =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'waiting_approval'
+  | 'interrupt_requested'
+  | 'unknown'
+
+export type DevCodexDispatchResult = {
+  threadId: string
+  turnId?: string
+  cwd?: string
+  state: DevCodexTurnState
+}
+
+export type DevCodexQueueStart = {
+  messageId: string
+  turnId: string
+}
+
+export type DevCodexQueueProcessor = {
+  processThreadQueue: (threadId: string, threadReadResult?: unknown) => Promise<DevCodexQueueStart | undefined>
+  startMessageTurn: (
+    threadId: string,
+    message: StoredQueuedMessage,
+    options?: { cwd?: string; resume?: boolean },
+  ) => Promise<string>
+}
+
+export class DevCodexBridgeOperationError extends Error {
+  constructor(
+    readonly code:
+      | 'THREAD_NOT_FOUND'
+      | 'THREAD_BUSY'
+      | 'NO_ACTIVE_TURN'
+      | 'TURN_NOT_FOUND'
+      | 'TURN_NOT_ACTIVE'
+      | 'INVALID_TARGET'
+      | 'INVALID_MODE'
+      | 'INVALID_ARGUMENT'
+      | 'STEER_NOT_SUPPORTED'
+      | 'INTERRUPT_NOT_SUPPORTED'
+      | 'APP_SERVER_UNAVAILABLE',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DevCodexBridgeOperationError'
+  }
 }
 
 type ServerRequestReply = {
@@ -1079,6 +1131,29 @@ function setJson(res: ServerResponse, statusCode: number, payload: unknown): voi
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.end(JSON.stringify(payload))
+}
+
+function setDevCodexBridgeError(res: ServerResponse, error: unknown): void {
+  const normalized = error instanceof DevCodexBridgeOperationError
+    ? error
+    : new DevCodexBridgeOperationError(
+        'APP_SERVER_UNAVAILABLE',
+        error instanceof Error ? error.message : String(error),
+      )
+  const statusCode = normalized.code === 'THREAD_NOT_FOUND' || normalized.code === 'TURN_NOT_FOUND'
+    ? 404
+    : normalized.code === 'THREAD_BUSY' || normalized.code === 'NO_ACTIVE_TURN' || normalized.code === 'TURN_NOT_ACTIVE'
+      ? 409
+      : normalized.code === 'APP_SERVER_UNAVAILABLE'
+          || normalized.code === 'STEER_NOT_SUPPORTED'
+          || normalized.code === 'INTERRUPT_NOT_SUPPORTED'
+        ? 503
+        : 400
+  setJson(res, statusCode, {
+    bridgeVersion: 2,
+    code: normalized.code,
+    message: normalized.message,
+  })
 }
 
 const PROJECT_ZIP_SKIPPED_NAMES = new Set([
@@ -5606,7 +5681,7 @@ async function setThreadUnreadState(threadId: string, unread: boolean): Promise<
 const FIRST_LAUNCH_PLUGINS_CARD_DISMISSED_KEY = 'first-launch-plugins-card-dismissed'
 const THREAD_QUEUE_STATE_KEY = 'thread-queue-state'
 
-type StoredQueuedMessage = {
+export type StoredQueuedMessage = {
   id: string
   text: string
   imageUrls: string[]
@@ -7276,6 +7351,11 @@ class AppServerProcess {
     return this.call(method, params)
   }
 
+  getLifecycleStatus(): 'idle' | 'starting' | 'ready' {
+    if (this.initialized) return 'ready'
+    return this.process ? 'starting' : 'idle'
+  }
+
   async reload(): Promise<void> {
     if (this.reloadPromise) return await this.reloadPromise
 
@@ -7434,31 +7514,34 @@ export class BackendQueueProcessor {
     this.queueDrainDueAtByThreadId.set(threadId, nextDueAt)
   }
 
-  async processThreadQueue(threadId: string): Promise<void> {
-    if (this.processingThreadIds.has(threadId)) return
+  async processThreadQueue(threadId: string, threadReadResult?: unknown): Promise<DevCodexQueueStart | undefined> {
+    if (this.processingThreadIds.has(threadId)) return undefined
     this.processingThreadIds.add(threadId)
     try {
-      const canStart = await this.canStartQueuedTurn(threadId)
+      const canStart = await this.canStartQueuedTurn(threadId, threadReadResult)
       if (!canStart) {
         if (await this.hasQueuedTurns(threadId)) {
           this.scheduleThreadQueueDrain(threadId)
         }
-        return
+        return undefined
       }
       const next = await this.popNextQueuedTurn(threadId)
-      if (!next) return
+      if (!next) return undefined
       try {
-        await this.startQueuedTurn(next)
+        const turnId = await this.startQueuedTurn(next)
         if (await this.hasQueuedTurns(threadId)) {
           this.scheduleThreadQueueDrain(threadId)
         }
+        return { messageId: next.message.id, turnId }
       } catch {
         await this.restoreQueuedTurn(next)
         this.scheduleThreadQueueDrain(threadId)
+        return undefined
       }
     } catch {
       // Queue processing is best-effort. Keep the bridge alive if app-server is unavailable.
       this.scheduleThreadQueueDrain(threadId)
+      return undefined
     } finally {
       this.processingThreadIds.delete(threadId)
     }
@@ -7470,17 +7553,11 @@ export class BackendQueueProcessor {
     return Array.isArray(queue) && queue.length > 0
   }
 
-  private async canStartQueuedTurn(threadId: string): Promise<boolean> {
-    const response = asRecord(await this.appServer.rpc('thread/read', { threadId, includeTurns: true }))
+  private async canStartQueuedTurn(threadId: string, threadReadResult?: unknown): Promise<boolean> {
+    const response = asRecord(threadReadResult ?? await this.appServer.rpc('thread/read', { threadId, includeTurns: true }))
     const thread = asRecord(response?.thread)
     if (!thread) return false
-
-    const status = asRecord(thread.status)
-    const statusType = readNonEmptyString(status?.type)
-    if (statusType === 'inProgress' || statusType === 'running' || statusType === 'active') return false
-
-    const turns = Array.isArray(thread.turns) ? thread.turns : []
-    return !turns.some((turn) => readNonEmptyString(asRecord(turn)?.status) === 'inProgress')
+    return !isDevCodexThreadBusy(response)
   }
 
   private async popNextQueuedTurn(threadId: string): Promise<BackendQueuedTurn | null> {
@@ -7613,11 +7690,338 @@ export class BackendQueueProcessor {
     return params
   }
 
-  private async startQueuedTurn(turn: BackendQueuedTurn): Promise<void> {
-    const resumed = asRecord(await this.appServer.rpc('thread/resume', { threadId: turn.threadId }))
-    const cwd = readNonEmptyString(resumed?.cwd)
-    await this.appServer.rpc('turn/start', await this.buildQueuedTurnParams(turn, cwd))
+  async startMessageTurn(
+    threadId: string,
+    message: StoredQueuedMessage,
+    options: { cwd?: string; resume?: boolean } = {},
+  ): Promise<string> {
+    let cwd = options.cwd
+    if (options.resume !== false) {
+      const resumed = asRecord(await this.appServer.rpc('thread/resume', { threadId }))
+      cwd = readNonEmptyString(resumed?.cwd) || cwd
+    }
+    const result = asRecord(await this.appServer.rpc(
+      'turn/start',
+      await this.buildQueuedTurnParams({ threadId, message }, cwd),
+    ))
+    const turnId = readNonEmptyString(asRecord(result?.turn)?.id) || readNonEmptyString(result?.turnId)
+    if (!turnId) throw new Error('turn/start did not return a turn id')
+    return turnId
   }
+
+  private startQueuedTurn(turn: BackendQueuedTurn): Promise<string> {
+    return this.startMessageTurn(turn.threadId, turn.message)
+  }
+}
+
+type DevCodexDependencies = {
+  readPermissions: () => Promise<PermissionState>
+  appendQueuedMessage: (threadId: string, message: StoredQueuedMessage) => Promise<void>
+  readQueueState: () => Promise<ThreadQueueState>
+}
+
+const defaultDevCodexDependencies: DevCodexDependencies = {
+  readPermissions: readPermissionState,
+  appendQueuedMessage: appendThreadQueuedMessage,
+  readQueueState: readThreadQueueState,
+}
+
+export function isDevCodexThreadBusy(value: unknown): boolean {
+  const response = asRecord(value)
+  const thread = asRecord(response?.thread) ?? response
+  const statusType = readNonEmptyString(asRecord(thread?.status)?.type)
+  if (
+    statusType === 'active'
+    || statusType === 'inProgress'
+    || statusType === 'running'
+    || statusType === 'waitingForApproval'
+    || statusType === 'waiting_approval'
+  ) return true
+
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  return turns.some((turn) => {
+    const status = readNonEmptyString(asRecord(turn)?.status)
+    return status === 'inProgress' || status === 'running' || status === 'waitingForApproval' || status === 'waiting_approval'
+  })
+}
+
+export type DevCodexDispatchInput = {
+  message: string
+  target:
+    | { type: 'new'; cwd: string }
+    | { type: 'thread'; threadId: string }
+  mode: 'start' | 'queue' | 'steer'
+}
+
+export async function dispatchDevCodex(
+  appServer: RpcExecutor,
+  queueProcessor: DevCodexQueueProcessor,
+  input: DevCodexDispatchInput,
+  dependencies: DevCodexDependencies = defaultDevCodexDependencies,
+): Promise<DevCodexDispatchResult> {
+  const message = input.message.trim()
+  if (!message) throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'message is required')
+
+  if (input.target.type === 'new') {
+    if (input.mode !== 'start') {
+      throw new DevCodexBridgeOperationError('INVALID_MODE', 'target=new supports mode=start only')
+    }
+    const cwd = input.target.cwd.trim()
+    if (!cwd) throw new DevCodexBridgeOperationError('INVALID_TARGET', 'target=new requires cwd')
+    let started: unknown
+    try {
+      started = await appServer.rpc('thread/start', { cwd })
+    } catch (error) {
+      throw appServerUnavailable(error, 'Unable to create the native Codex thread.')
+    }
+    const startedRecord = asRecord(started)
+    const thread = asRecord(startedRecord?.thread) ?? startedRecord
+    const threadId = readNonEmptyString(thread?.id) || readNonEmptyString(startedRecord?.threadId)
+    if (!threadId) {
+      throw new DevCodexBridgeOperationError('APP_SERVER_UNAVAILABLE', 'thread/start did not return a thread id')
+    }
+    const queuedMessage = await buildDevCodexMessage(threadId, message, dependencies.readPermissions)
+    try {
+      const turnId = await queueProcessor.startMessageTurn(threadId, queuedMessage, { cwd, resume: false })
+      return { threadId, turnId, cwd: readNonEmptyString(thread?.cwd) || cwd, state: 'running' }
+    } catch (error) {
+      throw appServerUnavailable(error, 'Unable to start the first Codex turn.')
+    }
+  }
+
+  const threadId = input.target.threadId.trim()
+  if (!threadId) throw new DevCodexBridgeOperationError('INVALID_TARGET', 'target=thread requires threadId')
+  const threadReadResult = await readDevCodexThread(appServer, threadId)
+  const response = asRecord(threadReadResult)
+  const thread = asRecord(response?.thread) ?? response
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+
+  if (input.mode === 'steer') {
+    const activeTurnId = findActiveDevCodexTurnId(threadReadResult)
+    if (!activeTurnId) throw new DevCodexBridgeOperationError('NO_ACTIVE_TURN', `Thread ${threadId} has no active turn.`)
+    try {
+      const result = asRecord(await appServer.rpc('turn/steer', {
+        threadId,
+        expectedTurnId: activeTurnId,
+        input: [{ type: 'text', text: message }],
+      }))
+      return {
+        threadId,
+        turnId: readNonEmptyString(result?.turnId) || activeTurnId,
+        ...(cwd ? { cwd } : {}),
+        state: 'running',
+      }
+    } catch (error) {
+      if (isUnsupportedRpcError(error)) {
+        throw new DevCodexBridgeOperationError('STEER_NOT_SUPPORTED', 'The active Codex App Server does not support turn/steer.')
+      }
+      throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${activeTurnId} is no longer active.`)
+    }
+  }
+
+  const queuedMessage = await buildDevCodexMessage(threadId, message, dependencies.readPermissions)
+  if (input.mode === 'queue') {
+    await dependencies.appendQueuedMessage(threadId, queuedMessage)
+    const started = await queueProcessor.processThreadQueue(threadId, threadReadResult)
+    const queueState = await dependencies.readQueueState()
+    const stillQueued = (queueState[threadId] ?? []).some((entry) => entry.id === queuedMessage.id)
+    return {
+      threadId,
+      ...(started?.messageId === queuedMessage.id ? { turnId: started.turnId } : {}),
+      ...(cwd ? { cwd } : {}),
+      state: stillQueued ? 'queued' : 'running',
+    }
+  }
+
+  if (input.mode !== 'start') {
+    throw new DevCodexBridgeOperationError('INVALID_MODE', `Unsupported dispatch mode: ${String(input.mode)}`)
+  }
+  if (isDevCodexThreadBusy(threadReadResult)) {
+    throw new DevCodexBridgeOperationError('THREAD_BUSY', `Thread ${threadId} already has an active turn.`)
+  }
+  try {
+    const turnId = await queueProcessor.startMessageTurn(threadId, queuedMessage, { cwd })
+    return { threadId, turnId, ...(cwd ? { cwd } : {}), state: 'running' }
+  } catch (error) {
+    if (isBusyTurnError(error)) {
+      throw new DevCodexBridgeOperationError('THREAD_BUSY', `Thread ${threadId} became busy before turn/start.`)
+    }
+    throw appServerUnavailable(error, 'Unable to start the Codex turn.')
+  }
+}
+
+export async function readDevCodexTurnStatus(
+  appServer: RpcExecutor,
+  threadId: string,
+  turnId?: string,
+  dependencies: Pick<DevCodexDependencies, 'readQueueState'> = defaultDevCodexDependencies,
+): Promise<DevCodexDispatchResult & { error?: string; queuedCount?: number }> {
+  const normalizedThreadId = threadId.trim()
+  const normalizedTurnId = turnId?.trim() ?? ''
+  if (!normalizedThreadId) throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId is required')
+  const read = await readDevCodexThread(appServer, normalizedThreadId)
+  const response = asRecord(read)
+  const thread = asRecord(response?.thread) ?? response
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  const queueState = await dependencies.readQueueState()
+  const queuedCount = queueState[normalizedThreadId]?.length ?? 0
+
+  if (normalizedTurnId) {
+    const turn = turns.map(asRecord).find((entry) => readNonEmptyString(entry?.id) === normalizedTurnId)
+    if (!turn) throw new DevCodexBridgeOperationError('TURN_NOT_FOUND', `Turn ${normalizedTurnId} was not found in thread ${normalizedThreadId}.`)
+    return {
+      threadId: normalizedThreadId,
+      turnId: normalizedTurnId,
+      ...(cwd ? { cwd } : {}),
+      state: normalizeDevCodexTurnState(turn.status),
+      ...(readDevCodexTurnError(turn) ? { error: readDevCodexTurnError(turn) } : {}),
+      ...(queuedCount > 0 ? { queuedCount } : {}),
+    }
+  }
+
+  const activeTurnId = findActiveDevCodexTurnId(read)
+  if (activeTurnId) {
+    const active = turns.map(asRecord).find((entry) => readNonEmptyString(entry?.id) === activeTurnId)
+    const threadState = readNonEmptyString(asRecord(thread?.status)?.type)
+    return {
+      threadId: normalizedThreadId,
+      turnId: activeTurnId,
+      ...(cwd ? { cwd } : {}),
+      state: normalizeDevCodexTurnState(threadState || active?.status || 'inProgress'),
+      ...(queuedCount > 0 ? { queuedCount } : {}),
+    }
+  }
+  if (queuedCount > 0) {
+    return { threadId: normalizedThreadId, ...(cwd ? { cwd } : {}), state: 'queued', queuedCount }
+  }
+  const latest = asRecord(turns.at(-1))
+  return {
+    threadId: normalizedThreadId,
+    ...(readNonEmptyString(latest?.id) ? { turnId: readNonEmptyString(latest?.id) } : {}),
+    ...(cwd ? { cwd } : {}),
+    state: latest ? normalizeDevCodexTurnState(latest.status) : 'unknown',
+    ...(latest && readDevCodexTurnError(latest) ? { error: readDevCodexTurnError(latest) } : {}),
+  }
+}
+
+export async function interruptDevCodexTurn(
+  appServer: RpcExecutor,
+  threadId: string,
+  turnId: string,
+): Promise<DevCodexDispatchResult> {
+  const normalizedThreadId = threadId.trim()
+  const normalizedTurnId = turnId.trim()
+  if (!normalizedThreadId || !normalizedTurnId) {
+    throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId and turnId are required')
+  }
+  const read = await readDevCodexThread(appServer, normalizedThreadId)
+  const response = asRecord(read)
+  const thread = asRecord(response?.thread) ?? response
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  const exists = turns.some((turn) => readNonEmptyString(asRecord(turn)?.id) === normalizedTurnId)
+  if (!exists) throw new DevCodexBridgeOperationError('TURN_NOT_FOUND', `Turn ${normalizedTurnId} was not found in thread ${normalizedThreadId}.`)
+  if (findActiveDevCodexTurnId(read) !== normalizedTurnId) {
+    throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${normalizedTurnId} is not the active turn for thread ${normalizedThreadId}.`)
+  }
+  try {
+    await appServer.rpc('turn/interrupt', { threadId: normalizedThreadId, turnId: normalizedTurnId })
+  } catch (error) {
+    if (isUnsupportedRpcError(error)) {
+      throw new DevCodexBridgeOperationError('INTERRUPT_NOT_SUPPORTED', 'The active Codex App Server does not support turn/interrupt.')
+    }
+    throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${normalizedTurnId} is no longer active.`)
+  }
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+  return {
+    threadId: normalizedThreadId,
+    turnId: normalizedTurnId,
+    ...(cwd ? { cwd } : {}),
+    state: 'interrupt_requested',
+  }
+}
+
+async function buildDevCodexMessage(
+  threadId: string,
+  text: string,
+  readPermissions: () => Promise<PermissionState>,
+): Promise<StoredQueuedMessage> {
+  const permissionState = await readPermissions()
+  return {
+    id: `devcodex-${randomUUID()}`,
+    text,
+    imageUrls: [],
+    skills: [],
+    fileAttachments: [],
+    collaborationMode: 'default',
+    permissionPreset: permissionState.threadPresets[threadId] ?? permissionState.defaultPreset,
+  }
+}
+
+async function readDevCodexThread(appServer: RpcExecutor, threadId: string): Promise<unknown> {
+  try {
+    const result = await appServer.rpc('thread/read', { threadId, includeTurns: true })
+    const record = asRecord(result)
+    const thread = asRecord(record?.thread) ?? record
+    if (!readNonEmptyString(thread?.id) && !readNonEmptyString(record?.threadId)) {
+      throw new DevCodexBridgeOperationError('THREAD_NOT_FOUND', `Thread ${threadId} was not found.`)
+    }
+    return result
+  } catch (error) {
+    if (error instanceof DevCodexBridgeOperationError) throw error
+    if (isThreadNotFoundError(error)) {
+      throw new DevCodexBridgeOperationError('THREAD_NOT_FOUND', `Thread ${threadId} was not found.`)
+    }
+    throw appServerUnavailable(error, `Unable to read thread ${threadId}.`)
+  }
+}
+
+function findActiveDevCodexTurnId(value: unknown): string {
+  const response = asRecord(value)
+  const thread = asRecord(response?.thread) ?? response
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = asRecord(turns[index])
+    if (isActiveDevCodexTurnStatus(turn?.status)) return readNonEmptyString(turn?.id)
+  }
+  return ''
+}
+
+function normalizeDevCodexTurnState(value: unknown): DevCodexTurnState {
+  const status = readNonEmptyString(value)
+  if (status === 'inProgress' || status === 'in_progress' || status === 'running' || status === 'active') return 'running'
+  if (status === 'completed') return 'completed'
+  if (status === 'failed') return 'failed'
+  if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') return 'interrupted'
+  if (status === 'waitingForApproval' || status === 'waiting_approval' || status === 'requiresApproval') return 'waiting_approval'
+  return 'unknown'
+}
+
+function isActiveDevCodexTurnStatus(value: unknown): boolean {
+  const state = normalizeDevCodexTurnState(value)
+  return state === 'running' || state === 'waiting_approval'
+}
+
+function readDevCodexTurnError(turn: Record<string, unknown>): string {
+  const error = asRecord(turn.error)
+  return readNonEmptyString(error?.message) || readNonEmptyString(error?.additionalDetails) || ''
+}
+
+function isUnsupportedRpcError(error: unknown): boolean {
+  return /unknown method|method not found|unsupported method|not supported/i.test(devCodexErrorMessage(error))
+}
+
+function isBusyTurnError(error: unknown): boolean {
+  return /active turn|turn.*in progress|thread.*busy|already.*running/i.test(devCodexErrorMessage(error))
+}
+
+function devCodexErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function appServerUnavailable(error: unknown, message: string): DevCodexBridgeOperationError {
+  const detail = devCodexErrorMessage(error).trim()
+  return new DevCodexBridgeOperationError('APP_SERVER_UNAVAILABLE', detail ? `${message} ${detail}` : message)
 }
 
 class MethodCatalog {
@@ -8370,6 +8774,121 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 
       if (req.method === 'POST' && url.pathname === '/codex-api/upload-file') {
         handleFileUpload(req, res)
+        return
+      }
+
+      const devCodexBridgePrefix = '/codex-api/integrations/devcodex/v2'
+      if (req.method === 'GET' && url.pathname === `${devCodexBridgePrefix}/health`) {
+        setJson(res, 200, {
+          ok: true,
+          bridgeVersion: 2,
+          appServer: appServer.getLifecycleStatus(),
+        })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === `${devCodexBridgePrefix}/threads`) {
+        const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10)
+        const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 20))
+        const cwd = url.searchParams.get('cwd')?.trim() ?? ''
+        try {
+          const result = await callRpcWithArchiveRecovery(appServer, 'thread/list', {
+            limit,
+            sortKey: 'updated_at',
+            sortDirection: 'desc',
+            ...(cwd ? { cwd } : {}),
+          })
+          setJson(res, 200, {
+            bridgeVersion: 2,
+            result: mergeImportedThreadsIntoThreadListResult(result),
+          })
+        } catch (error) {
+          setDevCodexBridgeError(res, appServerUnavailable(error, 'Unable to list Codex threads.'))
+        }
+        return
+      }
+
+      const devCodexThreadMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)$`).exec(url.pathname)
+      if (req.method === 'GET' && devCodexThreadMatch) {
+        const threadId = decodeURIComponent(devCodexThreadMatch[1] ?? '').trim()
+        if (!threadId) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId is required'))
+          return
+        }
+        try {
+          const result = await readDevCodexThread(appServer, threadId)
+          const trimmedResult = trimThreadTurnsInRpcResult('thread/read', result)
+          const errorMergedResult = mergeStreamTurnErrorsIntoThreadResult(appServer, trimmedResult)
+          const sanitizedResult = await sanitizeThreadTurnsInlinePayloads('thread/read', errorMergedResult)
+          setJson(res, 200, {
+            bridgeVersion: 2,
+            result: await mergeSessionSkillInputsIntoThreadResult(sanitizedResult),
+          })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === `${devCodexBridgePrefix}/dispatch`) {
+        const payload = asRecord(await readJsonBody(req))
+        const target = asRecord(payload?.target)
+        const message = readNonEmptyString(payload?.message)
+        const mode = readNonEmptyString(payload?.mode)
+        const targetType = readNonEmptyString(target?.type)
+        if (!message || !mode || (targetType !== 'new' && targetType !== 'thread')) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'message, mode, and a valid target are required'))
+          return
+        }
+        const dispatchTarget = targetType === 'new'
+          ? { type: 'new' as const, cwd: readNonEmptyString(target?.cwd) }
+          : { type: 'thread' as const, threadId: readNonEmptyString(target?.threadId) }
+        if ((dispatchTarget.type === 'new' && !dispatchTarget.cwd) || (dispatchTarget.type === 'thread' && !dispatchTarget.threadId)) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_TARGET', 'The dispatch target is incomplete'))
+          return
+        }
+        if (mode !== 'start' && mode !== 'queue' && mode !== 'steer') {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_MODE', `Unsupported dispatch mode: ${mode}`))
+          return
+        }
+        try {
+          if (dispatchTarget.type === 'new') await ensureWorkspaceRootForThread(dispatchTarget.cwd)
+          const dispatched = await dispatchDevCodex(appServer, backendQueueProcessor, {
+            message,
+            target: dispatchTarget,
+            mode,
+          })
+          emitBridgeStateNotification(bridgeState, 'bridge/threadQueueStateChanged', { threadId: dispatched.threadId })
+          setJson(res, 202, { bridgeVersion: 2, data: dispatched })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      const devCodexStatusMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)/turn-status$`).exec(url.pathname)
+      if (req.method === 'GET' && devCodexStatusMatch) {
+        const threadId = decodeURIComponent(devCodexStatusMatch[1] ?? '').trim()
+        const turnId = url.searchParams.get('turnId')?.trim() || undefined
+        try {
+          const status = await readDevCodexTurnStatus(appServer, threadId, turnId)
+          setJson(res, 200, { bridgeVersion: 2, data: status })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      const devCodexInterruptMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)/turns/([^/]+)/interrupt$`).exec(url.pathname)
+      if (req.method === 'POST' && devCodexInterruptMatch) {
+        const threadId = decodeURIComponent(devCodexInterruptMatch[1] ?? '').trim()
+        const turnId = decodeURIComponent(devCodexInterruptMatch[2] ?? '').trim()
+        try {
+          const status = await interruptDevCodexTurn(appServer, threadId, turnId)
+          setJson(res, 202, { bridgeVersion: 2, data: status })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
         return
       }
 

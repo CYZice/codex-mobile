@@ -122,6 +122,13 @@ Notes:
 - depending on proxying details, authentication behavior may differ from direct remote access
 - if conversations created in the web UI do not immediately appear in the Windows app, restarting the Windows app may refresh them
 
+For a controller-managed local deployment, bind to loopback and fail on port
+conflicts instead of silently selecting another port:
+
+```powershell
+npx codexapp --host 127.0.0.1 --port 5900 --strict-port --no-tunnel --no-open
+```
+
 ---
 
 ## ✨ Features
