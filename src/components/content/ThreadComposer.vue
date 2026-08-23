@@ -2046,7 +2046,7 @@ watch(
 }
 
 .thread-composer--expanded {
-  @apply fixed inset-0 z-[90] max-w-none bg-white/95;
+  @apply fixed inset-0 z-[300] max-w-none bg-white/95;
   height: 100dvh;
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-right: max(0.75rem, env(safe-area-inset-right));

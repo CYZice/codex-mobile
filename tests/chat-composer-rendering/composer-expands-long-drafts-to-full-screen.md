@@ -18,6 +18,7 @@ Thread composer full-screen expand control for multi-line drafts.
 7. Switch to dark theme and repeat steps 1-6.
 8. Repeat at 375x812 and 768x1024 with enough text to scroll; verify the first and last lines are reachable.
 9. Exit full screen with Escape on desktop and with the visible minimize button on each viewport.
+10. Open an existing thread with the title, terminal, and branch toolbar visible; expand the composer and verify the full-screen surface covers that toolbar instead of rendering behind it.
 
 #### Expected Results
 - Short drafts do not show the expand control.
@@ -25,6 +26,7 @@ Thread composer full-screen expand control for multi-line drafts.
 - Full-screen mode uses the same draft state and submit controls as inline mode.
 - Full-screen mode covers the visual viewport without being clipped by the app shell; attachment chips scroll separately while the textarea and bottom controls remain usable.
 - The minimize button stays visible above long content and the page behind the composer does not scroll.
+- Existing-thread title and branch controls never cover the expanded composer or its first lines.
 - Full-screen and inline states are readable in light theme and dark theme.
 
 #### Rollback/Cleanup
