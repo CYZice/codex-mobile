@@ -969,6 +969,7 @@
                   :dictation-click-to-toggle="dictationClickToToggle" :dictation-auto-send="dictationAutoSend"
                   :dictation-language="dictationLanguage"
                   @submit="onSubmitThreadMessage"
+                  @execute-command="onExecuteComposerCommand"
                   @update:selected-collaboration-mode="onSelectCollaborationMode"
                   @update:selected-permission-preset="onSelectPermissionPreset"
                   @update:selected-model="onSelectModel"
@@ -1061,7 +1062,8 @@
                     :dictation-language="dictationLanguage"
                     @update:selected-collaboration-mode="onSelectCollaborationMode"
                     @update:selected-permission-preset="onSelectPermissionPreset"
-                    @submit="onSubmitThreadMessage" @update:selected-model="onSelectModel"
+                    @submit="onSubmitThreadMessage" @execute-command="onExecuteComposerCommand"
+                    @update:selected-model="onSelectModel"
                     @update:selected-reasoning-effort="onSelectReasoningEffort"
                     @update:selected-speed-mode="onSelectSpeedMode"
                     @interrupt="onInterruptTurn" />
@@ -1241,12 +1243,13 @@ import {
   refreshAccountsFromAuth,
   resetGitBranchToCommit,
   startCodexLogin,
+  startThreadReview,
   searchThreads,
   switchAccount,
   unarchiveThread,
 } from './api/codexGateway'
 import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiMessage, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
-import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
+import type { ComposerCommandPayload, ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { PermissionPreset } from './permissions'
 import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
@@ -3517,12 +3520,18 @@ async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[
       : undefined
   editingQueuedMessageState.value = null
   if (isHomeRoute.value) {
+    const draft: ComposerDraftPayload = {
+      text,
+      imageUrls: [...payload.imageUrls],
+      fileAttachments: payload.fileAttachments.map((attachment) => ({ ...attachment })),
+      skills: payload.skills.map((skill) => ({ ...skill })),
+    }
     isHomeComposerSubmitting.value = true
+    homeThreadComposerRef.value?.completeSubmission()
     try {
       await submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills, payload.fileAttachments)
-      if (!isHomeRoute.value) {
-        homeThreadComposerRef.value?.completeSubmission()
-      }
+    } catch {
+      homeThreadComposerRef.value?.hydrateDraft(draft)
     } finally {
       isHomeComposerSubmitting.value = false
     }
@@ -3551,6 +3560,40 @@ async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[
     // Keep the draft intact so the user can correct or resend it.
   } finally {
     isThreadComposerSubmitting.value = false
+  }
+}
+
+async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promise<void> {
+  if (payload.command.name === 'plan') {
+    setSelectedCollaborationMode('plan')
+    const hasSubmissionContent = payload.submission.text.trim().length > 0
+      || payload.submission.imageUrls.length > 0
+      || payload.submission.fileAttachments.length > 0
+      || payload.submission.skills.length > 0
+    if (!hasSubmissionContent) {
+      const composer = isHomeRoute.value ? homeThreadComposerRef.value : threadComposerRef.value
+      composer?.completeSubmission()
+      return
+    }
+    await onSubmitThreadMessage(payload.submission)
+    return
+  }
+
+  if (isHomeRoute.value || !selectedThreadId.value) {
+    desktopError.value = 'Open an existing thread before running /review.'
+    return
+  }
+  if (isSelectedThreadInProgress.value) {
+    desktopError.value = 'Wait for the current turn to finish before running /review.'
+    return
+  }
+
+  desktopError.value = ''
+  try {
+    await startThreadReview(selectedThreadId.value, 'workspace', 'unstaged')
+    threadComposerRef.value?.completeSubmission()
+  } catch (reviewError) {
+    desktopError.value = reviewError instanceof Error ? reviewError.message : 'Failed to start review'
   }
 }
 

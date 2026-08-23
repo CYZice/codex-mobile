@@ -16,11 +16,15 @@ Thread composer full-screen expand control for multi-line drafts.
 5. Click the collapse button.
 6. Confirm the composer returns to its normal inline size with the draft still intact.
 7. Switch to dark theme and repeat steps 1-6.
+8. Repeat at 375x812 and 768x1024 with enough text to scroll; verify the first and last lines are reachable.
+9. Exit full screen with Escape on desktop and with the visible minimize button on each viewport.
 
 #### Expected Results
 - Short drafts do not show the expand control.
 - Long or overflowing drafts show an icon-only expand control.
 - Full-screen mode uses the same draft state and submit controls as inline mode.
+- Full-screen mode covers the visual viewport without being clipped by the app shell; attachment chips scroll separately while the textarea and bottom controls remain usable.
+- The minimize button stays visible above long content and the page behind the composer does not scroll.
 - Full-screen and inline states are readable in light theme and dark theme.
 
 #### Rollback/Cleanup

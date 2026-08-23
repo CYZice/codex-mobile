@@ -268,7 +268,7 @@
   @apply border-zinc-700 bg-zinc-800;
 }
 
-:root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) {
+:root.dark .thread-composer--expanded {
   @apply bg-zinc-950/95;
 }
 
@@ -301,11 +301,11 @@
     @apply border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white;
   }
 
-  :root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-shell {
+  :root.dark .thread-composer--expanded .thread-composer-shell {
     @apply border-zinc-700 bg-zinc-900;
   }
 
-  :root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-input-wrap {
+  :root.dark .thread-composer--expanded .thread-composer-input-wrap {
     @apply bg-transparent;
   }
 }
@@ -561,6 +561,26 @@
 
 :root.dark .thread-composer-file-mentions {
   @apply border-zinc-600 bg-zinc-800;
+}
+
+:root.dark .thread-composer-slash-commands {
+  @apply border-zinc-600 bg-zinc-800;
+}
+
+:root.dark .thread-composer-slash-command-row {
+  @apply hover:bg-zinc-700;
+}
+
+:root.dark .thread-composer-slash-command-row.is-active {
+  @apply bg-zinc-700;
+}
+
+:root.dark .thread-composer-slash-command-name {
+  @apply text-zinc-100;
+}
+
+:root.dark .thread-composer-slash-command-description {
+  @apply text-zinc-400;
 }
 
 :root.dark .thread-composer-file-mention-row {

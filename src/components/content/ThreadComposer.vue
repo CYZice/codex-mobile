@@ -1,5 +1,10 @@
 <template>
-  <form class="thread-composer" @submit.prevent="onSubmit(isTurnInProgress ? activeInProgressMode : 'steer')">
+  <Teleport to="body" :disabled="!isComposerExpanded">
+    <form
+      class="thread-composer"
+      :class="{ 'thread-composer--expanded': isComposerExpanded }"
+      @submit.prevent="onSubmit(isTurnInProgress ? activeInProgressMode : 'steer')"
+    >
     <p v-if="dictationErrorText" class="thread-composer-dictation-error">
       {{ dictationErrorText }}
     </p>
@@ -11,6 +16,7 @@
         'thread-composer-shell--drag-active': isDragActive,
       }"
     >
+      <div v-if="hasDraftContext" class="thread-composer-draft-context">
       <div v-if="selectedImages.length > 0" class="thread-composer-attachments">
         <div v-for="image in selectedImages" :key="image.id" class="thread-composer-attachment">
           <img class="thread-composer-attachment-image" :src="image.url" :alt="image.name || 'Selected image'" />
@@ -82,6 +88,7 @@
           >×</button>
         </span>
       </div>
+      </div>
 
       <div
         class="thread-composer-input-wrap"
@@ -96,6 +103,21 @@
       >
         <div v-if="isDragActive" class="thread-composer-drop-overlay" aria-hidden="true">
           <span class="thread-composer-drop-overlay-copy">Drop images or files</span>
+        </div>
+        <div v-if="isSlashCommandOpen" class="thread-composer-slash-commands" role="listbox" aria-label="Composer commands">
+          <button
+            v-for="(command, index) in slashCommandSuggestions"
+            :key="command.name"
+            class="thread-composer-slash-command-row"
+            :class="{ 'is-active': index === slashCommandHighlightedIndex }"
+            type="button"
+            role="option"
+            :aria-selected="index === slashCommandHighlightedIndex"
+            @mousedown.prevent="executeSuggestedCommand(command.name)"
+          >
+            <span class="thread-composer-slash-command-name">/{{ command.name }}</span>
+            <span class="thread-composer-slash-command-description">{{ command.description }}</span>
+          </button>
         </div>
         <div v-if="isFileMentionOpen" class="thread-composer-file-mentions">
           <template v-if="fileMentionSuggestions.length > 0">
@@ -397,7 +419,8 @@
       @cancel="isFullAccessConfirmationOpen = false"
       @confirm="confirmFullAccess"
     />
-  </form>
+    </form>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -417,6 +440,7 @@ import { useDictation } from '../../composables/useDictation'
 import { useMobile } from '../../composables/useMobile'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import type { PermissionPreset } from '../../permissions'
+import { getComposerCommandQuery, parseComposerCommand, type ComposerCommand } from '../../composerCommands'
 import {
   createComposerPrompt,
   getComposerPrompts,
@@ -492,6 +516,11 @@ export type SubmitPayload = {
   mode: 'steer' | 'queue'
 }
 
+export type ComposerCommandPayload = {
+  command: ComposerCommand
+  submission: SubmitPayload
+}
+
 export type ThreadComposerExposed = {
   hydrateDraft: (payload: ComposerDraftPayload) => void
   appendTextToDraft: (text: string) => void
@@ -501,6 +530,7 @@ export type ThreadComposerExposed = {
 
 const emit = defineEmits<{
   submit: [payload: SubmitPayload]
+  'execute-command': [payload: ComposerCommandPayload]
   interrupt: []
   'update:selected-collaboration-mode': [mode: CollaborationModeKind]
   'update:selected-permission-preset': [preset: PermissionPreset]
@@ -593,6 +623,7 @@ const mentionQuery = ref('')
 const fileMentionSuggestions = ref<ComposerFileSuggestion[]>([])
 const isFileMentionOpen = ref(false)
 const fileMentionHighlightedIndex = ref(0)
+const slashCommandHighlightedIndex = ref(0)
 const isComposerExpanded = ref(false)
 const isDraftOverflowing = ref(false)
 let composerOverflowMeasurementQueued = false
@@ -602,6 +633,7 @@ let fileMentionDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let isHoldPressActive = false
 let dragDepth = 0
 let attachmentSessionToken = 0
+let bodyOverflowBeforeExpansion = ''
 const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
 const DRAFT_STORAGE_PREFIX = 'codex-web-local.thread-draft.v1.'
 let lastActiveThreadId = ''
@@ -684,7 +716,26 @@ const standaloneFileAttachments = computed(() => {
   }
   return fileAttachments.value.filter((att) => !grouped.has(att.fsPath))
 })
+const hasDraftContext = computed(() =>
+  selectedImages.value.length > 0
+  || folderUploadGroups.value.length > 0
+  || standaloneFileAttachments.value.length > 0
+  || selectedSkills.value.length > 0,
+)
 const isInteractionDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
+const slashCommands = [
+  { name: 'plan' as const, description: 'Switch to Plan mode; add text after the command to send it' },
+  { name: 'review' as const, description: 'Review the current workspace changes in this thread' },
+]
+const slashCommandQuery = computed(() => getComposerCommandQuery(draft.value))
+const slashCommandSuggestions = computed(() => {
+  const query = slashCommandQuery.value
+  if (query === null) return []
+  return slashCommands.filter((command) => command.name.startsWith(query))
+})
+const isSlashCommandOpen = computed(() =>
+  !isInteractionDisabled.value && slashCommandSuggestions.value.length > 0,
+)
 const isComposerConfigDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
 const isFastModeSupported = computed(() => /^gpt-5\.(?:4|5)(?:$|-)/.test(props.selectedModel.trim()))
 const showFastModeModelIcon = computed(() =>
@@ -984,13 +1035,25 @@ function buildContextUsageView(
 function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
   const text = draft.value.trim()
   if (!canSubmit.value) return
-  emit('submit', {
-    text,
+  const command = parseComposerCommand(text)
+  const submission: SubmitPayload = {
+    text: command?.name === 'plan' ? command.argument : text,
     imageUrls: selectedImages.value.map((image) => image.url),
     fileAttachments: [...fileAttachments.value],
     skills: selectedSkills.value.map((s) => ({ name: s.name, path: s.path })),
     mode,
-  })
+  }
+  if (command) {
+    emit('execute-command', { command, submission })
+    return
+  }
+  emit('submit', submission)
+}
+
+function executeSuggestedCommand(name: 'plan' | 'review'): void {
+  draft.value = `/${name}`
+  slashCommandHighlightedIndex.value = 0
+  onSubmit(props.isTurnInProgress ? activeInProgressMode.value : 'steer')
 }
 
 function setActiveInProgressMode(mode: 'steer' | 'queue'): void {
@@ -1139,6 +1202,13 @@ function toggleComposerExpanded(): void {
   isComposerExpanded.value = !isComposerExpanded.value
   queueComposerOverflowMeasurement()
   void nextTick(() => inputRef.value?.focus())
+}
+
+function onDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !isComposerExpanded.value) return
+  if (isFileMentionOpen.value || isSlashCommandOpen.value || isAttachMenuOpen.value) return
+  isComposerExpanded.value = false
+  queueComposerOverflowMeasurement()
 }
 
 function onModelSelect(value: string): void {
@@ -1597,6 +1667,33 @@ function onInputChange(): void {
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
+  if (isSlashCommandOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      draft.value = ''
+      slashCommandHighlightedIndex.value = 0
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      slashCommandHighlightedIndex.value =
+        (slashCommandHighlightedIndex.value + 1) % slashCommandSuggestions.value.length
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      const size = slashCommandSuggestions.value.length
+      slashCommandHighlightedIndex.value = (slashCommandHighlightedIndex.value + size - 1) % size
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      const selected = slashCommandSuggestions.value[slashCommandHighlightedIndex.value]
+      if (selected) executeSuggestedCommand(selected.name)
+      return
+    }
+  }
+
   if (isFileMentionOpen.value) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -1852,6 +1949,7 @@ function onDocumentClick(event: MouseEvent): void {
 
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
+  document.addEventListener('keydown', onDocumentKeydown)
   window.addEventListener('drop', onWindowDragCleanup)
   window.addEventListener('dragend', onWindowDragCleanup)
   window.addEventListener('blur', onWindowDragCleanup)
@@ -1868,6 +1966,7 @@ defineExpose<ThreadComposerExposed>({
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
+  document.removeEventListener('keydown', onDocumentKeydown)
   window.removeEventListener('drop', onWindowDragCleanup)
   window.removeEventListener('dragend', onWindowDragCleanup)
   window.removeEventListener('blur', onWindowDragCleanup)
@@ -1876,6 +1975,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', onDictationPressEnd)
   if (fileMentionDebounceTimer) {
     clearTimeout(fileMentionDebounceTimer)
+  }
+  if (typeof document !== 'undefined' && isComposerExpanded.value) {
+    document.body.style.overflow = bodyOverflowBeforeExpansion
   }
 })
 
@@ -1903,7 +2005,18 @@ watch([draft, selectedImages, fileAttachments, selectedSkills], () => {
 }, { deep: true })
 
 watch(draft, () => {
+  slashCommandHighlightedIndex.value = 0
   queueComposerOverflowMeasurement()
+})
+
+watch(isComposerExpanded, (expanded) => {
+  if (typeof document === 'undefined') return
+  if (expanded) {
+    bodyOverflowBeforeExpansion = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return
+  }
+  document.body.style.overflow = bodyOverflowBeforeExpansion
 })
 
 watch(
@@ -1932,16 +2045,21 @@ watch(
   @apply w-full max-w-[min(var(--chat-column-max,72rem),100%)] mx-auto;
 }
 
-.thread-composer:has(.thread-composer-input-wrap--expanded) {
-  @apply fixed inset-0 z-50 max-w-none bg-white/95 p-3 sm:p-6;
+.thread-composer--expanded {
+  @apply fixed inset-0 z-[90] max-w-none bg-white/95;
+  height: 100dvh;
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
 }
 
 .thread-composer-shell {
   @apply relative rounded-2xl border border-zinc-300 bg-white p-2 sm:p-3 shadow-sm;
 }
 
-.thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-shell {
-  @apply mx-auto flex h-full w-full max-w-[min(var(--chat-column-max,72rem),100%)] flex-col shadow-2xl;
+.thread-composer--expanded .thread-composer-shell {
+  @apply mx-auto flex h-full min-h-0 w-full max-w-[min(var(--chat-column-max,72rem),100%)] flex-col overflow-hidden shadow-2xl;
 }
 
 .thread-composer-shell--drag-active {
@@ -1954,6 +2072,14 @@ watch(
 
 .thread-composer-attachments {
   @apply mb-2 flex flex-wrap gap-2;
+}
+
+.thread-composer-draft-context {
+  @apply shrink-0;
+}
+
+.thread-composer--expanded .thread-composer-draft-context {
+  @apply mb-2 max-h-[min(28dvh,12rem)] overflow-y-auto;
 }
 
 .thread-composer-attachment {
@@ -2091,6 +2217,30 @@ watch(
   @apply absolute left-0 right-0 bottom-[calc(100%+8px)] z-40 max-h-52 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
 }
 
+.thread-composer-slash-commands {
+  @apply absolute left-0 right-0 bottom-[calc(100%+8px)] z-40 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+}
+
+.thread-composer--expanded .thread-composer-slash-commands {
+  @apply bottom-auto top-0;
+}
+
+.thread-composer-slash-command-row {
+  @apply flex w-full items-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left transition hover:bg-zinc-100;
+}
+
+.thread-composer-slash-command-row.is-active {
+  @apply bg-zinc-100;
+}
+
+.thread-composer-slash-command-name {
+  @apply min-w-16 font-mono text-sm font-semibold text-zinc-900;
+}
+
+.thread-composer-slash-command-description {
+  @apply min-w-0 flex-1 text-xs leading-5 text-zinc-500;
+}
+
 .thread-composer-file-mention-row {
   @apply flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-xs text-zinc-700 transition hover:bg-zinc-100;
 }
@@ -2144,7 +2294,7 @@ watch(
 }
 
 .thread-composer-input-wrap--expanded .thread-composer-input {
-  @apply h-full max-h-none pr-12 text-base leading-6;
+  @apply h-full max-h-none pr-12 text-base leading-6 overflow-y-auto;
 }
 
 .thread-composer-input:focus {
@@ -2156,7 +2306,7 @@ watch(
 }
 
 .thread-composer-expand {
-  @apply absolute right-0.5 top-0.5 inline-flex h-8 w-8 items-center justify-center rounded-full border-0 bg-zinc-100 text-zinc-500 shadow-sm transition hover:bg-zinc-200 hover:text-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-400;
+  @apply absolute right-0.5 top-0.5 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border-0 bg-zinc-100 text-zinc-500 shadow-sm transition hover:bg-zinc-200 hover:text-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-400;
 }
 
 .thread-composer-expand-icon {
@@ -2348,21 +2498,21 @@ watch(
     display: none;
   }
 
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-shell {
+  .thread-composer--expanded .thread-composer-shell {
     @apply flex border border-zinc-300 bg-white p-3;
   }
 
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-controls {
+  .thread-composer--expanded .thread-composer-controls {
     @apply flex;
   }
 
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-input-wrap {
+  .thread-composer--expanded .thread-composer-input-wrap {
     @apply order-none border-0 bg-transparent;
   }
 
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-attach,
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-config-controls,
-  .thread-composer:has(.thread-composer-input-wrap--expanded) .thread-composer-actions {
+  .thread-composer--expanded .thread-composer-attach,
+  .thread-composer--expanded .thread-composer-config-controls,
+  .thread-composer--expanded .thread-composer-actions {
     @apply order-none;
   }
 }
