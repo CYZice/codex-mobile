@@ -108,6 +108,7 @@ describe('startThreadTurn collaboration mode payloads', () => {
       'default',
       {
         approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review',
         sandboxPolicy: {
           type: 'workspaceWrite',
           writableRoots: ['D:\\Projects\\LiDAR FPGA'],
@@ -120,6 +121,7 @@ describe('startThreadTurn collaboration mode payloads', () => {
 
     expect(requests[0].params).toMatchObject({
       approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
       sandboxPolicy: {
         type: 'workspaceWrite',
         writableRoots: ['D:\\Projects\\LiDAR FPGA'],

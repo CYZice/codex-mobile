@@ -1770,25 +1770,30 @@ export function useDesktopState() {
     shouldAutoScrollOnNextAgentEvent = false
   }
 
-  function setSelectedModelIdForThread(threadId: string, modelId: string): void {
+  function setSelectedModelIdForThread(
+    threadId: string,
+    modelId: string,
+    options: { rememberForNewThread?: boolean } = {},
+  ): void {
     const normalizedModelId = modelId.trim()
     const contextId = toThreadContextId(threadId)
     const normalizedProviderId = normalizeProviderContextId(activeProviderId.value)
-    const providerContextId =
-      contextId === NEW_THREAD_COLLABORATION_MODE_CONTEXT
-        ? toProviderModelContextId(normalizedProviderId)
-        : ''
-    const selectedContextId = providerContextId || contextId
+    const providerContextId = toProviderModelContextId(normalizedProviderId)
+    const isNewThreadContext = contextId === NEW_THREAD_COLLABORATION_MODE_CONTEXT
+    const selectedContextId = isNewThreadContext && providerContextId ? providerContextId : contextId
     if (normalizedModelId) {
       const nextModelMap = cloneStringKeyedRecord(selectedModelIdByContext.value)
       nextModelMap[selectedContextId] = normalizedModelId
-      if (providerContextId) {
+      if (providerContextId && (isNewThreadContext || options.rememberForNewThread !== false)) {
+        nextModelMap[providerContextId] = normalizedModelId
+      }
+      if (isNewThreadContext && providerContextId) {
         delete nextModelMap[contextId]
       }
       selectedModelIdByContext.value = nextModelMap
     } else {
       let nextModelMap = omitStringKeyedRecordKey(selectedModelIdByContext.value, selectedContextId)
-      if (providerContextId) {
+      if (isNewThreadContext && providerContextId) {
         nextModelMap = omitStringKeyedRecordKey(nextModelMap, contextId)
       }
       selectedModelIdByContext.value = nextModelMap
@@ -1804,7 +1809,7 @@ export function useDesktopState() {
   }
 
   function setSelectedModelId(modelId: string): void {
-    setSelectedModelIdForThread(selectedThreadId.value, modelId)
+    setSelectedModelIdForThread(selectedThreadId.value, modelId, { rememberForNewThread: false })
   }
 
   function setThreadModelId(threadId: string, modelId: string): void {
@@ -1974,11 +1979,12 @@ export function useDesktopState() {
     threadId: string,
     approvalPolicy: unknown,
     sandboxPolicy: unknown,
+    approvalsReviewer: unknown,
     options: { force?: boolean } = {},
   ): void {
     applyReconciledThreadPermissionPreset(
       threadId,
-      inferPermissionPresetFromSettings(approvalPolicy, sandboxPolicy),
+      inferPermissionPresetFromSettings(approvalPolicy, sandboxPolicy, approvalsReviewer),
       options,
     )
   }
@@ -3984,6 +3990,7 @@ export function useDesktopState() {
           threadId,
           threadSettings.approvalPolicy,
           threadSettings.sandboxPolicy,
+          threadSettings.approvalsReviewer,
           { force: true },
         )
       }

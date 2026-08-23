@@ -47,6 +47,36 @@ describe('workspace roots Desktop state compatibility', () => {
     }
   })
 
+  it('migrates legacy permission state to the auto-review default once', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-permissions-migration-'))
+    const permissionStatePath = join(codexHome, 'codexapp-permissions.json')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await writeFile(permissionStatePath, JSON.stringify({
+        defaultPreset: 'fullAccess',
+        threadPresets: {
+          'thread-workspace': 'workspace',
+          'thread-full': 'fullAccess',
+        },
+      }), 'utf8')
+
+      expect(await readPermissionState()).toEqual({
+        defaultPreset: 'autoReview',
+        threadPresets: {
+          'thread-workspace': 'workspace',
+          'thread-full': 'fullAccess',
+        },
+      })
+      expect(JSON.parse(await readFile(permissionStatePath, 'utf8'))).toMatchObject({
+        version: 2,
+        defaultPreset: 'autoReview',
+      })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   it('discovers Desktop local-project roots missing from saved workspace roots', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-local-project-read-'))
     const savedRoot = join(codexHome, 'saved-project')

@@ -1,4 +1,4 @@
-export type PermissionPreset = 'workspace' | 'fullAccess'
+export type PermissionPreset = 'workspace' | 'autoReview' | 'fullAccess'
 
 export type PermissionState = {
   defaultPreset: PermissionPreset
@@ -7,6 +7,7 @@ export type PermissionState = {
 
 export type PermissionConfig = {
   approvalPolicy: 'on-request' | 'never'
+  approvalsReviewer?: 'user' | 'auto_review'
   sandboxPolicy: {
     type: 'workspaceWrite'
     writableRoots: string[]
@@ -18,10 +19,10 @@ export type PermissionConfig = {
   }
 }
 
-export const DEFAULT_PERMISSION_PRESET: PermissionPreset = 'workspace'
+export const DEFAULT_PERMISSION_PRESET: PermissionPreset = 'autoReview'
 
 export function normalizePermissionPreset(value: unknown, fallback = DEFAULT_PERMISSION_PRESET): PermissionPreset {
-  return value === 'fullAccess' || value === 'workspace' ? value : fallback
+  return value === 'fullAccess' || value === 'autoReview' || value === 'workspace' ? value : fallback
 }
 
 export function normalizePermissionState(value: unknown, fallback = DEFAULT_PERMISSION_PRESET): PermissionState {
@@ -35,7 +36,7 @@ export function normalizePermissionState(value: unknown, fallback = DEFAULT_PERM
 
   for (const [threadId, preset] of Object.entries(rawThreadPresets)) {
     const normalizedThreadId = threadId.trim()
-    if (!normalizedThreadId || (preset !== 'workspace' && preset !== 'fullAccess')) continue
+    if (!normalizedThreadId || (preset !== 'workspace' && preset !== 'autoReview' && preset !== 'fullAccess')) continue
     threadPresets[normalizedThreadId] = preset
   }
 
@@ -56,6 +57,7 @@ export function resolvePermissionPreset(preset: PermissionPreset, projectRoot?: 
   const cwd = projectRoot?.trim()
   return {
     approvalPolicy: 'on-request',
+    ...(preset === 'autoReview' ? { approvalsReviewer: 'auto_review' as const } : {}),
     sandboxPolicy: {
       type: 'workspaceWrite',
       writableRoots: cwd ? [cwd] : [],
@@ -69,6 +71,7 @@ export function resolvePermissionPreset(preset: PermissionPreset, projectRoot?: 
 export function inferPermissionPresetFromSettings(
   approvalPolicy: unknown,
   sandboxPolicy: unknown,
+  approvalsReviewer?: unknown,
 ): PermissionPreset | null {
   const sandbox = sandboxPolicy !== null && typeof sandboxPolicy === 'object' && !Array.isArray(sandboxPolicy)
     ? sandboxPolicy as Record<string, unknown>
@@ -76,6 +79,11 @@ export function inferPermissionPresetFromSettings(
   const sandboxType = typeof sandbox?.type === 'string' ? sandbox.type : ''
 
   if (sandboxType === 'dangerFullAccess') return 'fullAccess'
+  if (
+    sandboxType === 'workspaceWrite'
+    && approvalPolicy === 'on-request'
+    && (approvalsReviewer === 'auto_review' || approvalsReviewer === 'guardian_subagent')
+  ) return 'autoReview'
   if (sandboxType === 'workspaceWrite' && approvalPolicy === 'on-request') return 'workspace'
   return null
 }

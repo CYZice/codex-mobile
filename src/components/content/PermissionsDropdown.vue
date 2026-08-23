@@ -78,6 +78,12 @@ const permissionOptions: Array<{
     description: 'Project files and network; asks before broader access',
   },
   {
+    value: 'autoReview',
+    shortLabel: 'Auto-review',
+    label: 'Auto-review',
+    description: 'Keeps workspace limits and automatically reviews broader access',
+  },
+  {
     value: 'fullAccess',
     shortLabel: 'Full access',
     label: 'Full access',

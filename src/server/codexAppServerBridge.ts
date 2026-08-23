@@ -5750,17 +5750,31 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
 }
 
 function resolveDefaultPermissionPreset(): PermissionPreset {
-  const runtime = resolveAppServerRuntimeConfig()
-  return runtime.sandboxMode === 'danger-full-access' && runtime.approvalPolicy === 'never'
-    ? 'fullAccess'
-    : DEFAULT_PERMISSION_PRESET
+  return DEFAULT_PERMISSION_PRESET
 }
+
+const PERMISSION_STATE_SCHEMA_VERSION = 2
 
 export async function readPermissionState(): Promise<PermissionState> {
   const statePath = getCodexPermissionsStatePath()
   try {
     const raw = await readFile(statePath, 'utf8')
-    return normalizePermissionState(JSON.parse(raw), resolveDefaultPermissionPreset())
+    const parsed = JSON.parse(raw) as unknown
+    const record = asRecord(parsed)
+    const normalized = normalizePermissionState(parsed, resolveDefaultPermissionPreset())
+    if (record?.version !== PERMISSION_STATE_SCHEMA_VERSION) {
+      const migrated = {
+        ...normalized,
+        defaultPreset: DEFAULT_PERMISSION_PRESET,
+      }
+      try {
+        await writePermissionState(migrated)
+      } catch {
+        // Keep the in-memory migration result even when persistence is temporarily unavailable.
+      }
+      return migrated
+    }
+    return normalized
   } catch {
     return normalizePermissionState(null, resolveDefaultPermissionPreset())
   }
@@ -5774,7 +5788,10 @@ export async function writePermissionState(nextState: PermissionState): Promise<
     await mkdir(dirname(statePath), { recursive: true })
     await writeFile(
       statePath,
-      JSON.stringify(normalizePermissionState(nextState, resolveDefaultPermissionPreset())),
+      JSON.stringify({
+        version: PERMISSION_STATE_SCHEMA_VERSION,
+        ...normalizePermissionState(nextState, resolveDefaultPermissionPreset()),
+      }),
       'utf8',
     )
   })

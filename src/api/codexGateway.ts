@@ -1712,7 +1712,11 @@ function normalizeThreadReasoningEffortFromPayload(payload: unknown): ReasoningE
 
 function readPermissionPresetFromThreadPayload(payload: unknown): PermissionPreset | null {
   const record = asRecord(payload)
-  return inferPermissionPresetFromSettings(record?.approvalPolicy, record?.sandbox ?? record?.sandboxPolicy)
+  return inferPermissionPresetFromSettings(
+    record?.approvalPolicy,
+    record?.sandbox ?? record?.sandboxPolicy,
+    record?.approvalsReviewer,
+  )
 }
 
 export type StartedThread = {
@@ -1957,6 +1961,9 @@ export async function startThreadTurn(
     if (permissionConfig) {
       params.approvalPolicy = permissionConfig.approvalPolicy
       params.sandboxPolicy = permissionConfig.sandboxPolicy
+      if (permissionConfig.approvalsReviewer) {
+        params.approvalsReviewer = permissionConfig.approvalsReviewer
+      }
     }
     if (attachments.length > 0) params.attachments = attachments
     if (normalizedModel) {

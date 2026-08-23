@@ -797,6 +797,35 @@ describe('live error overlay', () => {
 })
 
 describe('provider model selection', () => {
+  it('uses the most recently selected thread model as the default for the next Codex chat', () => {
+    installTestWindow()
+
+    const state = useDesktopState()
+    state.setSelectedModelIdForThread('thread-a', 'gpt-5.4-mini')
+
+    expect(state.readModelIdForThread('thread-a')).toBe('gpt-5.4-mini')
+    expect(state.readModelIdForThread('')).toBe('gpt-5.4-mini')
+    expect(JSON.parse(window.localStorage.getItem('codex-web-local.selected-model-by-context.v1') ?? '{}')).toEqual({
+      'thread-a': 'gpt-5.4-mini',
+      '__new-thread-provider__::codex': 'gpt-5.4-mini',
+    })
+  })
+
+  it('does not replace the new-chat default while restoring an existing thread model', () => {
+    installTestWindow({
+      'codex-web-local.selected-model-by-context.v1': JSON.stringify({
+        '__new-thread-provider__::codex': 'gpt-5.5',
+      }),
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-a')
+    state.setSelectedModelId('gpt-5.4-mini')
+
+    expect(state.readModelIdForThread('thread-a')).toBe('gpt-5.4-mini')
+    expect(state.readModelIdForThread('')).toBe('gpt-5.5')
+  })
+
   it('keeps the official model list when the OpenAI provider uses the custom id', async () => {
     installTestWindow()
     gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })

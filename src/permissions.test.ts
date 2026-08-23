@@ -26,22 +26,38 @@ describe('permission presets', () => {
     })
   })
 
+  it('routes workspace approval requests through automatic review', () => {
+    expect(resolvePermissionPreset('autoReview', 'D:\\Projects\\LiDAR FPGA')).toEqual({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['D:\\Projects\\LiDAR FPGA'],
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    })
+  })
+
   it('keeps only valid persisted thread presets', () => {
     expect(normalizePermissionState({
       defaultPreset: 'fullAccess',
       threadPresets: {
         'thread-a': 'workspace',
+        'thread-auto': 'autoReview',
         ' ': 'fullAccess',
         'thread-b': 'unknown',
       },
     })).toEqual({
       defaultPreset: 'fullAccess',
-      threadPresets: { 'thread-a': 'workspace' },
+      threadPresets: { 'thread-a': 'workspace', 'thread-auto': 'autoReview' },
     })
   })
 
   it('recognizes App Server settings when resuming a thread', () => {
     expect(inferPermissionPresetFromSettings('on-request', { type: 'workspaceWrite' })).toBe('workspace')
+    expect(inferPermissionPresetFromSettings('on-request', { type: 'workspaceWrite' }, 'auto_review')).toBe('autoReview')
     expect(inferPermissionPresetFromSettings('never', { type: 'dangerFullAccess' })).toBe('fullAccess')
   })
 })
