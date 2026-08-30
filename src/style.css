@@ -585,6 +585,20 @@
   @apply border-zinc-500 text-zinc-300;
 }
 
+:root.dark .thread-composer-plugin-chip,
+:root.dark .thread-composer-chatgpt-chip {
+  @apply border-orange-800 bg-orange-950/50 text-orange-200;
+}
+
+:root.dark .thread-composer-plugin-chip-remove,
+:root.dark .thread-composer-chatgpt-chip-remove {
+  @apply text-orange-300 hover:bg-orange-900 hover:text-orange-100;
+}
+
+:root.dark .thread-composer-chatgpt-chip-icon {
+  @apply border-orange-300 text-orange-200;
+}
+
 :root.dark .composer-menu-surface .thread-composer-attach-setting-label {
   @apply text-zinc-100;
 }
