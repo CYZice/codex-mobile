@@ -301,9 +301,6 @@ const THREAD_RESPONSE_TURN_LIMIT = 10
 const THREAD_TURN_PAGE_READ_CACHE_TTL_MS = 30_000
 const THREAD_METHODS_WITH_TURNS = new Set(['thread/read', 'thread/resume', 'thread/fork', 'thread/rollback'])
 const THREAD_METHODS_WITH_THREAD_SNAPSHOT = new Set([...THREAD_METHODS_WITH_TURNS, 'thread/start'])
-const PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS = 100
-const PROJECTLESS_THREAD_READABLE_DIRECTORY_ATTEMPTS = 20
-const PROJECTLESS_THREAD_SLUG_MAX_LENGTH = 80
 const API_PERF_LOGGING_ENV_KEY = 'CODEXUI_API_PERF_LOGGING'
 const API_PERF_MS_THRESHOLD_ENV_KEY = 'CODEXUI_API_PERF_MS_THRESHOLD'
 const API_PERF_BODY_MB_THRESHOLD_ENV_KEY = 'CODEXUI_API_PERF_BODY_MB_THRESHOLD'
@@ -2166,68 +2163,11 @@ function isTimeoutError(payload: unknown): boolean {
   return payload instanceof Error && (payload.name === 'AbortError' || payload.name === 'TimeoutError')
 }
 
-function formatProjectlessDateSegment(date = new Date()): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${date.getFullYear()}-${month}-${day}`
-}
-
-function buildProjectlessPromptSlug(prompt: string | null): string {
-  const slug = prompt
-    ?.toLowerCase()
-    .match(/[a-z0-9]+/g)
-    ?.slice(0, 6)
-    .join('-')
-    .slice(0, PROJECTLESS_THREAD_SLUG_MAX_LENGTH)
-  return slug && slug.length > 0 ? slug : 'new-chat'
-}
-
-function buildProjectlessUniqueSuffix(): string {
-  return `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
-}
-
-export function buildProjectlessFolderName(slug: string, index: number, uniqueSuffix = buildProjectlessUniqueSuffix()): string {
-  if (index === 0) return slug
-  if (index < PROJECTLESS_THREAD_READABLE_DIRECTORY_ATTEMPTS) return `${slug}-${index + 1}`
-
-  const suffix = `-${uniqueSuffix}`
-  const maxSlugLength = Math.max(1, PROJECTLESS_THREAD_SLUG_MAX_LENGTH - suffix.length)
-  return `${slug.slice(0, maxSlugLength)}${suffix}`
-}
-
 async function ensureRealDirectory(path: string, label: string): Promise<void> {
   const info = await lstat(path)
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new Error(`${label} must be a real directory`)
   }
-}
-
-async function createProjectlessThreadDirectory(prompt: string | null): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
-  const workspaceRoot = join(homedir(), 'Documents', 'Codex')
-  await mkdir(workspaceRoot, { recursive: true })
-  await ensureRealDirectory(workspaceRoot, 'Projectless workspace root')
-
-  const dateDir = join(workspaceRoot, formatProjectlessDateSegment())
-  await mkdir(dateDir, { recursive: true })
-  await ensureRealDirectory(dateDir, 'Projectless thread date directory')
-
-  const slug = buildProjectlessPromptSlug(prompt)
-  for (let index = 0; index < PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS; index += 1) {
-    const folderName = buildProjectlessFolderName(slug, index)
-    const cwd = join(dateDir, folderName)
-    try {
-      await mkdir(cwd, { recursive: false })
-      return { cwd, outputDirectory: cwd, workspaceRoot }
-    } catch {
-      try {
-        await stat(cwd)
-      } catch {
-        throw new Error('Failed to create new chat folder')
-      }
-    }
-  }
-
-  throw new Error('Unable to create a unique new chat folder')
 }
 
 function normalizeGithubCloneUrl(rawUrl: string): { url: string; repoName: string } {
@@ -10287,18 +10227,6 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: { path: clonedPath } })
         } catch (error) {
           setJson(res, 400, { error: error instanceof Error ? error.message : 'Failed to clone GitHub repository' })
-        }
-        return
-      }
-
-      if (req.method === 'POST' && url.pathname === '/codex-api/projectless-thread-cwd') {
-        const payload = asRecord(await readJsonBody(req))
-        const prompt = typeof payload?.prompt === 'string' ? payload.prompt : null
-        try {
-          const directory = await createProjectlessThreadDirectory(prompt)
-          setJson(res, 200, { data: directory })
-        } catch (error) {
-          setJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to create new chat folder' })
         }
         return
       }

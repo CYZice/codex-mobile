@@ -14,6 +14,7 @@ Return to the [manual test index](../../tests.md).
 | [Composer draft lifecycle and slash commands](composer-drafts-and-slash-commands.md) |
 | [Composer mode scoping and Fast mode support](composer-mode-scoping-and-fast-mode-support.md) |
 | [Composer controls stay editable during responses](composer-controls-stay-editable-during-responses.md) |
+| [Projectless new chat, plugin menu, and `$` skills](projectless-new-chat-and-contextual-skill-picker.md) |
 | [Native steer during an active turn and draft recovery](native-steer-active-turn-and-draft-recovery.md) |
 | [Thread permissions](thread-permissions.md) |
 | [Feature: Markdown file links with backticked filename labels render correctly](markdown-file-links-with-backticked-filename-labels-render-correctly.md) |

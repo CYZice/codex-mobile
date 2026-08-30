@@ -519,6 +519,24 @@
   @apply bg-zinc-700;
 }
 
+:root.dark .thread-composer-attach-section-label,
+:root.dark .thread-composer-attach-loading,
+:root.dark .thread-composer-attach-plugin-description {
+  @apply text-zinc-400;
+}
+
+:root.dark .thread-composer-attach-plugin {
+  @apply hover:bg-zinc-700;
+}
+
+:root.dark .thread-composer-attach-plugin-name {
+  @apply text-zinc-200;
+}
+
+:root.dark .thread-composer-attach-plugin-icon.is-fallback {
+  @apply bg-zinc-700 text-zinc-200;
+}
+
 :root.dark .thread-composer-attach-setting {
   @apply text-zinc-300 hover:bg-zinc-700;
 }

@@ -1216,7 +1216,6 @@ import {
   configureTelegramBot,
   createPermanentWorktree,
   createWorktree,
-  createProjectlessThreadDirectory,
   downloadProjectZip,
   getGitBranchState,
   getGitBranchCommits,
@@ -5145,10 +5144,6 @@ async function submitFirstMessageForNewThread(
         }
         return
       }
-    } else if (!targetCwd.trim()) {
-      const directory = await createProjectlessThreadDirectory(text)
-      targetCwd = directory.cwd
-      newThreadCwd.value = directory.cwd
     }
     const threadId = await sendMessageToNewThread(text, targetCwd, imageUrls, skills, fileAttachments)
     if (!threadId) return

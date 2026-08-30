@@ -146,6 +146,13 @@
           </template>
           <div v-else class="thread-composer-file-mention-empty">{{ t('No matching files') }}</div>
         </div>
+        <ComposerSkillPicker
+          :skills="matchingSkills"
+          :visible="isSkillPickerOpen"
+          :highlighted-index="skillHighlightedIndex"
+          @select="applySkillMention"
+          @highlight="skillHighlightedIndex = $event"
+        />
         <textarea
           ref="inputRef"
           v-model="draft"
@@ -210,6 +217,31 @@
             >
               {{ t('Take photo') }}
             </button>
+            <template v-if="isLoadingComposerPlugins || enabledComposerPlugins.length > 0">
+              <div class="thread-composer-attach-separator" />
+              <div class="thread-composer-attach-section-label">{{ t('Plugins') }}</div>
+              <div v-if="isLoadingComposerPlugins" class="thread-composer-attach-loading">{{ t('Loading plugins...') }}</div>
+              <button
+                v-for="plugin in enabledComposerPlugins"
+                :key="plugin.id"
+                class="thread-composer-attach-plugin"
+                type="button"
+                :disabled="isInteractionDisabled"
+                @click="selectComposerPlugin(plugin)"
+              >
+                <img
+                  v-if="pluginIconSrc(plugin)"
+                  class="thread-composer-attach-plugin-icon"
+                  :src="pluginIconSrc(plugin)"
+                  alt=""
+                />
+                <span v-else class="thread-composer-attach-plugin-icon is-fallback">{{ plugin.displayName.slice(0, 1) }}</span>
+                <span class="thread-composer-attach-plugin-copy">
+                  <span class="thread-composer-attach-plugin-name">{{ plugin.displayName }}</span>
+                  <span v-if="plugin.description" class="thread-composer-attach-plugin-description">{{ plugin.description }}</span>
+                </span>
+              </button>
+            </template>
             <div class="thread-composer-attach-separator" />
             <div class="thread-composer-attach-mode">
               <span class="thread-composer-attach-mode-label">{{ t('In-progress send') }}</span>
@@ -301,22 +333,6 @@
             :disabled="isComposerConfigDisabled"
             :is-turn-in-progress="isTurnInProgress"
             @select="onPermissionPresetSelected"
-          />
-
-          <ComposerSearchDropdown
-            class="thread-composer-control"
-            :options="skillDropdownOptions"
-            :selected-values="selectedSkillPaths"
-            :placeholder="t('Skills')"
-            :search-placeholder="t('Search skills and prompts...')"
-            :create-label="t('Add new prompt')"
-            :allow-remove="true"
-            :remove-label="t('Remove prompt')"
-            open-direction="up"
-            :disabled="isComposerConfigDisabled"
-            @toggle="onSkillDropdownToggle"
-            @create="onCreatePrompt"
-            @remove="onRemovePrompt"
           />
 
         </div>
@@ -442,13 +458,11 @@ import { useUiLanguage } from '../../composables/useUiLanguage'
 import type { PermissionPreset } from '../../permissions'
 import { getComposerCommandQuery, parseComposerCommand, type ComposerCommand } from '../../composerCommands'
 import {
-  createComposerPrompt,
-  getComposerPrompts,
-  removeComposerPrompt,
+  listDirectoryPlugins,
   searchComposerFiles,
   uploadFile,
   type ComposerFileSuggestion,
-  type ComposerPromptInfo,
+  type DirectoryPluginSummary,
 } from '../../api/codexGateway'
 import IconTablerArrowUp from '../icons/IconTablerArrowUp.vue'
 import IconTablerBolt from '../icons/IconTablerBolt.vue'
@@ -458,16 +472,10 @@ import IconTablerMaximize from '../icons/IconTablerMaximize.vue'
 import IconTablerMicrophone from '../icons/IconTablerMicrophone.vue'
 import IconTablerMinimize from '../icons/IconTablerMinimize.vue'
 import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
-import ComposerSearchDropdown from './ComposerSearchDropdown.vue'
+import ComposerSkillPicker from './ComposerSkillPicker.vue'
 import FullAccessConfirmation from './FullAccessConfirmation.vue'
 import ModelSettingsDropdown from './ModelSettingsDropdown.vue'
 import PermissionsDropdown from './PermissionsDropdown.vue'
-
-type SkillSourceBadge = {
-  badge: string
-  badgeLabel: string
-  badgeTone: 'repo' | 'system' | 'plugin' | 'user' | 'prompt'
-}
 
 type SkillItem = { name: string; displayName?: string; description: string; path: string; scope?: string; enabled?: boolean }
 
@@ -564,12 +572,9 @@ type AttachmentBatchStats = {
 
 const CONTEXT_WINDOW_BASELINE_TOKENS = 12000
 const PASTED_TEXT_FILE_THRESHOLD = 2000
-const PROMPT_OPTION_PREFIX = 'prompt:'
-
 const draft = ref('')
 const selectedImages = ref<SelectedImage[]>([])
 const selectedSkills = ref<SkillItem[]>([])
-const savedPrompts = ref<ComposerPromptInfo[]>([])
 const fileAttachments = ref<FileAttachment[]>([])
 const folderUploadGroups = ref<FolderUploadGroup[]>([])
 
@@ -618,11 +623,18 @@ const folderPickerInputRef = ref<HTMLInputElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const { isMobile } = useMobile()
 const isAttachMenuOpen = ref(false)
+const composerPlugins = ref<DirectoryPluginSummary[]>([])
+const isLoadingComposerPlugins = ref(false)
+const hasLoadedComposerPlugins = ref(false)
 const mentionStartIndex = ref<number | null>(null)
 const mentionQuery = ref('')
 const fileMentionSuggestions = ref<ComposerFileSuggestion[]>([])
 const isFileMentionOpen = ref(false)
 const fileMentionHighlightedIndex = ref(0)
+const skillMentionStartIndex = ref<number | null>(null)
+const skillQuery = ref('')
+const isSkillPickerOpen = ref(false)
+const skillHighlightedIndex = ref(0)
 const slashCommandHighlightedIndex = ref(0)
 const isComposerExpanded = ref(false)
 const isDraftOverflowing = ref(false)
@@ -666,32 +678,16 @@ const isPlanModeWaitingForModel = computed(() =>
   props.selectedCollaborationMode === 'plan' && props.selectedModel.trim().length === 0,
 )
 
-const selectedSkillPaths = computed(() => selectedSkills.value.map((s) => s.path))
-const skillDropdownOptions = computed(() =>
-  [
-    ...(props.skills ?? []).map((s) => {
-      const source = skillSourceBadge(s)
-      return {
-        value: s.path,
-        label: s.name,
-        description: s.description,
-        badge: source.badge,
-        badgeLabel: source.badgeLabel,
-        badgeTone: source.badgeTone,
-        removable: false,
-      }
-    }),
-    ...savedPrompts.value.map((prompt) => ({
-      value: promptOptionValue(prompt.path),
-      label: prompt.name,
-      description: prompt.description,
-      badge: 'T',
-      badgeLabel: 'Prompt',
-      badgeTone: 'prompt' as const,
-      removable: true,
-    })),
-  ],
-)
+const matchingSkills = computed(() => {
+  const query = skillQuery.value.trim().toLowerCase()
+  return (props.skills ?? []).filter((skill) => {
+    if (!query) return true
+    return skill.name.toLowerCase().includes(query)
+      || (skill.displayName ?? '').toLowerCase().includes(query)
+      || skill.description.toLowerCase().includes(query)
+  })
+})
+const enabledComposerPlugins = computed(() => composerPlugins.value.filter((plugin) => plugin.installed && plugin.enabled))
 
 const canSubmit = computed(() => {
   if (props.disabled) return false
@@ -1079,6 +1075,7 @@ function replaceDraftState(payload: ComposerDraftPayload): void {
   pendingAttachmentCount.value = 0
   isAttachMenuOpen.value = false
   closeFileMention()
+  closeSkillPicker()
   attachmentSessionToken += 1
 }
 
@@ -1225,6 +1222,7 @@ function completeSubmission(): void {
   folderUploadGroups.value = []
   isAttachMenuOpen.value = false
   closeFileMention()
+  closeSkillPicker()
   if (isAndroid || isMobile.value) {
     inputRef.value?.blur()
     return
@@ -1297,6 +1295,41 @@ function onDictationPressEnd(): void {
 function toggleAttachMenu(): void {
   if (isInteractionDisabled.value) return
   isAttachMenuOpen.value = !isAttachMenuOpen.value
+  if (isAttachMenuOpen.value) {
+    void loadComposerPlugins()
+  }
+}
+
+async function loadComposerPlugins(): Promise<void> {
+  if (hasLoadedComposerPlugins.value || isLoadingComposerPlugins.value) return
+  isLoadingComposerPlugins.value = true
+  try {
+    const cwd = (props.cwd ?? '').trim()
+    composerPlugins.value = await listDirectoryPlugins(cwd ? [cwd] : undefined)
+    hasLoadedComposerPlugins.value = true
+  } catch {
+    composerPlugins.value = []
+  } finally {
+    isLoadingComposerPlugins.value = false
+  }
+}
+
+function localAssetSrc(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('connectors://')) return `/codex-api/connector-logo?src=${encodeURIComponent(path)}`
+  if (/^https?:\/\//i.test(path) || path.startsWith('data:')) return path
+  if (!path.startsWith('/')) return ''
+  return `/codex-local-image?path=${encodeURIComponent(path)}`
+}
+
+function pluginIconSrc(plugin: DirectoryPluginSummary): string {
+  return plugin.logoUrl || localAssetSrc(plugin.logoPath) || plugin.composerIconUrl || localAssetSrc(plugin.composerIconPath)
+}
+
+function selectComposerPlugin(plugin: DirectoryPluginSummary): void {
+  const defaultPrompt = plugin.defaultPrompt.join('\n').trim()
+  appendTextToDraft(defaultPrompt || `Use the ${plugin.displayName} plugin for this request.`)
+  isAttachMenuOpen.value = false
 }
 
 function triggerPhotoLibrary(): void {
@@ -1664,6 +1697,7 @@ function onInputChange(): void {
   }
   queueComposerOverflowMeasurement()
   updateFileMentionState()
+  updateSkillMentionState()
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
@@ -1691,6 +1725,32 @@ function onInputKeydown(event: KeyboardEvent): void {
       const selected = slashCommandSuggestions.value[slashCommandHighlightedIndex.value]
       if (selected) executeSuggestedCommand(selected.name)
       return
+    }
+  }
+
+  if (isSkillPickerOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeSkillPicker()
+      return
+    }
+    if (event.key === 'ArrowDown' && matchingSkills.value.length > 0) {
+      event.preventDefault()
+      skillHighlightedIndex.value = (skillHighlightedIndex.value + 1) % matchingSkills.value.length
+      return
+    }
+    if (event.key === 'ArrowUp' && matchingSkills.value.length > 0) {
+      event.preventDefault()
+      skillHighlightedIndex.value = (skillHighlightedIndex.value + matchingSkills.value.length - 1) % matchingSkills.value.length
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      const selected = matchingSkills.value[skillHighlightedIndex.value]
+      if (selected) {
+        event.preventDefault()
+        applySkillMention(selected)
+        return
+      }
     }
   }
 
@@ -1805,6 +1865,51 @@ function applyFileMention(suggestion: ComposerFileSuggestion): void {
   nextTick(() => input?.focus())
 }
 
+function closeSkillPicker(): void {
+  isSkillPickerOpen.value = false
+  skillMentionStartIndex.value = null
+  skillQuery.value = ''
+  skillHighlightedIndex.value = 0
+}
+
+function updateSkillMentionState(): void {
+  const input = inputRef.value
+  if (!input || (props.skills?.length ?? 0) === 0) {
+    closeSkillPicker()
+    return
+  }
+  const cursor = input.selectionStart ?? draft.value.length
+  const beforeCursor = draft.value.slice(0, cursor)
+  const match = beforeCursor.match(/(^|\s)(\$[^\s$]*)$/)
+  if (!match) {
+    closeSkillPicker()
+    return
+  }
+  const token = match[2] ?? ''
+  skillMentionStartIndex.value = cursor - token.length
+  skillQuery.value = token.slice(1)
+  skillHighlightedIndex.value = 0
+  isSkillPickerOpen.value = true
+}
+
+function applySkillMention(skill: SkillItem): void {
+  const input = inputRef.value
+  const start = skillMentionStartIndex.value
+  if (start === null || !input) return
+  const cursor = input.selectionStart ?? draft.value.length
+  const marker = `$${skill.name}`
+  draft.value = `${draft.value.slice(0, start)}${marker}${draft.value.slice(cursor)}`
+  if (!selectedSkills.value.some((item) => item.path === skill.path)) {
+    selectedSkills.value = [...selectedSkills.value, skill]
+  }
+  closeSkillPicker()
+  nextTick(() => {
+    const nextCursor = start + marker.length
+    input.focus()
+    input.setSelectionRange(nextCursor, nextCursor)
+  })
+}
+
 function hydrateDraft(payload: ComposerDraftPayload): void {
   cancelDictation()
   replaceDraftState(payload)
@@ -1824,45 +1929,6 @@ function appendTextToDraft(text: string): void {
     draft.value = nextText
   }
   nextTick(() => inputRef.value?.focus())
-}
-
-async function reloadPrompts(): Promise<void> {
-  savedPrompts.value = await getComposerPrompts()
-}
-
-function promptOptionValue(path: string): string {
-  return `${PROMPT_OPTION_PREFIX}${path}`
-}
-
-function promptPathFromOptionValue(value: string): string | null {
-  return value.startsWith(PROMPT_OPTION_PREFIX) ? value.slice(PROMPT_OPTION_PREFIX.length) : null
-}
-
-async function onCreatePrompt(): Promise<void> {
-  const name = window.prompt(t('Prompt name'))?.trim() ?? ''
-  if (!name) return
-  const content = window.prompt(t('Prompt content')) ?? ''
-  if (!content.trim()) return
-  const created = await createComposerPrompt(name, content)
-  if (!created) return
-  await reloadPrompts()
-  appendTextToDraft(created.content)
-}
-
-async function onRemovePrompt(path: string): Promise<void> {
-  const promptPath = promptPathFromOptionValue(path) ?? path
-  const target = savedPrompts.value.find((prompt) => prompt.path === promptPath)
-  const confirmed = window.confirm(target ? `${t('Remove prompt')} "${target.name}"?` : t('Remove prompt'))
-  if (!confirmed) return
-  const removed = await removeComposerPrompt(promptPath)
-  if (!removed) return
-  await reloadPrompts()
-}
-
-function onPromptDropdownToggle(path: string): void {
-  const prompt = savedPrompts.value.find((entry) => entry.path === path)
-  if (!prompt) return
-  appendTextToDraft(prompt.content)
 }
 
 function getMentionFileName(path: string): string {
@@ -1907,37 +1973,6 @@ function isMarkdownFile(path: string): boolean {
   return ext === 'md' || ext === 'mdx'
 }
 
-function skillSourceBadge(skill: SkillItem): SkillSourceBadge {
-  const path = skill.path.toLowerCase()
-  if (path.includes('/plugins/cache/')) {
-    return { badge: 'P', badgeLabel: 'Plugin', badgeTone: 'plugin' }
-  }
-  if (skill.scope === 'repo') {
-    return { badge: 'R', badgeLabel: 'Repo', badgeTone: 'repo' }
-  }
-  if (skill.scope === 'system') {
-    return { badge: 'S', badgeLabel: 'System', badgeTone: 'system' }
-  }
-  return { badge: 'U', badgeLabel: 'User', badgeTone: 'user' }
-}
-
-function onSkillDropdownToggle(path: string, checked: boolean): void {
-  const promptPath = promptPathFromOptionValue(path)
-  if (promptPath) {
-    onPromptDropdownToggle(promptPath)
-    return
-  }
-
-  if (checked) {
-    const skill = (props.skills ?? []).find((s) => s.path === path)
-    if (skill && !selectedSkills.value.some((s) => s.path === path)) {
-      selectedSkills.value = [...selectedSkills.value, skill]
-    }
-  } else {
-    selectedSkills.value = selectedSkills.value.filter((s) => s.path !== path)
-  }
-}
-
 function onDocumentClick(event: MouseEvent): void {
   if (!isAttachMenuOpen.value) return
   const root = attachMenuRootRef.value
@@ -1953,7 +1988,6 @@ onMounted(() => {
   window.addEventListener('drop', onWindowDragCleanup)
   window.addEventListener('dragend', onWindowDragCleanup)
   window.addEventListener('blur', onWindowDragCleanup)
-  void reloadPrompts()
   queueComposerOverflowMeasurement()
 })
 
@@ -2330,7 +2364,7 @@ watch(
 }
 
 .thread-composer-attach-menu {
-  @apply absolute bottom-11 left-0 z-20 w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+  @apply absolute bottom-11 left-0 z-20 max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
 }
 
 .thread-composer-attach-item {
@@ -2339,6 +2373,38 @@ watch(
 
 .thread-composer-attach-separator {
   @apply my-1 h-px bg-zinc-100;
+}
+
+.thread-composer-attach-section-label {
+  @apply px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500;
+}
+
+.thread-composer-attach-loading {
+  @apply px-3 py-2 text-sm text-zinc-500;
+}
+
+.thread-composer-attach-plugin {
+  @apply flex w-full items-center gap-2 rounded-lg border-0 bg-transparent px-2 py-1.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.thread-composer-attach-plugin-icon {
+  @apply h-6 w-6 shrink-0 rounded-md object-contain;
+}
+
+.thread-composer-attach-plugin-icon.is-fallback {
+  @apply inline-flex items-center justify-center bg-zinc-200 text-xs font-semibold text-zinc-700;
+}
+
+.thread-composer-attach-plugin-copy {
+  @apply flex min-w-0 flex-col;
+}
+
+.thread-composer-attach-plugin-name {
+  @apply truncate text-sm text-zinc-800;
+}
+
+.thread-composer-attach-plugin-description {
+  @apply truncate text-xs text-zinc-500;
 }
 
 .thread-composer-attach-mode {
