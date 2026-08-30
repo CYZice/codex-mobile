@@ -291,14 +291,6 @@
   @apply border-zinc-400 shadow-zinc-950/60;
 }
 
-:root.dark .thread-composer-input {
-  @apply text-zinc-100;
-}
-
-:root.dark .thread-composer-input:disabled {
-  @apply bg-zinc-700 text-zinc-500;
-}
-
 @media (max-width: 639px) {
   :root.dark .thread-composer-shell {
     @apply border-transparent bg-transparent;
@@ -583,20 +575,6 @@
 
 :root.dark .thread-composer-attach-plugin-icon.is-chatgpt {
   @apply border-zinc-500 text-zinc-300;
-}
-
-:root.dark .thread-composer-plugin-chip,
-:root.dark .thread-composer-chatgpt-chip {
-  @apply border-orange-800 bg-orange-950/50 text-orange-200;
-}
-
-:root.dark .thread-composer-plugin-chip-remove,
-:root.dark .thread-composer-chatgpt-chip-remove {
-  @apply text-orange-300 hover:bg-orange-900 hover:text-orange-100;
-}
-
-:root.dark .thread-composer-chatgpt-chip-icon {
-  @apply border-orange-300 text-orange-200;
 }
 
 :root.dark .composer-menu-surface .thread-composer-attach-setting-label {
@@ -1713,10 +1691,6 @@
   @apply border-emerald-800 bg-emerald-900/40 text-emerald-300;
 }
 
-:root.dark .thread-composer-input::placeholder {
-  @apply text-zinc-500;
-}
-
 :root.dark .new-thread-folder-dropdown {
   @apply text-zinc-400;
 }
@@ -2138,7 +2112,6 @@
 }
 
 @media (max-width: 768px) {
-  .thread-composer-input,
   .composer-dropdown-search-input,
   .search-dropdown-search,
   .sidebar-search-input,

@@ -4958,26 +4958,48 @@ async function fetchChatgptBackend(pathname: string): Promise<unknown> {
   return payload
 }
 
-function extractChatgptPreview(payload: unknown): string {
+type ChatgptPreviewMessage = {
+  role: 'user' | 'assistant'
+  content: Array<{ content_type: 'text'; text: string }>
+}
+
+export function extractChatgptPreview(payload: unknown): { conversation: ChatgptPreviewMessage[]; diff: null } | null {
   const record = asRecord(payload)
   const mapping = asRecord(record?.mapping)
-  if (!mapping) return ''
-  const rows: Array<{ role: string; text: string; order: number }> = []
-  let order = 0
-  for (const node of Object.values(mapping)) {
-    const message = asRecord(asRecord(node)?.message)
+  if (!mapping) return null
+  const orderedNodes: Record<string, unknown>[] = []
+  const visited = new Set<string>()
+  let nodeId = readNonEmptyString(record?.current_node ?? record?.currentNode)
+  while (nodeId && !visited.has(nodeId)) {
+    visited.add(nodeId)
+    const node = asRecord(mapping[nodeId])
+    if (!node) break
+    orderedNodes.push(node)
+    nodeId = readNonEmptyString(node.parent)
+  }
+  orderedNodes.reverse()
+
+  const rows: Array<{ role: 'user' | 'assistant'; text: string }> = []
+  for (const node of orderedNodes) {
+    const message = asRecord(node.message)
     const author = asRecord(message?.author)
     const role = readNonEmptyString(author?.role) ?? ''
+    const status = readNonEmptyString(message?.status)
+    if (role === 'assistant' && status && status !== 'finished_successfully') continue
     const content = asRecord(message?.content)
     const parts = Array.isArray(content?.parts) ? content.parts : []
     const text = parts.filter((part): part is string => typeof part === 'string').join('\n').trim()
-    if ((role === 'user' || role === 'assistant') && text) rows.push({ role, text: text.slice(0, 2000), order: order++ })
+    if ((role === 'user' || role === 'assistant') && text) {
+      rows.push({ role, text: text.slice(0, 2000) })
+    }
   }
-  return rows
-    .sort((a, b) => a.order - b.order)
-    .slice(-6)
-    .map((row) => `${row.role === 'user' ? 'User' : 'Assistant'}: ${row.text}`)
-    .join('\n\n')
+  const userIndexes = rows.flatMap((row, index) => row.role === 'user' ? [index] : [])
+  const start = userIndexes[Math.max(0, userIndexes.length - 3)] ?? Math.max(0, rows.length - 6)
+  const conversation = rows.slice(start).map((row): ChatgptPreviewMessage => ({
+    role: row.role,
+    content: [{ content_type: 'text', text: row.text }],
+  }))
+  return conversation.length > 0 ? { conversation, diff: null } : null
 }
 
 let codexGlobalStateMutationChain: Promise<unknown> = Promise.resolve()

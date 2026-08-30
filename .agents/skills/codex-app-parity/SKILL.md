@@ -814,3 +814,12 @@ After each feature implementation session that uses this skill:
 - Confirming an edit rolls the thread back to the selected user turn and resends the edited text with the original attachments and skill selections.
 - Retry remains a direct rollback-and-resend action; it does not need to expose the original text in the bottom composer.
 - On Windows, when no reusable Codex CDP endpoint is available, a user-provided native screenshot can serve as the preserved reference artifact without restarting their active Desktop session.
+
+## Findings: Inline ChatGPT Conversation References (2026-08-30)
+
+- Installed Windows package `OpenAI.Codex_26.825.6671.0_x64__2p2nqsd0c76g0` uses a ProseMirror inline atom named `chatGptConversationMention` in `webview/assets/app-initial-DJ_IF-Jc.js`.
+- ChatGPT references remain inside the editable paragraph and serialize as Markdown links with the `chatgpt-conversation://` prefix; plugin references use `plugin://`. A whitespace-delimited `@query` can be triggered repeatedly after existing prose.
+- Submission parsing deduplicates conversation ids and appends a separate `## Referenced ChatGPT conversation:` block containing `conversationId`, `title`, and `priorConversation`. The block explicitly marks the preview untrusted.
+- `priorConversation` follows the chosen conversation's `current_node` parent chain, includes user and completed assistant text, starts at the third-latest user turn, and limits each text item to 2,000 characters.
+- When the preview is null, attachments or more context are needed, Desktop instructs the agent to call `read_thread` with `threadId` equal to the conversation id and `turnLimit` equal to 10, following the cursor for older turns.
+- If packaged Codex exposes no reusable CDP endpoint on 3434, 3435, 9222, or 9223, inspect the installed renderer bundle read-only and do not restart the user's active session.

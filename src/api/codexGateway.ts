@@ -316,8 +316,16 @@ export type ChatGptConversationSummary = {
   updatedAt: string | null
 }
 
+export type ChatGptPriorConversation = {
+  conversation: Array<{
+    role: 'user' | 'assistant'
+    content: Array<{ content_type: 'text'; text: string }>
+  }>
+  diff: null
+}
+
 export type ChatGptConversationPreview = ChatGptConversationSummary & {
-  preview: string
+  preview: ChatGptPriorConversation | null
 }
 
 export type ThreadQueueState = Record<string, StoredQueuedMessage[]>
@@ -2722,9 +2730,31 @@ function normalizeChatGptConversationSummary(value: unknown): ChatGptConversatio
 function normalizeChatGptConversationPreview(value: unknown): ChatGptConversationPreview | null {
   const summary = normalizeChatGptConversationSummary(value)
   if (!summary || !value || typeof value !== 'object' || Array.isArray(value)) return null
-  const preview = typeof (value as Record<string, unknown>).preview === 'string'
-    ? String((value as Record<string, unknown>).preview)
-    : ''
+  const previewValue = (value as Record<string, unknown>).preview
+  const previewRecord = previewValue && typeof previewValue === 'object' && !Array.isArray(previewValue)
+    ? previewValue as Record<string, unknown>
+    : null
+  const conversation = Array.isArray(previewRecord?.conversation)
+    ? previewRecord.conversation.flatMap((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const row = item as Record<string, unknown>
+      const role = row.role === 'user' ? 'user' as const : row.role === 'assistant' ? 'assistant' as const : null
+      if (!role) return []
+      const content = Array.isArray(row.content)
+        ? row.content.flatMap((part) => {
+          if (!part || typeof part !== 'object' || Array.isArray(part)) return []
+          const contentRow = part as Record<string, unknown>
+          return contentRow.content_type === 'text' && typeof contentRow.text === 'string'
+            ? [{ content_type: 'text' as const, text: contentRow.text }]
+            : []
+        })
+        : []
+      return content.length > 0 ? [{ role, content }] : []
+    })
+    : []
+  const preview: ChatGptPriorConversation | null = conversation.length > 0
+    ? { conversation, diff: null }
+    : null
   return { ...summary, preview }
 }
 
