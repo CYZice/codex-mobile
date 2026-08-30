@@ -261,10 +261,16 @@
                 </span>
               </button>
             </template>
-            <template v-if="isLoadingChatGptConversations || visibleChatGptConversations.length > 0">
+            <template v-if="isLoadingChatGptConversations || chatGptConversationsError || visibleChatGptConversations.length > 0">
               <div class="thread-composer-attach-separator" />
               <div class="thread-composer-attach-section-label">{{ t('ChatGPT conversations') }}</div>
               <div v-if="isLoadingChatGptConversations" class="thread-composer-attach-loading">{{ t('Loading ChatGPT conversations...') }}</div>
+              <div v-else-if="chatGptConversationsError" class="thread-composer-attach-error" role="status">
+                <span>{{ chatGptConversationsError }}</span>
+                <button type="button" :disabled="isInteractionDisabled" @click="loadChatGptConversations">
+                  {{ t('Retry') }}
+                </button>
+              </div>
               <button
                 v-for="conversation in visibleChatGptConversations"
                 :key="conversation.conversationId"
@@ -705,6 +711,7 @@ const hasLoadedComposerPlugins = ref(false)
 const chatGptConversations = ref<ChatGptConversationSummary[]>([])
 const isLoadingChatGptConversations = ref(false)
 const hasLoadedChatGptConversations = ref(false)
+const chatGptConversationsError = ref('')
 const chatGptConversationLoadingId = ref('')
 const mentionStartIndex = ref<number | null>(null)
 const mentionQuery = ref('')
@@ -1400,11 +1407,15 @@ async function loadComposerPlugins(): Promise<void> {
 async function loadChatGptConversations(): Promise<void> {
   if (hasLoadedChatGptConversations.value || isLoadingChatGptConversations.value) return
   isLoadingChatGptConversations.value = true
+  chatGptConversationsError.value = ''
   try {
     chatGptConversations.value = await listChatGptConversations()
     hasLoadedChatGptConversations.value = true
-  } catch {
+  } catch (error) {
     chatGptConversations.value = []
+    chatGptConversationsError.value = error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : t('Failed to load ChatGPT conversations')
   } finally {
     isLoadingChatGptConversations.value = false
   }
@@ -2544,6 +2555,14 @@ watch(
 
 .thread-composer-attach-loading {
   @apply px-3 py-2 text-sm text-zinc-500;
+}
+
+.thread-composer-attach-error {
+  @apply flex items-start justify-between gap-3 px-3 py-2 text-xs text-red-600;
+}
+
+.thread-composer-attach-error button {
+  @apply shrink-0 rounded-full border border-red-200 px-2.5 py-1 font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50;
 }
 
 .thread-composer-attach-plugin {

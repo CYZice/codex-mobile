@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -43,6 +43,23 @@ describe('Codex app-server runtime reload', () => {
     await reloadCodexAppServer()
 
     expect(fetchMock).toHaveBeenCalledWith('/codex-api/runtime/reload', { method: 'POST' })
+  })
+})
+
+describe('ChatGPT conversation loading', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('surfaces the server connection detail when loading fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: 'Unable to connect to ChatGPT via http://127.0.0.1:7897 proxy',
+    }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(listChatGptConversations()).rejects.toThrow('Unable to connect to ChatGPT via http://127.0.0.1:7897 proxy')
   })
 })
 

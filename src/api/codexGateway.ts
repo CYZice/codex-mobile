@@ -2710,18 +2710,22 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
 
 export async function listChatGptConversations(): Promise<ChatGptConversationSummary[]> {
   const response = await fetch('/codex-api/chatgpt-conversations')
-  if (!response.ok) throw new Error(`Failed to load ChatGPT conversations (${response.status})`)
-  const payload = await response.json() as { data?: unknown }
-  return Array.isArray(payload.data)
+  const payload = await response.json().catch(() => null) as { data?: unknown } | null
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, `Failed to load ChatGPT conversations (${response.status})`))
+  }
+  return Array.isArray(payload?.data)
     ? payload.data.map(normalizeChatGptConversationSummary).filter((item): item is ChatGptConversationSummary => item !== null)
     : []
 }
 
 export async function getChatGptConversationPreview(conversationId: string): Promise<ChatGptConversationPreview> {
   const response = await fetch(`/codex-api/chatgpt-conversations/${encodeURIComponent(conversationId)}`)
-  if (!response.ok) throw new Error(`Failed to load ChatGPT conversation (${response.status})`)
-  const payload = await response.json() as { data?: unknown }
-  const preview = normalizeChatGptConversationPreview(payload.data)
+  const payload = await response.json().catch(() => null) as { data?: unknown } | null
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, `Failed to load ChatGPT conversation (${response.status})`))
+  }
+  const preview = normalizeChatGptConversationPreview(payload?.data)
   if (!preview) throw new Error('ChatGPT conversation preview was empty')
   return preview
 }

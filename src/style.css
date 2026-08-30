@@ -565,6 +565,14 @@
   @apply text-zinc-400;
 }
 
+:root.dark .composer-menu-surface .thread-composer-attach-error {
+  @apply text-red-300;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-error button {
+  @apply border-red-900/80 text-red-300 hover:bg-red-950/40;
+}
+
 :root.dark .thread-composer-attach-plugin {
   @apply hover:bg-zinc-700;
 }

@@ -119,6 +119,7 @@ const zhCN: Record<string, string> = {
   'ChatGPT conversations': 'ChatGPT 对话',
   'ChatGPT conversation': 'ChatGPT 对话',
   'Loading ChatGPT conversations...': '正在加载 ChatGPT 对话…',
+  'Failed to load ChatGPT conversations': '无法加载 ChatGPT 对话',
   'In-progress send': '执行中发送',
   'Fast mode': '快速模式',
   'Plan mode': '规划模式',

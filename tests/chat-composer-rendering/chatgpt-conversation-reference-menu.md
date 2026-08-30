@@ -19,6 +19,7 @@
 9. Repeat in dark mode and on mobile.
 10. On Windows with only the system proxy enabled, reload the menu and confirm the conversation list loads without adding proxy variables to the app process.
 11. Temporarily use an unreachable proxy in an isolated test process and confirm the error distinguishes a ChatGPT network-route failure from missing authentication.
+12. While the list request is failing, confirm the ChatGPT conversations group remains visible with the backend error and a Retry action; restore connectivity and retry without reloading the page.
 
 ## Expected results
 
@@ -31,6 +32,7 @@
 - ChatGPT references serialize as `[title](chatgpt-conversation://conversation-id)`; plugin references serialize with the `plugin://` prefix.
 - The ChatGPT context block contains at most the latest three user-turn branches, limits each text item to 2,000 characters, and instructs the agent to call `read_thread` when more context is needed.
 - Unauthenticated or unavailable ChatGPT data leaves the composer usable and does not block attachments, plugins, or skills.
+- ChatGPT list failures are not rendered as an empty list: the server detail is visible, Retry issues a fresh request, and a successful retry restores the rows in place.
 - ChatGPT list/detail and connector-logo requests honor environment proxy variables first and fall back to the enabled Windows system proxy.
 - Proxy resolution is cached briefly and does not execute a registry query for every conversation request.
 - Mobile keeps the original permission/model-above-input layout and hides the context ring.
