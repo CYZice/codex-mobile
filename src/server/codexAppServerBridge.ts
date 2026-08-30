@@ -4119,6 +4119,89 @@ function getCodexHomeDir(): string {
   return codexHome && codexHome.length > 0 ? codexHome : join(homedir(), '.codex')
 }
 
+export type GlobalInstructionsState = {
+  content: string
+  path: string
+  targetPath: string | null
+  isSymlink: boolean
+  overridePath: string
+  overrideActive: boolean
+  effectiveSource: 'AGENTS.override.md' | 'AGENTS.md' | 'none'
+}
+
+async function readTextFileIfPresent(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
+}
+
+export async function readGlobalInstructions(): Promise<GlobalInstructionsState> {
+  const codexHome = getCodexHomeDir()
+  const agentsPath = join(codexHome, 'AGENTS.md')
+  const overridePath = join(codexHome, 'AGENTS.override.md')
+  let isSymlink = false
+  let targetPath: string | null = null
+
+  try {
+    const info = await lstat(agentsPath)
+    isSymlink = info.isSymbolicLink()
+    if (isSymlink) {
+      try {
+        targetPath = await realpath(agentsPath)
+      } catch {
+        const linkTarget = await readlink(agentsPath)
+        targetPath = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(agentsPath), linkTarget)
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  const [content, overrideContent] = await Promise.all([
+    readTextFileIfPresent(agentsPath),
+    readTextFileIfPresent(overridePath),
+  ])
+  const overrideActive = overrideContent.trim().length > 0
+
+  return {
+    content,
+    path: agentsPath,
+    targetPath,
+    isSymlink,
+    overridePath,
+    overrideActive,
+    effectiveSource: overrideActive
+      ? 'AGENTS.override.md'
+      : content.trim().length > 0
+        ? 'AGENTS.md'
+        : 'none',
+  }
+}
+
+export async function writeGlobalInstructions(content: string): Promise<GlobalInstructionsState> {
+  const codexHome = getCodexHomeDir()
+  const agentsPath = join(codexHome, 'AGENTS.md')
+  await mkdir(codexHome, { recursive: true })
+
+  let writePath = agentsPath
+  try {
+    const info = await lstat(agentsPath)
+    if (info.isSymbolicLink()) {
+      const linkTarget = await readlink(agentsPath)
+      writePath = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(agentsPath), linkTarget)
+      await mkdir(dirname(writePath), { recursive: true })
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  await writeFile(writePath, content, 'utf8')
+  return readGlobalInstructions()
+}
+
 function getSkillsInstallDir(): string {
   return join(getCodexHomeDir(), 'skills')
 }
@@ -10443,6 +10526,29 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: scored })
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to search files') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/global-instructions') {
+        try {
+          setJson(res, 200, { data: await readGlobalInstructions() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load global instructions') })
+        }
+        return
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/codex-api/global-instructions') {
+        const payload = asRecord(await readJsonBody(req))
+        if (typeof payload?.content !== 'string') {
+          setJson(res, 400, { error: 'content must be a string' })
+          return
+        }
+        try {
+          setJson(res, 200, { data: await writeGlobalInstructions(payload.content) })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to save global instructions') })
         }
         return
       }

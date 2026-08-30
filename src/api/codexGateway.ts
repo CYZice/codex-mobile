@@ -328,6 +328,16 @@ export type ChatGptConversationPreview = ChatGptConversationSummary & {
   preview: ChatGptPriorConversation | null
 }
 
+export type GlobalInstructionsState = {
+  content: string
+  path: string
+  targetPath: string | null
+  isSymlink: boolean
+  overridePath: string
+  overrideActive: boolean
+  effectiveSource: 'AGENTS.override.md' | 'AGENTS.md' | 'none'
+}
+
 export type ThreadQueueState = Record<string, StoredQueuedMessage[]>
 
 export type ComposerFileSuggestion = {
@@ -2717,6 +2727,28 @@ export async function listChatGptConversations(): Promise<ChatGptConversationSum
   return Array.isArray(payload?.data)
     ? payload.data.map(normalizeChatGptConversationSummary).filter((item): item is ChatGptConversationSummary => item !== null)
     : []
+}
+
+export async function getGlobalInstructions(): Promise<GlobalInstructionsState> {
+  const response = await fetch('/codex-api/global-instructions')
+  const payload = await response.json().catch(() => null) as { data?: GlobalInstructionsState } | null
+  if (!response.ok || !payload?.data) {
+    throw new Error(extractErrorMessage(payload, `Failed to load global instructions (${response.status})`))
+  }
+  return payload.data
+}
+
+export async function saveGlobalInstructions(content: string): Promise<GlobalInstructionsState> {
+  const response = await fetch('/codex-api/global-instructions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  const payload = await response.json().catch(() => null) as { data?: GlobalInstructionsState } | null
+  if (!response.ok || !payload?.data) {
+    throw new Error(extractErrorMessage(payload, `Failed to save global instructions (${response.status})`))
+  }
+  return payload.data
 }
 
 export async function getChatGptConversationPreview(conversationId: string): Promise<ChatGptConversationPreview> {

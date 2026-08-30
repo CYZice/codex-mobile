@@ -29,6 +29,7 @@ Return to the [manual test index](../../tests.md).
 | [Feature: Remote changes win when no local uncommitted skill edits exist](remote-changes-win-when-no-local-uncommitted-skill-edits-exist.md) |
 | [Feature: Startup sync does not delete remote AGENTS.md](startup-sync-does-not-delete-remote-agents-md.md) |
 | [Feature: Bidirectional AGENTS.md sync via Startup Sync](bidirectional-agents-md-sync-via-startup-sync.md) |
+| [Global AGENTS.md personalization settings](global-agents-personalization-settings.md) |
 | [Feature: Mixed local+remote AGENTS edits do not stall Startup Sync](mixed-local-remote-agents-edits-do-not-stall-startup-sync.md) |
 | [Feature: Startup sync uses deterministic pull reconcile (`fetch + reset --hard`) before local replay](startup-sync-uses-deterministic-pull-reconcile-fetch-reset-hard-before-local-replay.md) |
 | [Codex.app-style Plugins Directory](codex-app-style-plugins-directory.md) |

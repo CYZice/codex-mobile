@@ -593,6 +593,62 @@
   @apply text-zinc-100;
 }
 
+:root.dark .personalization-settings-rail {
+  @apply border-zinc-800;
+}
+
+:root.dark .personalization-settings-rail-item {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .personalization-settings-heading h1,
+:root.dark .personalization-settings-editor h2 {
+  @apply text-zinc-100;
+}
+
+:root.dark .personalization-settings-editor {
+  @apply border-zinc-800;
+}
+
+:root.dark .personalization-settings-save {
+  @apply bg-zinc-100 text-zinc-900 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500;
+}
+
+:root.dark .personalization-settings-loading,
+:root.dark .personalization-settings-textarea {
+  @apply border-zinc-700 bg-zinc-900 text-zinc-200;
+}
+
+:root.dark .personalization-settings-textarea {
+  @apply focus:border-zinc-500 focus:ring-zinc-800;
+}
+
+:root.dark .personalization-settings-note {
+  @apply bg-zinc-800 text-zinc-300;
+}
+
+:root.dark .personalization-settings-warning {
+  @apply bg-amber-950/40 text-amber-200;
+}
+
+:root.dark .personalization-settings-status[data-kind='success'] {
+  @apply bg-emerald-950/40 text-emerald-200;
+}
+
+:root.dark .personalization-settings-status[data-kind='error'] {
+  @apply bg-red-950/40 text-red-200;
+}
+
+@media (max-width: 767px) {
+  :root.dark .personalization-settings-rail {
+    @apply border-zinc-800;
+  }
+
+  :root.dark .personalization-settings-rail-item {
+    @apply bg-transparent;
+  }
+}
+
 :root.dark .composer-menu-surface .thread-composer-attach-setting-description {
   @apply text-zinc-400;
 }

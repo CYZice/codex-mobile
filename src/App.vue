@@ -242,6 +242,10 @@
                 <span class="sidebar-settings-label">{{ t('Appearance') }}</span>
                 <span class="sidebar-settings-value">{{ darkMode === 'system' ? t('System') : darkMode === 'dark' ? t('Dark') : t('Light') }}</span>
               </button>
+              <button class="sidebar-settings-row" type="button" @click="openPersonalizationSettings">
+                <span class="sidebar-settings-label">{{ t('Personalization') }}</span>
+                <span class="sidebar-settings-value">AGENTS.md</span>
+              </button>
               <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the interface language for the app.')">
                 <span class="sidebar-settings-label">{{ t('UI language') }}</span>
                 <ComposerDropdown
@@ -555,7 +559,7 @@
         :style="contentStyle"
       >
         <span v-if="isVirtualKeyboardOpen" class="content-keyboard-spacer" aria-hidden="true" />
-        <ContentHeader :title="contentTitle" :accent="isSkillsRoute || isAutomationsRoute">
+        <ContentHeader :title="contentTitle" :accent="isSkillsRoute || isAutomationsRoute || isSettingsRoute">
           <template #leading>
             <SidebarThreadControls
               v-if="isSidebarCollapsed || isMobile"
@@ -570,6 +574,9 @@
             </span>
             <span v-else-if="isAutomationsRoute" class="skills-route-header-icon automations-route-header-icon" aria-hidden="true">
               <IconTablerBolt />
+            </span>
+            <span v-else-if="isSettingsRoute" class="skills-route-header-icon" aria-hidden="true">
+              <IconTablerSettings />
             </span>
           </template>
           <template #actions>
@@ -643,6 +650,9 @@
               @edit-automation="onEditAutomationFromPanel"
               @create-automation="onCreateAutomationFromPanel"
             />
+          </template>
+          <template v-else-if="isSettingsRoute">
+            <PersonalizationSettings />
           </template>
           <template v-else-if="isHomeRoute">
             <div class="content-grid content-grid-home">
@@ -1273,6 +1283,7 @@ const ThreadTerminalPanel = defineAsyncComponent(() => import('./components/cont
 const ReviewPane = defineAsyncComponent(() => import('./components/content/ReviewPane.vue'))
 const DirectoryHub = defineAsyncComponent(() => import('./components/content/DirectoryHub.vue'))
 const AutomationsPanel = defineAsyncComponent(() => import('./components/content/AutomationsPanel.vue'))
+const PersonalizationSettings = defineAsyncComponent(() => import('./components/content/PersonalizationSettings.vue'))
 const { t, uiLanguage, uiLanguageOptions, setUiLanguage } = useUiLanguage()
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
@@ -1817,6 +1828,7 @@ const routeThreadId = computed(() => {
 const isHomeRoute = computed(() => route.name === 'home')
 const isSkillsRoute = computed(() => route.name === 'skills')
 const isAutomationsRoute = computed(() => route.name === 'automations')
+const isSettingsRoute = computed(() => route.name === 'personalization-settings')
 const routeAutomationId = computed(() => {
   const raw = route.query.automationId
   return typeof raw === 'string' ? raw : ''
@@ -1824,6 +1836,7 @@ const routeAutomationId = computed(() => {
 const contentTitle = computed(() => {
   if (isAutomationsRoute.value) return t('Automations')
   if (isSkillsRoute.value) return t('Skills')
+  if (isSettingsRoute.value) return t('Personalization')
   if (isHomeRoute.value) return t('Start new thread')
   return selectedThread.value?.title ?? t('Choose a thread')
 })
@@ -1887,7 +1900,7 @@ const isTerminalKeyboardLayoutActive = computed(() => (
 ))
 const directoryCwd = computed(() => selectedThread.value?.cwd?.trim() ?? newThreadCwd.value.trim())
 const isSelectedThreadInProgress = computed(() => !isHomeRoute.value && selectedThread.value?.inProgress === true)
-const showThreadContextBadge = computed(() => !isHomeRoute.value && !isSkillsRoute.value && !isAutomationsRoute.value && selectedThreadId.value.trim().length > 0)
+const showThreadContextBadge = computed(() => !isHomeRoute.value && !isSkillsRoute.value && !isAutomationsRoute.value && !isSettingsRoute.value && selectedThreadId.value.trim().length > 0)
 const isAccountSwitchBlocked = computed(() =>
   isSendingMessage.value ||
   isInterruptingTurn.value ||
@@ -3468,6 +3481,12 @@ function onSettingsAreaClick(event: MouseEvent): void {
   isSettingsOpen.value = false
 }
 
+function openPersonalizationSettings(): void {
+  isSettingsOpen.value = false
+  void router.push({ name: 'personalization-settings' })
+  if (isMobile.value) setSidebarCollapsed(true)
+}
+
 function onDocumentVisibilityChange(): void {
   if (typeof document === 'undefined') return
   if (!isMobile.value) return
@@ -4411,7 +4430,7 @@ function onRevisePlan(payload: { turnId: string; text: string }): void {
 
 
 async function copySelectedThreadChat(): Promise<void> {
-  if (isHomeRoute.value || isSkillsRoute.value || isAutomationsRoute.value) return
+  if (isHomeRoute.value || isSkillsRoute.value || isAutomationsRoute.value || isSettingsRoute.value) return
   if (!selectedThread.value || filteredMessages.value.length === 0) return
   const markdown = buildThreadMarkdown()
   try {
@@ -4980,7 +4999,7 @@ watch(
   async (threadId) => {
     if (!hasInitialized.value) return
     if (isRouteSyncInProgress.value) return
-    if (isHomeRoute.value || isSkillsRoute.value || isAutomationsRoute.value) return
+    if (isHomeRoute.value || isSkillsRoute.value || isAutomationsRoute.value || isSettingsRoute.value) return
 
     if (!threadId) {
       if (route.name !== 'home') {
