@@ -1,6 +1,75 @@
 <template>
-  <section class="thread-tree-root" :class="{ 'chats-first': showChatsFirst }">
-    <section v-if="pinnedThreads.length > 0" class="pinned-section">
+  <section class="thread-tree-root" :class="{ 'chats-first': showChatsFirst, 'activity-view': activityView }">
+    <section v-if="activityView" class="activity-thread-sections">
+      <p v-if="isLoading && activityDisplayGroups.length === 0" class="thread-tree-loading">{{ t('Loading threads...') }}</p>
+      <p v-else-if="activityDisplayGroups.length === 0" class="thread-tree-no-results">{{ t('No matching threads') }}</p>
+      <section v-for="group in activityDisplayGroups" :key="group.key" class="activity-thread-section">
+        <div class="activity-thread-header">
+          <span>{{ group.label }}</span>
+          <span v-if="group.key === 'priority'" class="activity-thread-count">{{ group.threads.length }}</span>
+        </div>
+        <ul class="thread-list activity-thread-list">
+          <li
+            v-for="thread in group.threads"
+            :key="thread.id"
+            class="thread-row-item"
+            :data-menu-open="isThreadMenuOpen(thread.id) ? 'true' : 'false'"
+          >
+            <SidebarMenuRow
+              class="thread-row activity-thread-row"
+              :data-active="thread.id === selectedThreadId"
+              :data-pinned="isPinned(thread.id)"
+              :data-menu-open="isThreadMenuOpen(thread.id) ? 'true' : 'false'"
+              :force-right-hover="isThreadMenuOpen(thread.id)"
+              @click="onSelect(thread.id)"
+              @mouseleave="onThreadRowLeave(thread.id, $event)"
+              @contextmenu="onThreadRowContextMenu($event, thread.id)"
+            >
+              <template #left>
+                <span class="thread-left-stack">
+                  <span
+                    v-if="shouldShowThreadIndicator(thread)"
+                    class="thread-status-indicator"
+                    :data-state="getThreadState(thread)"
+                  />
+                  <button
+                    class="thread-delete-button"
+                    type="button"
+                    :data-confirming="isInlineDeleteConfirming(thread.id)"
+                    :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
+                    @click.stop="onInlineDeleteClick(thread.id)"
+                  >
+                    <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
+                    <IconTablerTrash v-else class="thread-icon" />
+                  </button>
+                </span>
+              </template>
+              <button class="thread-main-button activity-thread-main" type="button" @click.stop="onSelect(thread.id)">
+                <span class="thread-row-title-wrap">
+                  <span class="thread-row-title-line">
+                    <span class="thread-row-title">{{ thread.title }}</span>
+                    <IconTablerGitFork v-if="thread.hasWorktree" class="thread-row-worktree-icon" :title="t('Worktree thread')" />
+                    <span v-if="thread.pendingRequestState" class="thread-row-request-chip" :data-state="thread.pendingRequestState">
+                      {{ threadRequestLabel(thread) }}
+                    </span>
+                  </span>
+                  <span class="activity-thread-subtitle">{{ getActivityThreadSubtitle(thread) }}</span>
+                </span>
+              </button>
+              <template #right-hover>
+                <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                  <button class="thread-menu-trigger" type="button" title="thread_menu" @click.stop="toggleThreadMenu(thread.id)">
+                    <IconTablerDots class="thread-icon" />
+                  </button>
+                </div>
+              </template>
+            </SidebarMenuRow>
+          </li>
+        </ul>
+      </section>
+    </section>
+
+    <section v-if="!activityView && pinnedThreads.length > 0" class="pinned-section">
       <SidebarMenuRow
         as="button"
         class="section-toggle-row"
@@ -92,7 +161,7 @@
       </ul>
     </section>
 
-    <section class="projects-section">
+    <section v-if="!activityView" class="projects-section">
       <SidebarMenuRow
         as="button"
         class="thread-tree-header-row section-toggle-row"
@@ -484,7 +553,7 @@
       </template>
     </section>
 
-    <section class="chats-section">
+    <section v-if="!activityView" class="chats-section">
       <SidebarMenuRow
         as="button"
         class="section-toggle-row"
@@ -904,6 +973,7 @@ import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPa
 import ComposerDropdown from '../content/ComposerDropdown.vue'
 import SidebarMenuRow from './SidebarMenuRow.vue'
 import { reconcilePinnedThreadIds } from './pinnedThreadUtils'
+import { groupThreadsByActivityDate, isAttentionThread, sortThreadsByActivity } from './activityThreadGroups'
 
 const props = defineProps<{
   groups: UiProjectGroup[]
@@ -915,6 +985,7 @@ const props = defineProps<{
   isThreadListFullyLoaded: boolean
   searchQuery: string
   searchMatchedThreadIds: string[] | null
+  activityView: boolean
 }>()
 
 const { t } = useUiLanguage()
@@ -1415,6 +1486,48 @@ const unpinnedThreadsByProjectName = computed(() => {
   }
   return map
 })
+
+const activityProjectLabelByThreadId = computed(() => {
+  const labels = new Map<string, string>()
+  for (const group of props.groups) {
+    const label = getProjectDisplayName(group.projectName)
+    for (const thread of group.threads) labels.set(thread.id, label)
+  }
+  return labels
+})
+
+const activityThreads = computed(() => {
+  const rows = new Map<string, UiThread>()
+  for (const group of props.groups) {
+    for (const thread of group.threads) {
+      if (threadMatchesSearch(thread)) rows.set(thread.id, thread)
+    }
+  }
+  return [...rows.values()]
+})
+
+const activityDisplayGroups = computed(() => {
+  const priorityThreads = sortThreadsByActivity(activityThreads.value.filter(isAttentionThread))
+  const priorityIds = new Set(priorityThreads.map((thread) => thread.id))
+  const chronologicalGroups = groupThreadsByActivityDate(
+    activityThreads.value.filter((thread) => !priorityIds.has(thread.id)),
+    {
+      locale: typeof navigator === 'undefined' ? undefined : navigator.language,
+      todayLabel: t('Today'),
+      yesterdayLabel: t('Yesterday'),
+      earlierLabel: t('Earlier'),
+    },
+  )
+  return [
+    ...(priorityThreads.length > 0 ? [{ key: 'priority', label: t('Priority'), threads: priorityThreads }] : []),
+    ...chronologicalGroups,
+  ]
+})
+
+function getActivityThreadSubtitle(thread: UiThread): string {
+  if (isProjectlessChatPath(thread.cwd)) return t('Chat without project')
+  return activityProjectLabelByThreadId.value.get(thread.id) || getPathLeafName(thread.cwd) || thread.cwd
+}
 const visibleThreadsByProjectName = computed(() => {
   const map = new Map<string, UiThread[]>()
   for (const group of filteredGroups.value) {
@@ -3012,6 +3125,42 @@ onBeforeUnmount(() => {
 
 .thread-tree-root {
   @apply mt-2 flex flex-col gap-1;
+}
+
+.thread-tree-root.activity-view {
+  @apply mt-3 gap-3;
+}
+
+.activity-thread-sections {
+  @apply flex flex-col gap-4;
+}
+
+.activity-thread-section {
+  @apply min-w-0;
+}
+
+.activity-thread-header {
+  @apply mb-1.5 flex items-center gap-2 px-2.5 text-xs font-semibold text-zinc-500;
+}
+
+.activity-thread-count {
+  @apply inline-flex min-w-5 items-center justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] leading-none text-orange-700;
+}
+
+.activity-thread-row {
+  @apply min-h-11 py-1;
+}
+
+.activity-thread-main {
+  @apply min-h-9;
+}
+
+.activity-thread-row .thread-row-title-wrap {
+  @apply flex-col items-start justify-center;
+}
+
+.activity-thread-subtitle {
+  @apply block max-w-full truncate text-[11px] leading-4 text-zinc-400;
 }
 
 .pinned-section {

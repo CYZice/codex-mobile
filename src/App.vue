@@ -26,6 +26,17 @@
             >
               <IconTablerSearch class="sidebar-search-toggle-icon" />
             </button>
+            <button
+              class="sidebar-activity-toggle"
+              type="button"
+              :aria-pressed="isSidebarActivityView"
+              :aria-label="t('Toggle priority activity view')"
+              :title="t('Toggle priority activity view')"
+              @click="toggleSidebarActivityView"
+            >
+              <IconTablerBell class="sidebar-activity-toggle-icon" />
+              <span v-if="sidebarAttentionThreadCount > 0 && !isSidebarActivityView" class="sidebar-activity-attention-dot" />
+            </button>
           </SidebarThreadControls>
 
           <div v-if="!isSidebarCollapsed && isSidebarSearchVisible" class="sidebar-search-bar">
@@ -83,6 +94,7 @@
             :is-thread-list-fully-loaded="isThreadListFullyLoaded"
             :search-query="sidebarSearchQuery"
             :search-matched-thread-ids="serverMatchedThreadIds"
+            :activity-view="isSidebarActivityView"
             @select="onSelectThread"
             @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
             @browse-thread-files="onBrowseThreadFiles"
@@ -1224,6 +1236,7 @@ import ComposerRuntimeDropdown from './components/content/ComposerRuntimeDropdow
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
 import IconTablerBolt from './components/icons/IconTablerBolt.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
+import IconTablerBell from './components/icons/IconTablerBell.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
 import IconTablerRefresh from './components/icons/IconTablerRefresh.vue'
@@ -1277,6 +1290,7 @@ import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, Telegra
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
 import { copyTextToClipboard } from './utils/clipboard'
+import { isAttentionThread } from './components/sidebar/activityThreadGroups'
 
 const ThreadConversation = defineAsyncComponent(() => import('./components/content/ThreadConversation.vue'))
 const ThreadTerminalPanel = defineAsyncComponent(() => import('./components/content/ThreadTerminalPanel.vue'))
@@ -1287,6 +1301,7 @@ const PersonalizationSettings = defineAsyncComponent(() => import('./components/
 const { t, uiLanguage, uiLanguageOptions, setUiLanguage } = useUiLanguage()
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
+const SIDEBAR_ACTIVITY_VIEW_STORAGE_KEY = 'codex-web-local.sidebar-activity-view.v1'
 const ACCOUNTS_SECTION_COLLAPSED_STORAGE_KEY = 'codex-web-local.accounts-section-collapsed.v1'
 const TERMINAL_QUICK_COMMAND_STORAGE_KEY = 'codex-web-local.terminal-quick-commands.v1'
 const TOGGLE_TERMINAL_COMMAND_VALUE = '__toggle_terminal__'
@@ -1605,6 +1620,7 @@ const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: str
   message: '',
 })
 const isSidebarCollapsed = ref(loadSidebarCollapsed())
+const isSidebarActivityView = ref(loadBoolPref(SIDEBAR_ACTIVITY_VIEW_STORAGE_KEY, false))
 const sidebarSearchQuery = ref('')
 const isSidebarSearchVisible = ref(false)
 const sidebarScrollableRef = ref<HTMLElement | null>(null)
@@ -1829,6 +1845,15 @@ const isHomeRoute = computed(() => route.name === 'home')
 const isSkillsRoute = computed(() => route.name === 'skills')
 const isAutomationsRoute = computed(() => route.name === 'automations')
 const isSettingsRoute = computed(() => route.name === 'personalization-settings')
+const sidebarAttentionThreadCount = computed(() => {
+  const threadIds = new Set<string>()
+  for (const group of projectGroups.value) {
+    for (const thread of group.threads) {
+      if (isAttentionThread(thread)) threadIds.add(thread.id)
+    }
+  }
+  return threadIds.size
+})
 const routeAutomationId = computed(() => {
   const raw = route.query.automationId
   return typeof raw === 'string' ? raw : ''
@@ -2436,6 +2461,13 @@ function toggleSidebarSearch(): void {
     nextTick(() => sidebarSearchInputRef.value?.focus())
   } else {
     sidebarSearchQuery.value = ''
+  }
+}
+
+function toggleSidebarActivityView(): void {
+  isSidebarActivityView.value = !isSidebarActivityView.value
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(SIDEBAR_ACTIVITY_VIEW_STORAGE_KEY, isSidebarActivityView.value ? '1' : '0')
   }
 }
 
@@ -5301,6 +5333,22 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-search-toggle-icon {
   @apply w-4 h-4;
+}
+
+.sidebar-activity-toggle {
+  @apply relative flex h-6.75 w-6.75 items-center justify-center rounded-md border border-transparent bg-transparent text-zinc-600 transition hover:border-zinc-200 hover:bg-zinc-50;
+}
+
+.sidebar-activity-toggle[aria-pressed='true'] {
+  @apply border-orange-300 bg-orange-50 text-orange-600;
+}
+
+.sidebar-activity-toggle-icon {
+  @apply h-4 w-4;
+}
+
+.sidebar-activity-attention-dot {
+  @apply absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full border border-white bg-orange-500;
 }
 
 .sidebar-search-bar {

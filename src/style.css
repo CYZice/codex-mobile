@@ -231,6 +231,18 @@
   @apply border-zinc-600 bg-zinc-800 text-zinc-300;
 }
 
+:root.dark .sidebar-activity-toggle {
+  @apply text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800;
+}
+
+:root.dark .sidebar-activity-toggle[aria-pressed='true'] {
+  @apply border-orange-800 bg-orange-950/50 text-orange-300;
+}
+
+:root.dark .sidebar-activity-attention-dot {
+  @apply border-zinc-900;
+}
+
 :root.dark .sidebar-search-bar {
   @apply border-zinc-600 bg-zinc-800;
 }
@@ -273,6 +285,15 @@
 
 :root.dark .thread-row-time {
   @apply text-zinc-500;
+}
+
+:root.dark .activity-thread-header,
+:root.dark .activity-thread-subtitle {
+  @apply text-zinc-500;
+}
+
+:root.dark .activity-thread-count {
+  @apply bg-orange-950/60 text-orange-300;
 }
 
 :root.dark .project-header-row {

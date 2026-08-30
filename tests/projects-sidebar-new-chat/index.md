@@ -26,3 +26,4 @@ Return to the [manual test index](../../tests.md).
 | [Toolbar new thread keeps active project](toolbar-new-thread-keeps-active-project.md) |
 | [Desktop local projects and web project persistence](desktop-local-projects-and-web-project-persistence.md) |
 | [Codex Desktop style sidebar](codex-desktop-style-sidebar.md) |
+| [Sidebar priority activity view](sidebar-activity-priority-view.md) |
