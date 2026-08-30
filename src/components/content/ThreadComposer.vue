@@ -217,6 +217,14 @@
             >
               {{ t('Take photo') }}
             </button>
+            <div class="thread-composer-attach-permissions">
+              <PermissionsDropdown
+                :model-value="selectedPermissionPreset"
+                :disabled="isComposerConfigDisabled"
+                :is-turn-in-progress="isTurnInProgress"
+                @select="onPermissionPresetSelected"
+              />
+            </div>
             <button
               class="thread-composer-attach-item thread-composer-attach-plan-item"
               type="button"
@@ -307,13 +315,12 @@
 
         <div v-if="!isDictationRecording" class="thread-composer-config-controls">
           <PermissionsDropdown
-            class="thread-composer-control"
+            class="thread-composer-mobile-permissions"
             :model-value="selectedPermissionPreset"
             :disabled="isComposerConfigDisabled"
             :is-turn-in-progress="isTurnInProgress"
             @select="onPermissionPresetSelected"
           />
-
           <button
             v-if="isPlanModeSelected"
             class="thread-composer-plan-toggle"
@@ -334,6 +341,8 @@
             :class="`is-${contextUsageTone}`"
             :style="{ '--context-usage-percent': String(contextUsageUsedPercent) }"
             tabindex="0"
+            :aria-label="`${t('Context window')}: ${contextUsageUsedPercent}% ${t('used')}`"
+            :title="`${contextUsageUsedPercent}% ${t('used')} · ${contextUsageRemainingPercent}% ${t('left')}`"
           >
             <span class="thread-composer-context-ring-track" aria-hidden="true" />
             <div class="thread-composer-context-tooltip" role="tooltip">
@@ -2313,7 +2322,7 @@ watch(
 }
 
 .thread-composer-attach {
-  @apply relative shrink-0;
+  @apply shrink-0;
 }
 
 .thread-composer-attach-trigger {
@@ -2321,7 +2330,16 @@ watch(
 }
 
 .thread-composer-attach-menu {
-  @apply absolute bottom-11 left-0 z-20 max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 max-h-[calc(100dvh-5rem)] w-full max-w-none overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+}
+
+.thread-composer-attach-permissions {
+  @apply my-1 border-y border-zinc-100 px-1 py-1;
+}
+
+.thread-composer-attach-permissions :deep(.permissions-dropdown),
+.thread-composer-attach-permissions :deep(.permissions-dropdown-trigger) {
+  @apply w-full;
 }
 
 .thread-composer-attach-item {
@@ -2449,6 +2467,10 @@ watch(
   @apply flex min-w-0 items-center gap-2 sm:gap-4;
 }
 
+.thread-composer-mobile-permissions {
+  display: none;
+}
+
 .thread-composer-model-context {
   @apply ml-auto flex min-w-0 items-center gap-3;
 }
@@ -2529,7 +2551,7 @@ watch(
 
 @media (max-width: 639px) {
   .thread-composer-shell {
-    @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
+    @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
   }
 
   .thread-composer-attachments,
@@ -2540,7 +2562,7 @@ watch(
   }
 
   .thread-composer-input-wrap {
-    @apply order-3 col-start-2 min-w-0 self-end border border-zinc-200 bg-zinc-100;
+    @apply order-2 col-start-2 min-w-0 self-end border border-zinc-200 bg-zinc-100;
     border-radius: 22px;
   }
 
@@ -2561,7 +2583,7 @@ watch(
   }
 
   .thread-composer-config-controls {
-    @apply order-1 col-span-full flex-nowrap gap-1.5 overflow-x-auto px-0.5;
+    @apply order-1 col-span-2 min-w-0 flex-nowrap gap-1.5 overflow-x-auto px-0.5;
     scrollbar-width: none;
   }
 
@@ -2573,8 +2595,16 @@ watch(
     @apply min-w-0 shrink-0;
   }
 
+  .thread-composer-mobile-permissions {
+    display: block;
+  }
+
   .thread-composer-model-context {
-    @apply order-1 col-span-full ml-0 justify-end;
+    @apply order-1 col-start-3 max-w-[9.5rem] ml-0 justify-end self-center;
+  }
+
+  .thread-composer-context-ring {
+    display: none;
   }
 
   .thread-composer-control :deep(.composer-dropdown-trigger),
@@ -2585,7 +2615,7 @@ watch(
   }
 
   .thread-composer-actions {
-    @apply order-4 col-start-3 ml-0 self-center gap-1;
+    @apply order-2 col-start-4 ml-0 self-center gap-1;
   }
 
   .thread-composer-mic,

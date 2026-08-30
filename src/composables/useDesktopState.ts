@@ -3072,7 +3072,16 @@ export function useDesktopState() {
     const last = normalizeTokenUsageBreakdown(record.last)
     if (!total || !last) return null
 
-    const modelContextWindow = readNumber(record.modelContextWindow ?? record.model_context_window)
+    const modelContextWindow = readNumber(
+      record.modelContextWindow
+        ?? record.model_context_window
+        ?? record.contextWindow
+        ?? record.context_window
+        ?? record.contextWindowTokens
+        ?? record.context_window_tokens
+        ?? record.maxContextTokens
+        ?? record.max_context_tokens,
+    )
     const currentContextTokens = last.totalTokens
     const remainingContextTokens = typeof modelContextWindow === 'number'
       ? Math.max(modelContextWindow - currentContextTokens, 0)

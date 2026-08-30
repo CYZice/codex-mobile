@@ -49,7 +49,7 @@ const { t } = useUiLanguage()
 @reference "tailwindcss";
 
 .skill-picker {
-  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 flex max-h-64 w-80 max-w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 flex max-h-[min(20rem,calc(100dvh-8rem))] w-full max-w-none flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
 }
 
 .skill-picker-label {
