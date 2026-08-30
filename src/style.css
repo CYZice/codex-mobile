@@ -515,6 +515,19 @@
   @apply text-zinc-300 hover:bg-zinc-700;
 }
 
+:root.dark .thread-composer-attach-plan-icon,
+:root.dark .thread-composer-plan-toggle {
+  @apply text-zinc-300 hover:text-zinc-100;
+}
+
+:root.dark .thread-composer-attach-plan-copy small {
+  @apply text-zinc-400;
+}
+
+:root.dark .thread-composer-plan-toggle {
+  @apply border-zinc-700;
+}
+
 :root.dark .thread-composer-attach-separator {
   @apply bg-zinc-700;
 }

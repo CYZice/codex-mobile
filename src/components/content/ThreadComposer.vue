@@ -217,6 +217,18 @@
             >
               {{ t('Take photo') }}
             </button>
+            <button
+              class="thread-composer-attach-item thread-composer-attach-plan-item"
+              type="button"
+              :disabled="isComposerConfigDisabled"
+              @click="togglePlanModeFromAttachMenu"
+            >
+              <IconTablerBulb class="thread-composer-attach-plan-icon" />
+              <span class="thread-composer-attach-plan-copy">
+                <span>{{ t('Plan mode') }}</span>
+                <small>{{ t('Agent proposes a plan before acting') }}</small>
+              </span>
+            </button>
             <template v-if="isLoadingComposerPlugins || enabledComposerPlugins.length > 0">
               <div class="thread-composer-attach-separator" />
               <div class="thread-composer-attach-section-label">{{ t('Plugins') }}</div>
@@ -290,28 +302,30 @@
                 }"
               />
             </button>
-            <button
-              class="thread-composer-attach-setting"
-              type="button"
-              role="switch"
-              :aria-checked="isPlanModeSelected"
-              :aria-label="isPlanModeSelected ? t('Disable plan mode') : t('Enable plan mode')"
-              :disabled="isComposerConfigDisabled"
-              @click="toggleCollaborationMode"
-            >
-              <span class="thread-composer-attach-setting-copy">
-                <span class="thread-composer-attach-setting-label">{{ t('Plan mode') }}</span>
-                <span class="thread-composer-attach-setting-description">{{ t('Agent proposes a plan before acting') }}</span>
-              </span>
-              <span
-                class="thread-composer-attach-switch"
-                :class="{ 'is-on': isPlanModeSelected }"
-              />
-            </button>
           </div>
         </div>
 
         <div v-if="!isDictationRecording" class="thread-composer-config-controls">
+          <PermissionsDropdown
+            class="thread-composer-control"
+            :model-value="selectedPermissionPreset"
+            :disabled="isComposerConfigDisabled"
+            :is-turn-in-progress="isTurnInProgress"
+            @select="onPermissionPresetSelected"
+          />
+
+          <button
+            v-if="isPlanModeSelected"
+            class="thread-composer-plan-toggle"
+            type="button"
+            :aria-label="t('Disable plan mode')"
+            :disabled="isComposerConfigDisabled"
+            @click="toggleCollaborationMode"
+          >
+            <IconTablerBulb class="thread-composer-plan-toggle-icon" />
+            <span>{{ t('Plan') }}</span>
+          </button>
+
           <ModelSettingsDropdown
             class="thread-composer-control"
             :model-value="selectedModel"
@@ -326,15 +340,6 @@
             @update:model-value="onModelSelect"
             @update:reasoning-value="onReasoningEffortSelect"
           />
-
-          <PermissionsDropdown
-            class="thread-composer-control"
-            :model-value="selectedPermissionPreset"
-            :disabled="isComposerConfigDisabled"
-            :is-turn-in-progress="isTurnInProgress"
-            @select="onPermissionPresetSelected"
-          />
-
         </div>
 
         <div
@@ -466,6 +471,7 @@ import {
 } from '../../api/codexGateway'
 import IconTablerArrowUp from '../icons/IconTablerArrowUp.vue'
 import IconTablerBolt from '../icons/IconTablerBolt.vue'
+import IconTablerBulb from '../icons/IconTablerBulb.vue'
 import IconTablerFilePencil from '../icons/IconTablerFilePencil.vue'
 import IconTablerFolder from '../icons/IconTablerFolder.vue'
 import IconTablerMaximize from '../icons/IconTablerMaximize.vue'
@@ -1214,6 +1220,11 @@ function onModelSelect(value: string): void {
 
 function toggleCollaborationMode(): void {
   emit('update:selected-collaboration-mode', isPlanModeSelected.value ? 'default' : 'plan')
+}
+
+function togglePlanModeFromAttachMenu(): void {
+  toggleCollaborationMode()
+  isAttachMenuOpen.value = false
 }
 
 function completeSubmission(): void {
@@ -2371,6 +2382,22 @@ watch(
   @apply block w-full rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-400;
 }
 
+.thread-composer-attach-plan-item {
+  @apply flex items-center gap-2;
+}
+
+.thread-composer-attach-plan-icon {
+  @apply h-5 w-5 shrink-0 text-zinc-600;
+}
+
+.thread-composer-attach-plan-copy {
+  @apply flex min-w-0 items-baseline gap-2;
+}
+
+.thread-composer-attach-plan-copy small {
+  @apply truncate text-xs text-zinc-500;
+}
+
 .thread-composer-attach-separator {
   @apply my-1 h-px bg-zinc-100;
 }
@@ -2474,6 +2501,14 @@ watch(
 
 .thread-composer-config-controls {
   @apply flex min-w-0 items-center gap-2 sm:gap-4;
+}
+
+.thread-composer-plan-toggle {
+  @apply inline-flex shrink-0 items-center gap-1 border-0 border-l border-zinc-200 bg-transparent pl-2 text-sm text-zinc-700 transition hover:text-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-400;
+}
+
+.thread-composer-plan-toggle-icon {
+  @apply h-4 w-4;
 }
 
 .thread-composer-control :deep(.composer-dropdown-value) {
