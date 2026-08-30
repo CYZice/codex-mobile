@@ -241,7 +241,7 @@ onMounted(() => {
   @apply bg-red-50 text-red-700;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .personalization-settings {
     @apply block overflow-y-auto;
   }
