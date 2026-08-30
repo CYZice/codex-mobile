@@ -528,6 +528,14 @@
   @apply border-zinc-700;
 }
 
+:root.dark .thread-composer-context-ring-track {
+  background: conic-gradient(var(--context-usage-accent) calc(var(--context-usage-percent) * 1%), rgb(82 82 91) 0);
+}
+
+:root.dark .thread-composer-context-ring-track::after {
+  @apply bg-zinc-800;
+}
+
 :root.dark .thread-composer-attach-separator {
   @apply bg-zinc-700;
 }

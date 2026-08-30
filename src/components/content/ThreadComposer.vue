@@ -325,7 +325,23 @@
             <IconTablerBulb class="thread-composer-plan-toggle-icon" />
             <span>{{ t('Plan') }}</span>
           </button>
+        </div>
 
+        <div v-if="!isDictationRecording" class="thread-composer-model-context">
+          <div
+            v-if="contextUsageView"
+            class="thread-composer-context-ring"
+            :class="`is-${contextUsageTone}`"
+            :style="{ '--context-usage-percent': String(contextUsageUsedPercent) }"
+            tabindex="0"
+          >
+            <span class="thread-composer-context-ring-track" aria-hidden="true" />
+            <div class="thread-composer-context-tooltip" role="tooltip">
+              <span class="thread-composer-context-tooltip-label">{{ t('Context window') }}</span>
+              <strong>{{ contextUsageUsedPercent }}% {{ t('used') }} · {{ contextUsageRemainingPercent }}% {{ t('left') }}</strong>
+              <span>{{ t('Used') }} {{ formatCompactTokenCount(contextTokensInUse) }} {{ t('tokens of') }} {{ formatCompactTokenCount(contextWindowTokens) }}</span>
+            </div>
+          </div>
           <ModelSettingsDropdown
             class="thread-composer-control"
             :model-value="selectedModel"
@@ -455,7 +471,6 @@ import type {
   UiRateLimitSnapshot,
   UiRateLimitWindow,
   UiThreadTokenUsage,
-  UiTokenUsageBreakdown,
 } from '../../types/codex'
 import { useDictation } from '../../composables/useDictation'
 import { useMobile } from '../../composables/useMobile'
@@ -576,7 +591,6 @@ type AttachmentBatchStats = {
   failed: number
 }
 
-const CONTEXT_WINDOW_BASELINE_TOKENS = 12000
 const PASTED_TEXT_FILE_THRESHOLD = 2000
 const draft = ref('')
 const selectedImages = ref<SelectedImage[]>([])
@@ -814,10 +828,11 @@ const quotaSummaryText = computed(() => buildQuotaSummaryText(props.codexQuota ?
 const quotaWeeklyRefreshText = computed(() => '')
 const quotaTooltipText = computed(() => buildQuotaTooltipText(props.codexQuota ?? null))
 const contextUsageView = computed(() => buildContextUsageView(props.threadTokenUsage ?? null))
-const contextUsageSummaryText = computed(() => contextUsageView.value?.summaryText ?? '')
-const contextUsageTooltipText = computed(() => contextUsageView.value?.tooltipText ?? '')
 const contextUsageRemainingPercent = computed(() => contextUsageView.value?.percentRemaining ?? 0)
 const contextUsageTone = computed(() => contextUsageView.value?.tone ?? 'healthy')
+const contextUsageUsedPercent = computed(() => Math.max(0, Math.min(100, 100 - contextUsageRemainingPercent.value)))
+const contextTokensInUse = computed(() => Math.max(0, props.threadTokenUsage?.currentContextTokens ?? 0))
+const contextWindowTokens = computed(() => Math.max(0, props.threadTokenUsage?.modelContextWindow ?? 0))
 
 function formatPlanType(planType: string | null | undefined): string {
   if (!planType || planType === 'unknown') return ''
@@ -966,44 +981,9 @@ function formatCompactTokenCount(value: number): string {
   return String(Math.round(value))
 }
 
-function formatBreakdownSummary(breakdown: UiTokenUsageBreakdown): string {
-  const nonCachedInput = Math.max(0, breakdown.inputTokens - breakdown.cachedInputTokens)
-  const parts = [
-    `${formatCompactTokenCount(breakdown.totalTokens)} total`,
-    `${formatCompactTokenCount(nonCachedInput)} input`,
-  ]
-  if (breakdown.cachedInputTokens > 0) {
-    parts.push(`${formatCompactTokenCount(breakdown.cachedInputTokens)} cached`)
-  }
-  if (breakdown.outputTokens > 0) {
-    parts.push(`${formatCompactTokenCount(breakdown.outputTokens)} output`)
-  }
-  if (breakdown.reasoningOutputTokens > 0) {
-    parts.push(`${formatCompactTokenCount(breakdown.reasoningOutputTokens)} reasoning`)
-  }
-  return parts.join(' · ')
-}
-
-function calculateContextPercentRemaining(tokensInContext: number, contextWindow: number): number {
-  // Mirror official Codex normalization so the first prompt does not look artificially "used".
-  if (!Number.isFinite(tokensInContext) || !Number.isFinite(contextWindow) || contextWindow <= 0) {
-    return 0
-  }
-  if (contextWindow <= CONTEXT_WINDOW_BASELINE_TOKENS) {
-    const remaining = Math.max(0, contextWindow - Math.max(0, tokensInContext))
-    return Math.max(0, Math.min(100, Math.round((remaining / contextWindow) * 100)))
-  }
-  const effectiveWindow = contextWindow - CONTEXT_WINDOW_BASELINE_TOKENS
-  const used = Math.max(0, tokensInContext - CONTEXT_WINDOW_BASELINE_TOKENS)
-  const remaining = Math.max(0, effectiveWindow - used)
-  return Math.max(0, Math.min(100, Math.round((remaining / effectiveWindow) * 100)))
-}
-
 function buildContextUsageView(
   usage: UiThreadTokenUsage | null,
 ): {
-    summaryText: string
-    tooltipText: string
     percentRemaining: number
     tone: 'healthy' | 'warning' | 'danger'
   } | null {
@@ -1012,9 +992,9 @@ function buildContextUsageView(
   const contextWindow = usage.modelContextWindow ?? null
   if (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow) || contextWindow <= 0) return null
 
-  const tokensInContext = Math.max(0, usage.last.totalTokens)
-  const percentRemaining = calculateContextPercentRemaining(tokensInContext, contextWindow)
-  const percentUsed = Math.max(0, Math.min(100, 100 - percentRemaining))
+  const percentRemaining = usage.remainingContextPercent === null
+    ? Math.max(0, Math.min(100, Math.round((Math.max(contextWindow - usage.currentContextTokens, 0) / contextWindow) * 100)))
+    : usage.remainingContextPercent
   const tone: 'healthy' | 'warning' | 'danger' = percentRemaining <= 15
     ? 'danger'
     : percentRemaining <= 35
@@ -1022,13 +1002,6 @@ function buildContextUsageView(
       : 'healthy'
 
   return {
-    summaryText: `${percentRemaining}% · ${formatCompactTokenCount(tokensInContext)} / ${formatCompactTokenCount(contextWindow)}`,
-    tooltipText: [
-      `Context window: ${percentRemaining}% left (${percentUsed}% used)`,
-      `In context: ${tokensInContext.toLocaleString()} / ${contextWindow.toLocaleString()} tokens`,
-      `Last turn: ${formatBreakdownSummary(usage.last)}`,
-      `Session total: ${formatBreakdownSummary(usage.total)}`,
-    ].join('\n'),
     percentRemaining,
     tone,
   }
@@ -2211,33 +2184,6 @@ watch(
   @apply min-w-0 flex-1 truncate;
 }
 
-.thread-composer-context-usage-inline {
-  --context-usage-accent: rgb(34 197 94);
-  @apply ml-auto inline-flex min-w-0 max-w-[56%] items-center gap-2 text-right;
-}
-
-.thread-composer-context-usage-inline.is-warning {
-  --context-usage-accent: rgb(245 158 11);
-}
-
-.thread-composer-context-usage-inline.is-danger {
-  --context-usage-accent: rgb(239 68 68);
-}
-
-.thread-composer-context-usage-inline-value {
-  @apply min-w-0 truncate font-medium tabular-nums;
-  color: var(--context-usage-accent);
-}
-
-.thread-composer-context-usage-inline-bar {
-  @apply block h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-zinc-200/80;
-}
-
-.thread-composer-context-usage-inline-bar-fill {
-  @apply block h-full rounded-full transition-[width] duration-200 ease-out;
-  background: var(--context-usage-accent);
-}
-
 .thread-composer-input-wrap {
   @apply relative;
 }
@@ -2503,6 +2449,60 @@ watch(
   @apply flex min-w-0 items-center gap-2 sm:gap-4;
 }
 
+.thread-composer-model-context {
+  @apply ml-auto flex min-w-0 items-center gap-3;
+}
+
+.thread-composer-context-ring {
+  --context-usage-accent: rgb(82 82 91);
+  @apply relative inline-flex h-5 w-5 shrink-0 cursor-default items-center justify-center outline-none;
+}
+
+.thread-composer-context-ring.is-warning {
+  --context-usage-accent: rgb(217 119 6);
+}
+
+.thread-composer-context-ring.is-danger {
+  --context-usage-accent: rgb(220 38 38);
+}
+
+.thread-composer-context-ring-track {
+  @apply absolute inset-0 rounded-full;
+  background: conic-gradient(var(--context-usage-accent) calc(var(--context-usage-percent) * 1%), rgb(228 228 231) 0);
+}
+
+.thread-composer-context-ring-track::after {
+  content: '';
+  @apply absolute inset-[3px] rounded-full bg-white;
+}
+
+.thread-composer-context-tooltip {
+  @apply pointer-events-none absolute bottom-[calc(100%+10px)] right-0 z-50 hidden w-max max-w-[18rem] rounded-2xl bg-zinc-900 px-4 py-3 text-center text-sm text-white shadow-xl;
+}
+
+.thread-composer-context-tooltip-label,
+.thread-composer-context-tooltip strong,
+.thread-composer-context-tooltip span:last-child {
+  @apply block;
+}
+
+.thread-composer-context-tooltip-label {
+  @apply mb-1 text-zinc-300;
+}
+
+.thread-composer-context-tooltip strong {
+  @apply text-base font-medium;
+}
+
+.thread-composer-context-tooltip span:last-child {
+  @apply mt-1 text-zinc-200;
+}
+
+.thread-composer-context-ring:hover .thread-composer-context-tooltip,
+.thread-composer-context-ring:focus-visible .thread-composer-context-tooltip {
+  @apply block;
+}
+
 .thread-composer-plan-toggle {
   @apply inline-flex shrink-0 items-center gap-1 border-0 border-l border-zinc-200 bg-transparent pl-2 text-sm text-zinc-700 transition hover:text-zinc-900 disabled:cursor-not-allowed disabled:text-zinc-400;
 }
@@ -2520,7 +2520,7 @@ watch(
 }
 
 .thread-composer-actions {
-  @apply ml-auto flex min-w-0 items-center gap-2;
+  @apply flex min-w-0 items-center gap-2;
 }
 
 .thread-composer-actions--recording {
@@ -2573,6 +2573,10 @@ watch(
     @apply min-w-0 shrink-0;
   }
 
+  .thread-composer-model-context {
+    @apply order-1 col-span-full ml-0 justify-end;
+  }
+
   .thread-composer-control :deep(.composer-dropdown-trigger),
   .thread-composer-control :deep(.model-settings-trigger),
   .thread-composer-control :deep(.search-dropdown-trigger),
@@ -2613,6 +2617,7 @@ watch(
 
   .thread-composer--expanded .thread-composer-attach,
   .thread-composer--expanded .thread-composer-config-controls,
+  .thread-composer--expanded .thread-composer-model-context,
   .thread-composer--expanded .thread-composer-actions {
     @apply order-none;
   }
