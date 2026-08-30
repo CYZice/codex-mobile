@@ -534,8 +534,7 @@
 }
 
 :root.dark .composer-menu-surface .thread-composer-attach-item:disabled,
-:root.dark .composer-menu-surface .thread-composer-attach-setting:disabled,
-:root.dark .composer-menu-surface .thread-composer-attach-mode-button:disabled {
+:root.dark .composer-menu-surface .thread-composer-attach-setting:disabled {
   @apply text-zinc-400 opacity-100;
 }
 
@@ -582,28 +581,16 @@
   @apply bg-zinc-700 text-zinc-200;
 }
 
+:root.dark .thread-composer-attach-plugin-icon.is-chatgpt {
+  @apply border-zinc-500 text-zinc-300;
+}
+
 :root.dark .composer-menu-surface .thread-composer-attach-setting-label {
   @apply text-zinc-100;
 }
 
 :root.dark .composer-menu-surface .thread-composer-attach-setting-description {
   @apply text-zinc-400;
-}
-
-:root.dark .composer-menu-surface .thread-composer-attach-mode-label {
-  @apply text-zinc-100;
-}
-
-:root.dark .composer-menu-surface .thread-composer-attach-mode-buttons {
-  @apply border-zinc-600 bg-zinc-900;
-}
-
-:root.dark .composer-menu-surface .thread-composer-attach-mode-button {
-  @apply text-zinc-300 hover:text-zinc-100;
-}
-
-:root.dark .composer-menu-surface .thread-composer-attach-mode-button.is-active {
-  @apply bg-zinc-200 text-zinc-900 hover:text-zinc-900;
 }
 
 :root.dark .composer-menu-surface .skill-picker-label,

@@ -310,6 +310,16 @@ export type StoredQueuedMessage = {
   permissionPreset: PermissionPreset
 }
 
+export type ChatGptConversationSummary = {
+  conversationId: string
+  title: string
+  updatedAt: string | null
+}
+
+export type ChatGptConversationPreview = ChatGptConversationSummary & {
+  preview: string
+}
+
 export type ThreadQueueState = Record<string, StoredQueuedMessage[]>
 
 export type ComposerFileSuggestion = {
@@ -2675,6 +2685,47 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
     permissionPreset: normalizePermissionPreset(record.permissionPreset),
   }
+}
+
+export async function listChatGptConversations(): Promise<ChatGptConversationSummary[]> {
+  const response = await fetch('/codex-api/chatgpt-conversations')
+  if (!response.ok) throw new Error(`Failed to load ChatGPT conversations (${response.status})`)
+  const payload = await response.json() as { data?: unknown }
+  return Array.isArray(payload.data)
+    ? payload.data.map(normalizeChatGptConversationSummary).filter((item): item is ChatGptConversationSummary => item !== null)
+    : []
+}
+
+export async function getChatGptConversationPreview(conversationId: string): Promise<ChatGptConversationPreview> {
+  const response = await fetch(`/codex-api/chatgpt-conversations/${encodeURIComponent(conversationId)}`)
+  if (!response.ok) throw new Error(`Failed to load ChatGPT conversation (${response.status})`)
+  const payload = await response.json() as { data?: unknown }
+  const preview = normalizeChatGptConversationPreview(payload.data)
+  if (!preview) throw new Error('ChatGPT conversation preview was empty')
+  return preview
+}
+
+function normalizeChatGptConversationSummary(value: unknown): ChatGptConversationSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const conversationId = typeof (record.conversationId ?? record.conversation_id ?? record.id) === 'string'
+    ? String(record.conversationId ?? record.conversation_id ?? record.id).trim()
+    : ''
+  if (!conversationId) return null
+  const title = typeof record.title === 'string' ? record.title.trim() : ''
+  const updatedAt = typeof record.updatedAt === 'string'
+    ? record.updatedAt
+    : typeof record.update_time === 'number' ? new Date(record.update_time * 1000).toISOString() : null
+  return { conversationId, title: title || 'New chat', updatedAt }
+}
+
+function normalizeChatGptConversationPreview(value: unknown): ChatGptConversationPreview | null {
+  const summary = normalizeChatGptConversationSummary(value)
+  if (!summary || !value || typeof value !== 'object' || Array.isArray(value)) return null
+  const preview = typeof (value as Record<string, unknown>).preview === 'string'
+    ? String((value as Record<string, unknown>).preview)
+    : ''
+  return { ...summary, preview }
 }
 
 export async function steerThreadTurn(

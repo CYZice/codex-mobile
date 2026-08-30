@@ -4939,6 +4939,47 @@ function getCodexGlobalStatePath(): string {
   return join(getCodexHomeDir(), '.codex-global-state.json')
 }
 
+async function fetchChatgptBackend(pathname: string): Promise<unknown> {
+  const auth = await readCodexAuth()
+  if (!auth) throw new Error('ChatGPT authentication is unavailable')
+  const response = await fetch(`https://chatgpt.com/backend-api${pathname}`, {
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      originator: 'Codex Desktop',
+      'User-Agent': `Codex Desktop/0.1.0 (${process.platform}; ${process.arch})`,
+      ...(auth.accountId ? { 'ChatGPT-Account-Id': auth.accountId } : {}),
+    },
+    signal: AbortSignal.timeout(15_000),
+  })
+  const text = await response.text()
+  let payload: unknown = null
+  try { payload = JSON.parse(text) as unknown } catch { payload = null }
+  if (!response.ok) throw new Error(`ChatGPT backend request failed (${response.status})`)
+  return payload
+}
+
+function extractChatgptPreview(payload: unknown): string {
+  const record = asRecord(payload)
+  const mapping = asRecord(record?.mapping)
+  if (!mapping) return ''
+  const rows: Array<{ role: string; text: string; order: number }> = []
+  let order = 0
+  for (const node of Object.values(mapping)) {
+    const message = asRecord(asRecord(node)?.message)
+    const author = asRecord(message?.author)
+    const role = readNonEmptyString(author?.role) ?? ''
+    const content = asRecord(message?.content)
+    const parts = Array.isArray(content?.parts) ? content.parts : []
+    const text = parts.filter((part): part is string => typeof part === 'string').join('\n').trim()
+    if ((role === 'user' || role === 'assistant') && text) rows.push({ role, text: text.slice(0, 2000), order: order++ })
+  }
+  return rows
+    .sort((a, b) => a.order - b.order)
+    .slice(-6)
+    .map((row) => `${row.role === 'user' ? 'User' : 'Assistant'}: ${row.text}`)
+    .join('\n\n')
+}
+
 let codexGlobalStateMutationChain: Promise<unknown> = Promise.resolve()
 
 async function readCodexGlobalStatePayload(): Promise<Record<string, unknown>> {
@@ -10300,6 +10341,52 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: scored })
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to search files') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/chatgpt-conversations') {
+        try {
+          const payload = asRecord(await fetchChatgptBackend('/conversations?limit=20&offset=0&order=updated&is_archived=false&hide_snorlax=true'))
+          const rows = Array.isArray(payload?.items) ? payload.items : []
+          const data = rows.flatMap((value) => {
+            const row = asRecord(value)
+            if (!row) return []
+            const conversationId = readNonEmptyString(row.conversation_id ?? row.conversationId ?? row.id)
+            if (!conversationId) return []
+            return [{
+              conversationId,
+              title: readNonEmptyString(row.title) ?? 'Untitled conversation',
+              updatedAt: readNonEmptyString(row.update_time ?? row.updatedAt ?? row.updated_at),
+            }]
+          })
+          setJson(res, 200, { data })
+        } catch (error) {
+          setJson(res, 502, { error: getErrorMessage(error, 'Failed to load ChatGPT conversations') })
+        }
+        return
+      }
+
+      const chatgptConversationMatch = /^\/codex-api\/chatgpt-conversations\/([^/]+)$/.exec(url.pathname)
+      if (req.method === 'GET' && chatgptConversationMatch) {
+        const conversationId = decodeURIComponent(chatgptConversationMatch[1] ?? '').trim()
+        if (!conversationId) {
+          setJson(res, 400, { error: 'Missing conversation id' })
+          return
+        }
+        try {
+          const payload = asRecord(await fetchChatgptBackend(`/conversation/${encodeURIComponent(conversationId)}`))
+          const actualId = readNonEmptyString(payload?.conversation_id ?? payload?.conversationId ?? payload?.id) ?? conversationId
+          setJson(res, 200, {
+            data: {
+              conversationId: actualId,
+              title: readNonEmptyString(payload?.title) ?? 'Untitled conversation',
+              updatedAt: readNonEmptyString(payload?.update_time ?? payload?.updatedAt ?? payload?.updated_at),
+              preview: extractChatgptPreview(payload),
+            },
+          })
+        } catch (error) {
+          setJson(res, 502, { error: getErrorMessage(error, 'Failed to load ChatGPT conversation') })
         }
         return
       }

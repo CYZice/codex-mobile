@@ -17,6 +17,7 @@ Return to the [manual test index](../../tests.md).
 | [Composer context-window indicator](composer-context-window-indicator.md) |
 | [Turn activity and automatic compaction](turn-activity-and-compaction.md) |
 | [Projectless new chat, plugin menu, and `$` skills](projectless-new-chat-and-contextual-skill-picker.md) |
+| [ChatGPT conversation reference menu](chatgpt-conversation-reference-menu.md) |
 | [Native steer during an active turn and draft recovery](native-steer-active-turn-and-draft-recovery.md) |
 | [Thread permissions](thread-permissions.md) |
 | [Feature: Markdown file links with backticked filename labels render correctly](markdown-file-links-with-backticked-filename-labels-render-correctly.md) |

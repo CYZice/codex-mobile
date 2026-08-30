@@ -10,7 +10,7 @@
       @click="isOpen = !isOpen"
     >
       <span class="permissions-dropdown-value">
-        <span class="permissions-dropdown-prefix">Permissions: </span>{{ selectedOption.shortLabel }}
+        {{ selectedOption.shortLabel }}
       </span>
       <IconTablerChevronDown class="permissions-dropdown-chevron" />
     </button>
