@@ -832,3 +832,10 @@ After each feature implementation session that uses this skill:
 - Apply the proxy-aware path to ChatGPT conversation list/detail and connector-logo requests only; do not alter app-server protocols.
 - A projectless chat must create `~/Documents/Codex/YYYY-MM-DD/<slug>` before `thread/start`, pass it as `cwd` and `outputDirectory`, set `workspaceRoot` to `~/Documents/Codex`, and avoid registering that path as a normal project root.
 - Keep toolbar new-thread project inheritance unchanged; expose explicit `Chat without project` and sidebar Chats new-chat paths for ordinary chat creation.
+
+## Findings: Global Instructions And Priority Sidebar (2026-08-30)
+
+- Codex-style Personalization maps to the real `CODEX_HOME/AGENTS.md`, but this repository may expose that file as a symbolic link to the synchronized skills directory. Web saves must write through the link target and must not replace the link itself.
+- A non-empty `AGENTS.override.md` is the effective global source. The settings page should surface that precedence without preventing edits to `AGENTS.md`.
+- Codex Desktop Priority is status-driven rather than a fixed top-N list: unread, active, approval-pending, and response-pending threads belong in Priority; remaining threads are grouped chronologically.
+- Preserve the existing project/pin sidebar as the default and use the top bell as an explicit, persisted alternate view.
