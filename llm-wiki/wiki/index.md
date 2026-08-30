@@ -12,6 +12,7 @@
 - [concepts/merge-to-main-workflow.md](./concepts/merge-to-main-workflow.md): branch integration and conflict-resolution workflow.
 - [concepts/opencode-zen-big-pickle.md](./concepts/opencode-zen-big-pickle.md): OpenCode Zen Big Pickle model configuration, local proxy behavior, Docker auth switching, and provider model loading.
 - [concepts/realtime-chat-rendering.md](./concepts/realtime-chat-rendering.md): realtime chat rendering, sync-churn reduction, and inline media sanitization.
+- [concepts/composer-desktop-parity.md](./concepts/composer-desktop-parity.md): Codex Desktop composer parity, mobile capsule layout, shared add/skill menus, and turn-action visibility.
 - [concepts/skills-route-ui.md](./concepts/skills-route-ui.md): Skills route naming, first-launch Plugins card persistence, dark-theme fixes, and verification lessons.
 - [concepts/thread-heartbeat-automations.md](./concepts/thread-heartbeat-automations.md): thread-scoped heartbeat automation storage, multi-automation management, and manual run behavior.
 - [concepts/project-cron-automations.md](./concepts/project-cron-automations.md): project-scoped cron automation storage and sidebar management UI.
@@ -22,6 +23,7 @@
 - [../raw/features/directory-hub-composio-skills-search.md](../raw/features/directory-hub-composio-skills-search.md): source facts for Directory Hub, Composio connectors, Skills search/install, and edge-case tests.
 - [../raw/features/realtime-chat-rendering-inline-media.md](../raw/features/realtime-chat-rendering-inline-media.md): source facts for realtime chat rendering and inline media sanitization.
 - [../raw/features/inline-user-message-edit.md](../raw/features/inline-user-message-edit.md): source facts for Codex Desktop-style inline user-message editing and direct retry.
+- [../raw/features/composer-desktop-parity-and-turn-actions.md](../raw/features/composer-desktop-parity-and-turn-actions.md): current source facts that supersede Retry and define composer/menu/action parity.
 - [../raw/features/skills-route-ui-and-first-launch-card.md](../raw/features/skills-route-ui-and-first-launch-card.md): source facts for the Skills route rename, first-launch Plugins card, dark-theme fix, and dev-server workflow adjustment.
 - [../raw/features/thread-heartbeat-automations.md](../raw/features/thread-heartbeat-automations.md): source facts for thread heartbeat automations, multiple automations per thread, and Run now queue behavior.
 - [../raw/features/project-cron-automations.md](../raw/features/project-cron-automations.md): source facts for project cron automations in the sidebar.

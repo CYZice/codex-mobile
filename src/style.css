@@ -1,6 +1,21 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+.composer-menu-surface {
+  @apply rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+}
+
+.composer-menu-scroll {
+  max-height: min(28rem, calc(100dvh - 12rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+:root.dark .composer-menu-surface {
+  @apply border-zinc-700 bg-zinc-800 shadow-2xl;
+}
+
 :root.dark {
   color-scheme: dark;
 }
@@ -297,6 +312,8 @@
   :root.dark .thread-composer-config-controls .model-settings-trigger,
   :root.dark .thread-composer-config-controls .search-dropdown-trigger,
   :root.dark .thread-composer-config-controls .permissions-dropdown-trigger,
+  :root.dark .thread-composer-mobile-leading-controls .permissions-dropdown-trigger,
+  :root.dark .thread-composer-model-context .model-settings-trigger,
   :root.dark .thread-composer-attach-trigger {
     @apply border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white;
   }
@@ -511,8 +528,15 @@
   @apply border-zinc-600 bg-zinc-800;
 }
 
-:root.dark .thread-composer-attach-item {
-  @apply text-zinc-300 hover:bg-zinc-700;
+:root.dark .composer-menu-surface .thread-composer-attach-item,
+:root.dark .composer-menu-surface .thread-composer-attach-setting {
+  @apply text-zinc-200 hover:bg-zinc-700;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-item:disabled,
+:root.dark .composer-menu-surface .thread-composer-attach-setting:disabled,
+:root.dark .composer-menu-surface .thread-composer-attach-mode-button:disabled {
+  @apply text-zinc-400 opacity-100;
 }
 
 :root.dark .thread-composer-attach-plan-icon,
@@ -520,7 +544,7 @@
   @apply text-zinc-300 hover:text-zinc-100;
 }
 
-:root.dark .thread-composer-attach-plan-copy small {
+:root.dark .composer-menu-surface .thread-composer-attach-plan-copy small {
   @apply text-zinc-400;
 }
 
@@ -536,13 +560,13 @@
   @apply bg-zinc-800;
 }
 
-:root.dark .thread-composer-attach-separator {
+:root.dark .composer-menu-surface .thread-composer-attach-separator {
   @apply bg-zinc-700;
 }
 
-:root.dark .thread-composer-attach-section-label,
-:root.dark .thread-composer-attach-loading,
-:root.dark .thread-composer-attach-plugin-description {
+:root.dark .composer-menu-surface .thread-composer-attach-section-label,
+:root.dark .composer-menu-surface .thread-composer-attach-loading,
+:root.dark .composer-menu-surface .thread-composer-attach-plugin-description {
   @apply text-zinc-400;
 }
 
@@ -550,7 +574,7 @@
   @apply hover:bg-zinc-700;
 }
 
-:root.dark .thread-composer-attach-plugin-name {
+:root.dark .composer-menu-surface .thread-composer-attach-plugin-name {
   @apply text-zinc-200;
 }
 
@@ -558,32 +582,43 @@
   @apply bg-zinc-700 text-zinc-200;
 }
 
-:root.dark .thread-composer-attach-setting {
-  @apply text-zinc-300 hover:bg-zinc-700;
-}
-
-:root.dark .thread-composer-attach-setting-label {
+:root.dark .composer-menu-surface .thread-composer-attach-setting-label {
   @apply text-zinc-100;
 }
 
-:root.dark .thread-composer-attach-setting-description {
+:root.dark .composer-menu-surface .thread-composer-attach-setting-description {
   @apply text-zinc-400;
 }
 
-:root.dark .thread-composer-attach-mode-label {
+:root.dark .composer-menu-surface .thread-composer-attach-mode-label {
   @apply text-zinc-100;
 }
 
-:root.dark .thread-composer-attach-mode-buttons {
+:root.dark .composer-menu-surface .thread-composer-attach-mode-buttons {
   @apply border-zinc-600 bg-zinc-900;
 }
 
-:root.dark .thread-composer-attach-mode-button {
+:root.dark .composer-menu-surface .thread-composer-attach-mode-button {
   @apply text-zinc-300 hover:text-zinc-100;
 }
 
-:root.dark .thread-composer-attach-mode-button.is-active {
+:root.dark .composer-menu-surface .thread-composer-attach-mode-button.is-active {
   @apply bg-zinc-200 text-zinc-900 hover:text-zinc-900;
+}
+
+:root.dark .composer-menu-surface .skill-picker-label,
+:root.dark .composer-menu-surface .skill-picker-empty,
+:root.dark .composer-menu-surface .skill-picker-desc {
+  @apply text-zinc-400;
+}
+
+:root.dark .composer-menu-surface .skill-picker-name {
+  @apply text-zinc-100;
+}
+
+:root.dark .composer-menu-surface .skill-picker-item:hover,
+:root.dark .composer-menu-surface .skill-picker-item.is-highlighted {
+  @apply bg-zinc-700;
 }
 
 :root.dark .thread-composer-attach-switch {

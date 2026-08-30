@@ -473,6 +473,17 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
     return []
   }
 
+  if ((item as { type?: string }).type === 'contextCompaction') {
+    return [
+      {
+        id: item.id,
+        role: 'system',
+        text: 'Context automatically compacted',
+        messageType: 'contextCompaction',
+      },
+    ]
+  }
+
 
   if (item.type === 'plan') {
     const text = typeof item.text === 'string' ? item.text : ''

@@ -14,8 +14,10 @@
 4. Confirm the tooltip shows context-window title, used and remaining percentages, and used tokens over total context tokens.
 5. Switch to dark theme and repeat steps 1-4.
 6. At a mobile viewport (for example, 375x812), confirm the context ring is hidden and the model control remains on the composer footer row.
-7. Open the `+` menu on desktop and mobile and confirm `Add photos & files`, `Add folder`, `Take photo`, and the permissions control are present.
-8. Open a thread that has no context-window data and confirm no empty ring or tooltip is rendered.
+7. On desktop, confirm the footer order is `+`, permissions, plan (when active), spacer, context ring, model, then microphone/send.
+8. On mobile, confirm permissions and model remain above the input, `+` stays to the left of the input, the send button appears only when content exists, and the context ring is hidden.
+9. Open the `+` menu on desktop and mobile and confirm attachments, folder, camera, plan mode, plugins, send mode, and fast mode are present, but permissions are not duplicated inside the menu.
+10. Open a thread that has no context-window data and confirm no empty ring or tooltip is rendered.
 
 ## Expected results
 
@@ -25,8 +27,9 @@
 - Light and dark surfaces remain readable.
 - Mobile omits the context ring so it cannot displace footer controls.
 - The mobile `+` menu keeps separate photo/file, folder, and camera entry points.
-- Desktop and mobile keep permission selection inside the `+` menu instead of the bottom footer.
-- The `+` menu and `$` skill picker span the composer width and scroll when their content exceeds the available height.
+- Desktop shows permission selection beside `+`; mobile shows the original permission control above the input.
+- The `+` menu does not contain a second permission control.
+- The `+` and `$` menus share the same surface, width, maximum height, scrolling, and outside-click/Escape behavior.
 
 ## Rollback and cleanup
 

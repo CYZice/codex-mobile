@@ -64,6 +64,22 @@ describe('normalizeThreadMessagesV2', () => {
     expect(messages[0].isUnhandled).toBeUndefined()
   })
 
+  it('renders persisted context compaction activity as a system message', () => {
+    const messages = normalizeThreadMessagesV2(threadReadResponseWithContent([{
+      type: 'contextCompaction',
+      id: 'compaction-1',
+    }]))
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        id: 'compaction-1',
+        role: 'system',
+        text: 'Context automatically compacted',
+        messageType: 'contextCompaction',
+      }),
+    ])
+  })
+
   it('decodes escaped heartbeat instructions without exposing raw XML', () => {
     const messages = normalizeThreadMessagesV2(threadReadResponseWithContent([{
       type: 'userMessage',

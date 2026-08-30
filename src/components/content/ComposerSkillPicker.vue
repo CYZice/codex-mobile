@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="skill-picker" role="listbox" aria-label="Skills">
+  <div v-if="visible" class="skill-picker composer-menu-surface composer-menu-scroll" role="listbox" aria-label="Skills">
     <div class="skill-picker-label">{{ t('Skills') }}</div>
     <ul v-if="skills.length > 0" class="skill-picker-list">
       <li v-for="(skill, index) in skills" :key="skill.path">
@@ -49,7 +49,7 @@ const { t } = useUiLanguage()
 @reference "tailwindcss";
 
 .skill-picker {
-  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 flex max-h-[min(20rem,calc(100dvh-8rem))] w-full max-w-none flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 w-full max-w-none;
 }
 
 .skill-picker-label {

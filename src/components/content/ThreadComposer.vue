@@ -90,6 +90,14 @@
       </div>
       </div>
 
+      <ComposerSkillPicker
+        :skills="matchingSkills"
+        :visible="isSkillPickerOpen"
+        :highlighted-index="skillHighlightedIndex"
+        @select="applySkillMention"
+        @highlight="skillHighlightedIndex = $event"
+      />
+
       <div
         class="thread-composer-input-wrap"
         :class="{
@@ -146,13 +154,6 @@
           </template>
           <div v-else class="thread-composer-file-mention-empty">{{ t('No matching files') }}</div>
         </div>
-        <ComposerSkillPicker
-          :skills="matchingSkills"
-          :visible="isSkillPickerOpen"
-          :highlighted-index="skillHighlightedIndex"
-          @select="applySkillMention"
-          @highlight="skillHighlightedIndex = $event"
-        />
         <textarea
           ref="inputRef"
           v-model="draft"
@@ -192,7 +193,7 @@
             +
           </button>
 
-          <div v-if="isAttachMenuOpen" class="thread-composer-attach-menu">
+          <div v-if="isAttachMenuOpen" class="thread-composer-attach-menu composer-menu-surface composer-menu-scroll">
             <button
               class="thread-composer-attach-item"
               type="button"
@@ -217,14 +218,6 @@
             >
               {{ t('Take photo') }}
             </button>
-            <div class="thread-composer-attach-permissions">
-              <PermissionsDropdown
-                :model-value="selectedPermissionPreset"
-                :disabled="isComposerConfigDisabled"
-                :is-turn-in-progress="isTurnInProgress"
-                @select="onPermissionPresetSelected"
-              />
-            </div>
             <button
               class="thread-composer-attach-item thread-composer-attach-plan-item"
               type="button"
@@ -313,16 +306,17 @@
           </div>
         </div>
 
-        <div v-if="!isDictationRecording" class="thread-composer-config-controls">
-          <PermissionsDropdown
-            class="thread-composer-mobile-permissions"
-            :model-value="selectedPermissionPreset"
-            :disabled="isComposerConfigDisabled"
-            :is-turn-in-progress="isTurnInProgress"
-            @select="onPermissionPresetSelected"
-          />
+        <PermissionsDropdown
+          v-if="!isMobile && !isDictationRecording"
+          class="thread-composer-desktop-permissions"
+          :model-value="selectedPermissionPreset"
+          :disabled="isComposerConfigDisabled"
+          :is-turn-in-progress="isTurnInProgress"
+          @select="onPermissionPresetSelected"
+        />
+
+        <div v-if="!isMobile && !isDictationRecording && isPlanModeSelected" class="thread-composer-config-controls">
           <button
-            v-if="isPlanModeSelected"
             class="thread-composer-plan-toggle"
             type="button"
             :aria-label="t('Disable plan mode')"
@@ -335,6 +329,26 @@
         </div>
 
         <div v-if="!isDictationRecording" class="thread-composer-model-context">
+          <div v-if="isMobile" class="thread-composer-mobile-leading-controls">
+            <PermissionsDropdown
+              class="thread-composer-mobile-permissions thread-composer-control"
+              :model-value="selectedPermissionPreset"
+              :disabled="isComposerConfigDisabled"
+              :is-turn-in-progress="isTurnInProgress"
+              @select="onPermissionPresetSelected"
+            />
+            <button
+              v-if="isPlanModeSelected"
+              class="thread-composer-plan-toggle"
+              type="button"
+              :aria-label="t('Disable plan mode')"
+              :disabled="isComposerConfigDisabled"
+              @click="toggleCollaborationMode"
+            >
+              <IconTablerBulb class="thread-composer-plan-toggle-icon" />
+              <span>{{ t('Plan') }}</span>
+            </button>
+          </div>
           <div
             v-if="contextUsageView"
             class="thread-composer-context-ring"
@@ -2314,7 +2328,7 @@ watch(
 }
 
 .thread-composer-controls {
-  @apply relative mt-2 sm:mt-3 flex items-center gap-2 sm:gap-4 overflow-visible pb-px;
+  @apply mt-2 sm:mt-3 flex items-center gap-2 sm:gap-4 overflow-visible pb-px;
 }
 
 .thread-composer-controls--recording {
@@ -2330,16 +2344,7 @@ watch(
 }
 
 .thread-composer-attach-menu {
-  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 max-h-[calc(100dvh-5rem)] w-full max-w-none overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
-}
-
-.thread-composer-attach-permissions {
-  @apply my-1 border-y border-zinc-100 px-1 py-1;
-}
-
-.thread-composer-attach-permissions :deep(.permissions-dropdown),
-.thread-composer-attach-permissions :deep(.permissions-dropdown-trigger) {
-  @apply w-full;
+  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 w-full;
 }
 
 .thread-composer-attach-item {
@@ -2467,7 +2472,15 @@ watch(
   @apply flex min-w-0 items-center gap-2 sm:gap-4;
 }
 
+.thread-composer-desktop-permissions {
+  @apply shrink-0;
+}
+
 .thread-composer-mobile-permissions {
+  display: none;
+}
+
+.thread-composer-mobile-leading-controls {
   display: none;
 }
 
@@ -2551,7 +2564,7 @@ watch(
 
 @media (max-width: 639px) {
   .thread-composer-shell {
-    @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
+    @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
   }
 
   .thread-composer-attachments,
@@ -2562,7 +2575,7 @@ watch(
   }
 
   .thread-composer-input-wrap {
-    @apply order-2 col-start-2 min-w-0 self-end border border-zinc-200 bg-zinc-100;
+    @apply order-3 col-start-2 min-w-0 self-end border border-zinc-200 bg-zinc-100;
     border-radius: 22px;
   }
 
@@ -2583,7 +2596,7 @@ watch(
   }
 
   .thread-composer-config-controls {
-    @apply order-1 col-span-2 min-w-0 flex-nowrap gap-1.5 overflow-x-auto px-0.5;
+    @apply order-1 col-span-full flex-nowrap gap-1.5 overflow-x-auto px-0.5;
     scrollbar-width: none;
   }
 
@@ -2599,8 +2612,12 @@ watch(
     display: block;
   }
 
+  .thread-composer-mobile-leading-controls {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
   .thread-composer-model-context {
-    @apply order-1 col-start-3 max-w-[9.5rem] ml-0 justify-end self-center;
+    @apply order-1 col-span-full ml-0 justify-between;
   }
 
   .thread-composer-context-ring {
@@ -2615,7 +2632,7 @@ watch(
   }
 
   .thread-composer-actions {
-    @apply order-2 col-start-4 ml-0 self-center gap-1;
+    @apply order-4 col-start-3 ml-0 self-center gap-1;
   }
 
   .thread-composer-mic,

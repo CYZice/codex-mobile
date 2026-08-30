@@ -4251,7 +4251,8 @@ export function useDesktopState() {
     const shouldRefreshMessages =
       method === 'turn/started' ||
       method === 'turn/completed' ||
-      method === 'error'
+      method === 'error' ||
+      method === 'thread/compacted'
     const shouldRefreshThreads =
       method.startsWith('thread/') ||
       method === 'turn/completed'

@@ -996,12 +996,13 @@
                     :active-thread-id="composerThreadContextId" :cwd="composerCwd"
                     :live-overlay="liveOverlay"
                     :pending-requests="selectedThreadServerRequests"
+                    :is-turn-in-progress="isSelectedThreadInProgress"
+                    :is-stop-pending="isSelectedThreadInterruptPending"
                     :has-more-persisted-above="hasMoreOlderMessages"
                     :is-loading-persisted-above="isLoadingOlderMessages"
                     :load-earlier-messages="loadOlderMessages"
                     @fork-thread="onForkThreadFromMessage"
                     @edit-message="onEditMessage"
-                    @retry-message="onRetryMessage"
                     @implement-plan="onImplementPlan"
                     @revise-plan="onRevisePlan"
                     @respond-server-request="onRespondServerRequest" />
@@ -4373,36 +4374,6 @@ async function onEditMessage(payload: {
     payload.onComplete(true)
   } catch {
     payload.onComplete(false, 'Edit failed. The original message was kept.')
-  }
-}
-
-async function onRetryMessage(payload: {
-  threadId: string
-  turnId: string
-  message: UiMessage
-  onComplete: (success: boolean, errorMessage?: string) => void
-}): Promise<void> {
-  const message = payload.message
-  try {
-    if (selectedThreadId.value === payload.threadId) scheduleMobileConversationJumpToLatest()
-    await sendMessageToSelectedThread(
-      message.text,
-      message.images ?? [],
-      message.skills ?? [],
-      'steer',
-      (message.fileAttachments ?? []).map((attachment) => ({
-        label: attachment.label,
-        path: attachment.path,
-        fsPath: attachment.path,
-      })),
-      undefined,
-      undefined,
-      undefined,
-      payload.threadId,
-    )
-    payload.onComplete(true)
-  } catch {
-    payload.onComplete(false, 'Retry failed. The original message was kept.')
   }
 }
 

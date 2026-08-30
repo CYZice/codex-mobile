@@ -1,7 +1,7 @@
 ### Composer controls stay editable during responses
 
 #### Feature/Change Name
-Model, skill, thinking, and plan controls remain usable while a thread turn is in progress.
+Composer text remains editable while a thread turn is in progress; message Edit/Fork actions wait for a settled turn.
 
 #### Prerequisites/Setup
 1. Dev server running (`pnpm run dev`)
@@ -22,6 +22,7 @@ Model, skill, thinking, and plan controls remain usable while a thread turn is i
 #### Expected Results
 - The message textarea remains editable while the assistant is responding.
 - Model, skills, thinking, and plan controls are not disabled during the in-progress response.
+- Message Edit and Fork actions are hidden or unavailable during response and stop-pending states, then return after persistence.
 - Selected controls update the composer state for the next submitted or queued message.
 - Stop remains available while no draft content is present, and the submit button switches to the configured steer/queue behavior when draft content exists.
 - Light-theme and dark-theme controls remain readable and do not overlap.

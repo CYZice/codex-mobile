@@ -21,13 +21,22 @@
         </button>
       </li>
       <template v-for="message in visibleMessages" :key="message.id">
-      <li
-        v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id)"
-        class="conversation-item"
-        :data-role="message.role"
-        :data-message-type="message.messageType || ''"
-      >
-        <div v-if="isCommandMessage(message)" class="message-row" data-role="system">
+        <li
+          v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id)"
+          class="conversation-item"
+          :data-role="message.role"
+          :data-message-type="message.messageType || ''"
+        >
+          <div v-if="isContextCompactionMessage(message)" class="message-row" data-role="system">
+            <div class="message-stack" data-role="system">
+              <div class="context-compaction-row" aria-live="polite">
+                <span class="context-compaction-icon" aria-hidden="true">↻</span>
+                <span>Context automatically compacted</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="isCommandMessage(message)" class="message-row" data-role="system">
           <div class="message-stack" data-role="system">
             <button
               v-if="getGroupedCommandsForLatest(message).length > 0"
@@ -64,7 +73,7 @@
                     @click="toggleCommandExpand(cmd)"
                   >
                     <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(cmd) }">▶</span>
-                    <code class="cmd-label">{{ cmd.commandExecution?.command || '(command)' }}</code>
+                    <code class="cmd-label">{{ commandDisplayText(cmd) }}</code>
                     <span class="cmd-status">{{ commandStatusLabel(cmd) }}</span>
                   </button>
                   <div
@@ -96,7 +105,7 @@
                 @click="toggleCommandExpand(message)"
               >
                 <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(message) }">▶</span>
-                <code class="cmd-label">{{ message.commandExecution?.command || '(command)' }}</code>
+                <code class="cmd-label">{{ commandDisplayText(message) }}</code>
                 <span class="cmd-status">{{ commandStatusLabel(message) }}</span>
               </button>
               <div
@@ -214,12 +223,6 @@
 
         <div v-else class="message-row" :data-role="message.role" :data-message-type="message.messageType || ''">
           <div class="message-stack" :data-role="message.role">
-              <div v-if="isRetryingMessage(message)" class="message-action-status" aria-live="polite">
-              <span v-if="retryStatus === 'pending'" class="message-action-spinner" aria-hidden="true" />
-              <span v-else aria-hidden="true">{{ retryStatus === 'success' ? '✓' : '!' }}</span>
-              {{ retryStatus === 'pending' ? 'Retrying in this thread…' : retryStatus === 'success' ? 'Retry sent' : 'Retry failed' }}
-              <span v-if="retryStatus === 'error' && retryErrorMessage">{{ retryErrorMessage }}</span>
-            </div>
             <article
               class="message-body"
               :class="{ 'message-body--editing': isInlineEditingMessage(message) }"
@@ -305,7 +308,7 @@
                   <p v-if="inlineEditError" class="message-inline-editor-error" role="alert">{{ inlineEditError }}</p>
                 </div>
                 <template v-else>
-                <div v-if="message.isAutomationRun" class="automation-message-label">
+                  <div v-if="message.isAutomationRun" class="automation-message-label">
                   <span>Sent via automation</span>
                   <code v-if="message.automationDisplayName">{{ message.automationDisplayName }}</code>
                 </div>
@@ -335,7 +338,7 @@
                         @click="toggleCommandExpand(cmd)"
                       >
                         <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(cmd) }">▶</span>
-                        <code class="cmd-label">{{ cmd.commandExecution?.command || '(command)' }}</code>
+                        <code class="cmd-label">{{ commandDisplayText(cmd) }}</code>
                         <span class="cmd-status">{{ commandStatusLabel(cmd) }}</span>
                       </button>
                       <div
@@ -761,18 +764,6 @@
                   <span class="message-edit-label">Edit message</span>
                 </button>
                 <button
-                  v-if="showEditMessageButton(message)"
-                  type="button"
-                  class="message-edit-button"
-                  aria-label="Retry this message"
-                  title="Retry this message"
-                  :disabled="isRetryingMessage(message)"
-                  @click="retryMessage(message.id)"
-                >
-                  <IconTablerArrowBackUp class="icon-svg message-edit-icon" />
-                  <span class="message-edit-label">{{ retryLabel(message) }}</span>
-                </button>
-                <button
                   v-if="showForkResponseButton(message)"
                   type="button"
                   class="message-fork-button"
@@ -1098,6 +1089,10 @@ function isCommandMessage(message: UiMessage): boolean {
   return message.messageType === 'commandExecution' && !!message.commandExecution
 }
 
+function isContextCompactionMessage(message: UiMessage): boolean {
+  return message.messageType === 'contextCompaction'
+}
+
 function isPlanMessage(message: UiMessage): boolean {
   return message.messageType === 'plan' || message.messageType === 'plan.live'
 }
@@ -1308,9 +1303,24 @@ function isCommandGroupExpanded(message: UiMessage): boolean {
 function commandGroupSummaryLabel(message: UiMessage): string {
   const commands = getCommandBlockForLatest(message)
   const count = commands.length
-  const latestCommand = message.commandExecution?.command?.trim() || '(command)'
-  const countLabel = count === 1 ? '1 command' : `${count} commands`
-  return `${countLabel} · latest: ${latestCommand}`
+  const hasSkillRead = commands.some(isSkillReadCommand)
+  const hasCommand = commands.some((command) => !isSkillReadCommand(command))
+  if (hasSkillRead && hasCommand) return 'Loaded tools and ran commands'
+  if (hasSkillRead) return count === 1 ? 'Read skill' : `Read ${count} skills`
+  return count === 1 ? 'Ran command' : `Ran ${count} commands`
+}
+
+function isSkillReadCommand(message: UiMessage): boolean {
+  return /SKILL\.md/iu.test(message.commandExecution?.command ?? '')
+}
+
+function commandDisplayText(message: UiMessage): string {
+  if (isSkillReadCommand(message)) {
+    const command = message.commandExecution?.command?.trim() ?? ''
+    const match = command.match(/skills[\\/]+([^\\/\s]+)[\\/]+SKILL\.md/iu)
+    return match?.[1] ? `Read ${match[1]} skill` : 'Read skill'
+  }
+  return message.commandExecution?.command?.trim() || '(command)'
 }
 
 function commandGroupSummaryStatus(message: UiMessage): string {
@@ -1415,6 +1425,8 @@ const props = defineProps<{
   messages: UiMessage[]
   pendingRequests: UiServerRequest[]
   liveOverlay: UiLiveOverlay | null
+  isTurnInProgress?: boolean
+  isStopPending?: boolean
   isLoading: boolean
   activeThreadId: string
   cwd: string
@@ -1432,12 +1444,6 @@ const emit = defineEmits<{
     text: string
     onComplete: (success: boolean, errorMessage?: string) => void
   }]
-  retryMessage: [payload: {
-    threadId: string
-    turnId: string
-    message: UiMessage
-    onComplete: (success: boolean, errorMessage?: string) => void
-  }]
   implementPlan: [payload: { turnId: string }]
   revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
@@ -1453,9 +1459,6 @@ const inlineEditingMessageId = ref('')
 const inlineEditDraft = ref('')
 const isInlineEditSubmitting = ref(false)
 const inlineEditError = ref('')
-const retryingMessageId = ref('')
-const retryStatus = ref<'pending' | 'success' | 'error'>('pending')
-const retryErrorMessage = ref('')
 const forkingMessageId = ref('')
 const forkErrorMessageId = ref('')
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
@@ -1465,6 +1468,7 @@ const toolQuestionAnswers = ref<Record<string, string>>({})
 const toolQuestionOtherAnswers = ref<Record<string, string>>({})
 const mcpElicitationAnswers = ref<Record<string, string | number | boolean | string[]>>({})
 const autoFollowOutput = ref(true)
+const isThreadActionLocked = computed(() => props.isTurnInProgress === true || props.isStopPending === true)
 const BOTTOM_THRESHOLD_PX = 16
 const CODE_LANGUAGE_ALIASES: Record<string, string> = {
   js: 'javascript',
@@ -1515,7 +1519,6 @@ let conversationScrollFrame = 0
 let bottomLockFrame = 0
 let bottomLockFramesLeft = 0
 let copiedMessageResetTimer: ReturnType<typeof setTimeout> | null = null
-let retryStatusResetTimer: ReturnType<typeof setTimeout> | null = null
 let conversationScrollPromise: Promise<void> | null = null
 const trackedPendingImages = new WeakSet<HTMLImageElement>()
 const highlightJsModule = ref<HighlightJsModule | null>(null)
@@ -2002,7 +2005,7 @@ function showCopyResponseButton(message: UiMessage): boolean {
 }
 
 function showForkResponseButton(message: UiMessage): boolean {
-  return typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
+  return !isThreadActionLocked.value && typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
 }
 
 function mergeFileChangeDiff(first: string, second: string): string {
@@ -2553,10 +2556,11 @@ const editableTurnIdByMessageId = computed<Record<string, string>>(() => {
 })
 
 function showEditMessageButton(message: UiMessage): boolean {
-  return typeof editableTurnIdByMessageId.value[message.id] === 'string'
+  return !isThreadActionLocked.value && typeof editableTurnIdByMessageId.value[message.id] === 'string'
 }
 
 function editMessage(messageId: string): void {
+  if (isThreadActionLocked.value) return
   const turnId = editableTurnIdByMessageId.value[messageId]
   const message = props.messages.find((item) => item.id === messageId)
   if (!turnId || !message) return
@@ -2585,6 +2589,7 @@ function cancelInlineEdit(): void {
 }
 
 function submitInlineEdit(message: UiMessage): void {
+  if (isThreadActionLocked.value) return
   const turnId = editableTurnIdByMessageId.value[message.id]
   const text = inlineEditDraft.value.trim()
   if (!turnId || !text || isInlineEditSubmitting.value) return
@@ -2604,43 +2609,6 @@ function submitInlineEdit(message: UiMessage): void {
       inlineEditingMessageId.value = ''
       inlineEditDraft.value = ''
       inlineEditError.value = ''
-    },
-  })
-}
-
-function isRetryingMessage(message: UiMessage): boolean {
-  return retryingMessageId.value === message.id
-}
-
-function retryLabel(message: UiMessage): string {
-  return isRetryingMessage(message) ? 'Retrying…' : 'Retry'
-}
-
-function retryMessage(messageId: string): void {
-  const turnId = editableTurnIdByMessageId.value[messageId]
-  const message = props.messages.find((item) => item.id === messageId)
-  if (!turnId || !message || !props.activeThreadId || retryingMessageId.value) return
-  retryingMessageId.value = messageId
-  retryStatus.value = 'pending'
-  retryErrorMessage.value = ''
-  emit('retryMessage', {
-    threadId: props.activeThreadId,
-    turnId,
-    message,
-    onComplete: (success, errorMessage) => {
-      retryStatus.value = success ? 'success' : 'error'
-      if (retryStatusResetTimer) clearTimeout(retryStatusResetTimer)
-      retryStatusResetTimer = setTimeout(() => {
-        if (retryingMessageId.value === messageId) {
-          retryingMessageId.value = ''
-          retryStatus.value = 'pending'
-          retryErrorMessage.value = ''
-        }
-        retryStatusResetTimer = null
-      }, success ? 1800 : 3200)
-      if (!success) {
-        retryErrorMessage.value = errorMessage || 'Try again.'
-      }
     },
   })
 }
@@ -4719,10 +4687,6 @@ onBeforeUnmount(() => {
     clearTimeout(copiedMessageResetTimer)
     copiedMessageResetTimer = null
   }
-  if (retryStatusResetTimer) {
-    clearTimeout(retryStatusResetTimer)
-    retryStatusResetTimer = null
-  }
   window.removeEventListener('pointerdown', onWindowPointerDownForFileLinkContextMenu)
   window.removeEventListener('blur', onWindowBlurForFileLinkContextMenu)
   window.removeEventListener('keydown', onWindowKeydownForFileLinkContextMenu)
@@ -4731,6 +4695,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 @reference "tailwindcss";
+
+.context-compaction-row {
+  @apply flex items-center gap-2 py-2 text-sm text-zinc-500 dark:text-zinc-400;
+}
+
+.context-compaction-icon {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-zinc-200 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400;
+}
 
 .conversation-root {
   @apply relative h-full min-h-0 min-w-0 p-0 flex flex-col overflow-y-hidden overflow-x-hidden bg-transparent border-none rounded-none;
