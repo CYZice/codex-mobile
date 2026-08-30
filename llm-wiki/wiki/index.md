@@ -27,6 +27,7 @@
 - [../raw/features/composer-desktop-parity-and-turn-actions.md](../raw/features/composer-desktop-parity-and-turn-actions.md): current source facts that supersede Retry and define composer/menu/action parity.
 - [../raw/features/chatgpt-conversation-reference-menu.md](../raw/features/chatgpt-conversation-reference-menu.md): source facts for ChatGPT conversation references and the updated composer menu grouping.
 - [../raw/features/codex-desktop-chatgpt-conversation-reference-protocol.md](../raw/features/codex-desktop-chatgpt-conversation-reference-protocol.md): installed Desktop evidence for inline mention serialization, bounded previews, and `read_thread` fallback.
+- [../raw/features/projectless-chat-and-chatgpt-proxy-2026-08-30.md](../raw/features/projectless-chat-and-chatgpt-proxy-2026-08-30.md): Desktop-style ordinary-chat workspace creation and Windows proxy-aware ChatGPT bridge requests.
 - [../raw/features/skills-route-ui-and-first-launch-card.md](../raw/features/skills-route-ui-and-first-launch-card.md): source facts for the Skills route rename, first-launch Plugins card, dark-theme fix, and dev-server workflow adjustment.
 - [../raw/features/thread-heartbeat-automations.md](../raw/features/thread-heartbeat-automations.md): source facts for thread heartbeat automations, multiple automations per thread, and Run now queue behavior.
 - [../raw/features/project-cron-automations.md](../raw/features/project-cron-automations.md): source facts for project cron automations in the sidebar.

@@ -41,13 +41,14 @@ import { handleOpenRouterProxyRequest } from './openRouterProxy.js'
 import { handleZenProxyRequest } from './zenProxy.js'
 import { handleCustomEndpointProxyRequest } from './customEndpointProxy.js'
 import { ThreadTerminalManager } from './terminalManager.js'
+import { describeProxyRoute, proxyAwareFetch } from './proxyAwareFetch.js'
 import { getSpawnInvocation } from '../utils/commandInvocation.js'
 import {
   resolveCodexCommand,
   resolveRipgrepCommand,
 } from '../commandResolution.js'
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
-import { isAbsoluteLikePath } from '../pathUtils.js'
+import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
 import {
   DEFAULT_PERMISSION_PRESET,
   normalizePermissionPreset,
@@ -301,6 +302,9 @@ const THREAD_RESPONSE_TURN_LIMIT = 10
 const THREAD_TURN_PAGE_READ_CACHE_TTL_MS = 30_000
 const THREAD_METHODS_WITH_TURNS = new Set(['thread/read', 'thread/resume', 'thread/fork', 'thread/rollback'])
 const THREAD_METHODS_WITH_THREAD_SNAPSHOT = new Set([...THREAD_METHODS_WITH_TURNS, 'thread/start'])
+const PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS = 100
+const PROJECTLESS_THREAD_READABLE_DIRECTORY_ATTEMPTS = 20
+const PROJECTLESS_THREAD_SLUG_MAX_LENGTH = 80
 const API_PERF_LOGGING_ENV_KEY = 'CODEXUI_API_PERF_LOGGING'
 const API_PERF_MS_THRESHOLD_ENV_KEY = 'CODEXUI_API_PERF_MS_THRESHOLD'
 const API_PERF_BODY_MB_THRESHOLD_ENV_KEY = 'CODEXUI_API_PERF_BODY_MB_THRESHOLD'
@@ -2161,6 +2165,35 @@ function logProviderModelDiscoveryWarning(message: string, details: Record<strin
 
 function isTimeoutError(payload: unknown): boolean {
   return payload instanceof Error && (payload.name === 'AbortError' || payload.name === 'TimeoutError')
+}
+
+function formatProjectlessDateSegment(date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+export function buildProjectlessPromptSlug(prompt: string | null): string {
+  const slug = prompt
+    ?.toLowerCase()
+    .match(/[a-z0-9]+/g)
+    ?.slice(0, 6)
+    .join('-')
+    .slice(0, PROJECTLESS_THREAD_SLUG_MAX_LENGTH)
+  return slug && slug.length > 0 ? slug : 'new-chat'
+}
+
+function buildProjectlessUniqueSuffix(): string {
+  return `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
+}
+
+export function buildProjectlessFolderName(slug: string, index: number, uniqueSuffix = buildProjectlessUniqueSuffix()): string {
+  if (index === 0) return slug
+  if (index < PROJECTLESS_THREAD_READABLE_DIRECTORY_ATTEMPTS) return `${slug}-${index + 1}`
+
+  const suffix = `-${uniqueSuffix}`
+  const maxSlugLength = Math.max(1, PROJECTLESS_THREAD_SLUG_MAX_LENGTH - suffix.length)
+  return `${slug.slice(0, maxSlugLength)}${suffix}`
 }
 
 async function ensureRealDirectory(path: string, label: string): Promise<void> {
@@ -4939,18 +4972,53 @@ function getCodexGlobalStatePath(): string {
   return join(getCodexHomeDir(), '.codex-global-state.json')
 }
 
+async function createProjectlessThreadDirectory(prompt: string | null): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
+  const workspaceRoot = join(homedir(), 'Documents', 'Codex')
+  await mkdir(workspaceRoot, { recursive: true })
+  await ensureRealDirectory(workspaceRoot, 'Projectless workspace root')
+
+  const dateDir = join(workspaceRoot, formatProjectlessDateSegment())
+  await mkdir(dateDir, { recursive: true })
+  await ensureRealDirectory(dateDir, 'Projectless thread date directory')
+
+  const slug = buildProjectlessPromptSlug(prompt)
+  for (let index = 0; index < PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS; index += 1) {
+    const folderName = buildProjectlessFolderName(slug, index)
+    const cwd = join(dateDir, folderName)
+    try {
+      await mkdir(cwd, { recursive: false })
+      return { cwd, outputDirectory: cwd, workspaceRoot }
+    } catch {
+      try {
+        await stat(cwd)
+      } catch {
+        throw new Error('Failed to create new chat folder')
+      }
+    }
+  }
+
+  throw new Error('Unable to create a unique new chat folder')
+}
+
 async function fetchChatgptBackend(pathname: string): Promise<unknown> {
   const auth = await readCodexAuth()
   if (!auth) throw new Error('ChatGPT authentication is unavailable')
-  const response = await fetch(`https://chatgpt.com/backend-api${pathname}`, {
-    headers: {
-      Authorization: `Bearer ${auth.accessToken}`,
-      originator: 'Codex Desktop',
-      'User-Agent': `Codex Desktop/0.1.0 (${process.platform}; ${process.arch})`,
-      ...(auth.accountId ? { 'ChatGPT-Account-Id': auth.accountId } : {}),
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
+  const endpoint = `https://chatgpt.com/backend-api${pathname}`
+  let response: Response
+  try {
+    response = await proxyAwareFetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${auth.accessToken}`,
+        originator: 'Codex Desktop',
+        'User-Agent': `Codex Desktop/0.1.0 (${process.platform}; ${process.arch})`,
+        ...(auth.accountId ? { 'ChatGPT-Account-Id': auth.accountId } : {}),
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error'
+    throw new Error(`Unable to connect to ChatGPT via ${describeProxyRoute(endpoint)} network route: ${message}`)
+  }
   const text = await response.text()
   let payload: unknown = null
   try { payload = JSON.parse(text) as unknown } catch { payload = null }
@@ -6835,7 +6903,7 @@ async function fetchConnectorLogo(rawUrl: string): Promise<{ contentType: string
   if (!auth) throw new Error('No auth token available for connector logo')
 
   const endpoint = `https://chatgpt.com/backend-api/aip/connectors/${encodeURIComponent(parsed.connectorId)}/logo?theme=${parsed.theme}`
-  const response = await fetch(endpoint, {
+  const response = await proxyAwareFetch(endpoint, {
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
       originator: 'Codex Desktop',
@@ -8938,7 +9006,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         if (body.method === 'thread/start') {
           const params = asRecord(body.params)
           const cwd = readNonEmptyString(params?.cwd)
-          if (cwd) await ensureWorkspaceRootForThread(cwd)
+          if (cwd && !isProjectlessChatPath(cwd)) await ensureWorkspaceRootForThread(cwd)
         }
 
         let rpcResult: unknown
@@ -10278,6 +10346,18 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         }
 
         setJson(res, 200, { data: { path: normalizedPath } })
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/projectless-thread-cwd') {
+        const payload = asRecord(await readJsonBody(req))
+        const prompt = typeof payload?.prompt === 'string' ? payload.prompt : null
+        try {
+          const directory = await createProjectlessThreadDirectory(prompt)
+          setJson(res, 200, { data: directory })
+        } catch (error) {
+          setJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to create new chat folder' })
+        }
         return
       }
 

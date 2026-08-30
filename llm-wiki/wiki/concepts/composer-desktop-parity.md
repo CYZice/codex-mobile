@@ -10,6 +10,10 @@ Source: [Composer Desktop parity and turn-action facts](../../raw/features/compo
 
 The footer order is add, permissions, active plan mode, flexible space, context usage, model, and microphone/send. Permissions live beside add and never appear again inside the add menu.
 
+## Ordinary chats and projects
+
+Ordinary chats still have a real filesystem cwd. Before the first turn, the bridge creates `~/Documents/Codex/YYYY-MM-DD/<prompt-slug>` and supplies it as `cwd` and `outputDirectory`, with `~/Documents/Codex` as `workspaceRoot`. Those paths are classified under Chats and must not be added to normal project roots. The global new-thread action may retain the current project, but the folder picker always offers an explicit ordinary-chat choice and the Chats section selects it directly.
+
 ## Mobile layout
 
 Permission and model controls share the same top row and the same capsule geometry. Keeping both controls inside one flex row is important: separate grid rows use independent height and alignment calculations and make the permission control appear to float upward. The context ring remains hidden on mobile so it cannot squeeze the input or action controls.

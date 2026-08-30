@@ -1745,6 +1745,13 @@ export type StartedThread = {
   permissionPreset: PermissionPreset | null
 }
 
+export type StartThreadOptions = {
+  cwd?: string
+  outputDirectory?: string
+  workspaceRoot?: string
+  model?: string
+}
+
 export type ForkedThread = {
   threadId: string
   cwd: string
@@ -1752,14 +1759,20 @@ export type ForkedThread = {
   messages: UiMessage[]
 }
 
-export async function startThread(cwd?: string, model?: string): Promise<StartedThread> {
+export async function startThread(options: StartThreadOptions = {}): Promise<StartedThread> {
   try {
     const params: Record<string, unknown> = {}
-    if (typeof cwd === 'string' && cwd.trim().length > 0) {
-      params.cwd = cwd.trim()
+    if (typeof options.cwd === 'string' && options.cwd.trim().length > 0) {
+      params.cwd = options.cwd.trim()
     }
-    if (typeof model === 'string' && model.trim().length > 0) {
-      params.model = model.trim()
+    if (typeof options.outputDirectory === 'string' && options.outputDirectory.trim().length > 0) {
+      params.outputDirectory = options.outputDirectory.trim()
+    }
+    if (typeof options.workspaceRoot === 'string' && options.workspaceRoot.trim().length > 0) {
+      params.workspaceRoot = options.workspaceRoot.trim()
+    }
+    if (typeof options.model === 'string' && options.model.trim().length > 0) {
+      params.model = options.model.trim()
     }
     const payload = await callRpc<ThreadStartResponse>('thread/start', params)
     const threadId = normalizeThreadIdFromPayload(payload)
@@ -3456,6 +3469,34 @@ export async function importProjectZip(file: Blob, parent: string): Promise<{ pa
   return {
     path: normalizedPath,
     importedSessions: typeof data.importedSessions === 'number' ? data.importedSessions : 0,
+  }
+}
+
+export async function createProjectlessThreadDirectory(prompt?: string): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
+  const response = await fetch('/codex-api/projectless-thread-cwd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt ?? null }),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) {
+    const message = getErrorMessageFromPayload(payload, 'Failed to create new chat folder')
+    throw new Error(message)
+  }
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {}
+  const data =
+    record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : {}
+  const cwd = typeof data.cwd === 'string' ? normalizePathForUi(data.cwd) : ''
+  if (!cwd) throw new Error('Failed to create new chat folder')
+  return {
+    cwd,
+    outputDirectory: typeof data.outputDirectory === 'string' ? normalizePathForUi(data.outputDirectory) : cwd,
+    workspaceRoot: typeof data.workspaceRoot === 'string' ? normalizePathForUi(data.workspaceRoot) : '',
   }
 }
 

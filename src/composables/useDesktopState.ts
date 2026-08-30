@@ -42,6 +42,7 @@ import {
   type RpcNotification,
   type AvailableModel,
   type SkillInfo,
+  type StartThreadOptions,
   type ThreadQueueState,
   type WorkspaceRootsState,
 } from '../api/codexGateway'
@@ -5318,6 +5319,7 @@ export function useDesktopState() {
     imageUrls: string[] = [],
     skills: Array<{ name: string; path: string }> = [],
     fileAttachments: FileAttachment[] = [],
+    workspace: Pick<StartThreadOptions, 'outputDirectory' | 'workspaceRoot'> = {},
   ): Promise<string> {
     if (isUpdatingSpeedMode.value) return ''
 
@@ -5335,7 +5337,12 @@ export function useDesktopState() {
 
     try {
       try {
-        const startedThread = await startThread(targetCwd || undefined, selectedModel || undefined)
+        const startedThread = await startThread({
+          cwd: targetCwd || undefined,
+          outputDirectory: workspace.outputDirectory,
+          workspaceRoot: workspace.workspaceRoot,
+          model: selectedModel || undefined,
+        })
         threadId = startedThread.threadId
         resolvedThreadCwd = targetCwd || startedThread.cwd
         setThreadModelId(threadId, startedThread.model)
@@ -5344,7 +5351,12 @@ export function useDesktopState() {
       } catch (unknownError) {
         if (selectedModel && selectedModel !== MODEL_FALLBACK_ID && isUnsupportedChatGptModelError(unknownError)) {
           await applyFallbackModelSelection()
-          const fallbackThread = await startThread(targetCwd || undefined, MODEL_FALLBACK_ID)
+          const fallbackThread = await startThread({
+            cwd: targetCwd || undefined,
+            outputDirectory: workspace.outputDirectory,
+            workspaceRoot: workspace.workspaceRoot,
+            model: MODEL_FALLBACK_ID,
+          })
           threadId = fallbackThread.threadId
           resolvedThreadCwd = targetCwd || fallbackThread.cwd
           setThreadModelId(threadId, fallbackThread.model)

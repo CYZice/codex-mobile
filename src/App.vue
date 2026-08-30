@@ -1216,6 +1216,7 @@ import {
   cloneGithubRepository,
   configureTelegramBot,
   createPermanentWorktree,
+  createProjectlessThreadDirectory,
   createWorktree,
   downloadProjectZip,
   getGitBranchState,
@@ -1997,8 +1998,10 @@ function resolveWorkspaceRootCwd(projectName: string): string {
 }
 
 const newThreadFolderOptions = computed(() => {
-  const options: Array<{ value: string; label: string }> = []
-  const seenCwds = new Set<string>()
+  const options: Array<{ value: string; label: string }> = [
+    { value: '', label: t('Chat without project') },
+  ]
+  const seenCwds = new Set<string>([''])
 
   for (const cwdRaw of getOrderedWorkspaceRootOptions()) {
     const cwd = cwdRaw.trim()
@@ -5096,6 +5099,7 @@ async function submitFirstMessageForNewThread(
   try {
     worktreeInitStatus.value = { phase: 'idle', title: '', message: '' }
     let targetCwd = newThreadCwd.value
+    let projectlessWorkspace: { outputDirectory?: string; workspaceRoot?: string } = {}
     if (newThreadRuntime.value === 'worktree') {
       worktreeInitStatus.value = {
         phase: 'running',
@@ -5115,8 +5119,22 @@ async function submitFirstMessageForNewThread(
         }
         return
       }
+    } else if (!targetCwd.trim()) {
+      const directory = await createProjectlessThreadDirectory(text)
+      targetCwd = directory.cwd
+      projectlessWorkspace = {
+        outputDirectory: directory.outputDirectory,
+        workspaceRoot: directory.workspaceRoot,
+      }
     }
-    const threadId = await sendMessageToNewThread(text, targetCwd, imageUrls, skills, fileAttachments)
+    const threadId = await sendMessageToNewThread(
+      text,
+      targetCwd,
+      imageUrls,
+      skills,
+      fileAttachments,
+      projectlessWorkspace,
+    )
     if (!threadId) return
     await router.replace({ name: 'thread', params: { threadId } })
     scheduleMobileConversationJumpToLatest()

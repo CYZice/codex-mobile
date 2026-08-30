@@ -823,3 +823,12 @@ After each feature implementation session that uses this skill:
 - `priorConversation` follows the chosen conversation's `current_node` parent chain, includes user and completed assistant text, starts at the third-latest user turn, and limits each text item to 2,000 characters.
 - When the preview is null, attachments or more context are needed, Desktop instructs the agent to call `read_thread` with `threadId` equal to the conversation id and `turnLimit` equal to 10, following the cursor for older turns.
 - If packaged Codex exposes no reusable CDP endpoint on 3434, 3435, 9222, or 9223, inspect the installed renderer bundle read-only and do not restart the user's active session.
+
+## Findings: Windows ChatGPT Backend Proxy Parity (2026-08-30)
+
+- Packaged Codex Desktop routes renderer/backend HTTP through Electron networking and therefore follows the active Windows/WinINET proxy, while Node's built-in `fetch` used by this web bridge does not automatically inherit that proxy.
+- On Windows web parity, resolve proxy settings in this order: `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`, then the current user's WinINET `ProxyEnable` and `ProxyServer`; honor `NO_PROXY`.
+- Reuse cached Undici `ProxyAgent` dispatchers and cache registry discovery briefly, rather than spawning `reg.exe` or rebuilding a dispatcher per ChatGPT conversation request.
+- Apply the proxy-aware path to ChatGPT conversation list/detail and connector-logo requests only; do not alter app-server protocols.
+- A projectless chat must create `~/Documents/Codex/YYYY-MM-DD/<slug>` before `thread/start`, pass it as `cwd` and `outputDirectory`, set `workspaceRoot` to `~/Documents/Codex`, and avoid registering that path as a normal project root.
+- Keep toolbar new-thread project inheritance unchanged; expose explicit `Chat without project` and sidebar Chats new-chat paths for ordinary chat creation.

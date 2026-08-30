@@ -18,6 +18,7 @@ const zhCN: Record<string, string> = {
   'Created': '创建时间',
   'Updated': '更新时间',
   'New chat': '新聊天',
+  'Chat without project': '普通聊天',
   'No chats': '没有聊天',
   'Skills Hub': '技能中心',
   'Expand accounts': '展开账户',
