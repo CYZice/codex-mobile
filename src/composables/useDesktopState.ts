@@ -1542,6 +1542,7 @@ export function useDesktopState() {
     return ''
   }
   let stopNotificationStream: (() => void) | null = null
+  let hasReceivedNotificationReady = false
   let eventSyncTimer: number | null = null
   let rateLimitRefreshTimer: number | null = null
   const delayedTurnSyncTimerByThreadId = new Map<string, number>()
@@ -4650,20 +4651,24 @@ export function useDesktopState() {
     await loadThreadsPromise
   }
 
-  async function loadMessages(threadId: string, options: { silent?: boolean } = {}) {
+  async function loadMessages(threadId: string, options: { silent?: boolean; force?: boolean } = {}) {
     if (!threadId) {
       return
     }
     const recentLoadFailure =
       Date.now() - (lastMessageLoadFailureAtByThreadId.get(threadId) ?? 0) < RECENT_THREAD_MESSAGE_LOAD_REUSE_MS
-    if (turnErrorByThreadId.value[threadId]?.transient && (options.silent === true || recentLoadFailure)) {
+    if (
+      options.force !== true
+      && turnErrorByThreadId.value[threadId]?.transient
+      && (options.silent === true || recentLoadFailure)
+    ) {
       return
     }
 
     const existingLoad = loadMessagePromiseByThreadId.get(threadId)
     if (existingLoad) {
       await existingLoad
-      return
+      if (options.force !== true) return
     }
 
     const alreadyLoaded = loadedMessagesByThreadId.value[threadId] === true
@@ -4679,6 +4684,7 @@ export function useDesktopState() {
       const loadedRecently =
         Date.now() - (lastMessageLoadAtByThreadId.get(threadId) ?? 0) < RECENT_THREAD_MESSAGE_LOAD_REUSE_MS
       const canReuseLoadedMessages =
+        options.force !== true &&
         alreadyLoaded &&
         (
           loadedRecently ||
@@ -4727,7 +4733,9 @@ export function useDesktopState() {
       rebindLiveFileChangeTurnIndices(threadId)
       const previousPersisted = persistedMessagesByThreadId.value[threadId] ?? []
       const mergedMessages = mergeMessages(previousPersisted, nextMessages, {
-        preserveMissing: options.silent === true || hasOptimisticUserMessages(previousPersisted),
+        preserveMissing:
+          (options.silent === true && options.force !== true)
+          || hasOptimisticUserMessages(previousPersisted),
       })
       setPersistedMessagesForThread(threadId, mergedMessages)
       removeLiveSteersPersistedIn(threadId, nextMessages)
@@ -4787,6 +4795,19 @@ export function useDesktopState() {
 
     loadMessagePromiseByThreadId.set(threadId, loadPromise)
     await loadPromise
+  }
+
+  async function refreshSelectedThreadMessages(): Promise<{ updated: boolean; inProgress: boolean }> {
+    const threadId = selectedThreadId.value
+    if (!threadId) return { updated: false, inProgress: false }
+
+    const before = messages.value
+    await loadMessages(threadId, { silent: true, force: true })
+    const after = selectedThreadId.value === threadId ? messages.value : before
+    return {
+      updated: !areMessageArraysEqual(before, after),
+      inProgress: inProgressById.value[threadId] === true,
+    }
   }
 
   async function loadOlderMessages(threadId: string = selectedThreadId.value): Promise<void> {
@@ -5878,8 +5899,14 @@ export function useDesktopState() {
     }
   }
 
-  async function recoverBridgeState(): Promise<void> {
+  async function recoverBridgeState(forceLoadedThread = false): Promise<void> {
     await loadPendingServerRequestsFromBridge()
+    const activeThreadId = selectedThreadId.value
+    const shouldForceLoadedThread = Boolean(
+      forceLoadedThread
+      && activeThreadId
+      && loadedMessagesByThreadId.value[activeThreadId] === true,
+    )
     pendingThreadsRefresh = !hasLoadedThreads.value
     if (
       selectedThreadId.value &&
@@ -5888,6 +5915,9 @@ export function useDesktopState() {
       pendingThreadMessageRefresh.add(selectedThreadId.value)
     }
     await syncFromNotifications()
+    if (activeThreadId && shouldForceLoadedThread && selectedThreadId.value === activeThreadId) {
+      await loadMessages(activeThreadId, { silent: true, force: true }).catch(() => {})
+    }
   }
 
   function startPolling(): void {
@@ -5898,7 +5928,9 @@ export function useDesktopState() {
     stopNotificationStream = subscribeCodexNotifications((notification) => {
       if (notification.method === 'ready') {
         clearAllTransientTurnErrors()
-        void recoverBridgeState()
+        const isReconnect = hasReceivedNotificationReady
+        hasReceivedNotificationReady = true
+        void recoverBridgeState(isReconnect)
         return
       }
       if (applySharedUnreadState(notification)) return
@@ -5938,6 +5970,7 @@ export function useDesktopState() {
       stopNotificationStream()
       stopNotificationStream = null
     }
+    hasReceivedNotificationReady = false
 
     pendingThreadsRefresh = false
     pendingThreadMessageRefresh.clear()
@@ -6085,6 +6118,7 @@ export function useDesktopState() {
     refreshSkills,
     selectThread,
     loadMessages,
+    refreshSelectedThreadMessages,
     loadOlderMessages,
     ensureThreadMessagesLoaded,
     setThreadTerminalOpen,

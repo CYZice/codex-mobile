@@ -1576,6 +1576,43 @@ describe('provider model selection', () => {
   })
 })
 
+describe('thread message refresh', () => {
+  it('bypasses the recent-message cache and reconciles a completed server snapshot', async () => {
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail
+      .mockResolvedValueOnce({
+        messages: [
+          { id: 'assistant-live', role: 'assistant', text: 'Almost done', messageType: 'agentMessage' },
+        ],
+        inProgress: true,
+        activeTurnId: 'turn-1',
+        turnIndexByTurnId: {},
+        hasMoreOlder: false,
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { id: 'assistant-final', role: 'assistant', text: 'Finished', messageType: 'agentMessage' },
+        ],
+        inProgress: false,
+        activeTurnId: '',
+        turnIndexByTurnId: {},
+        hasMoreOlder: false,
+      })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('stale-thread')
+    await state.loadMessages('stale-thread')
+
+    const result = await state.refreshSelectedThreadMessages()
+
+    expect(gatewayMocks.getThreadDetail).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({ updated: true, inProgress: false })
+    expect(state.messages.value).toEqual([
+      expect.objectContaining({ id: 'assistant-final', text: 'Finished' }),
+    ])
+  })
+})
+
 describe('findAdjacentThreadId', () => {
   it('selects the next thread after the archived thread', () => {
     const threads = [

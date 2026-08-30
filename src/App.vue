@@ -992,6 +992,16 @@
 
               <template v-else>
                 <div class="content-thread">
+                  <button
+                    class="thread-message-refresh"
+                    type="button"
+                    :disabled="isRefreshingThreadMessages"
+                    :aria-label="t('Refresh messages')"
+                    :title="t('Refresh messages')"
+                    @click="onRefreshSelectedThreadMessages"
+                  >
+                    <IconTablerRefresh :class="{ 'is-spinning': isRefreshingThreadMessages }" />
+                  </button>
                   <ThreadConversation ref="threadConversationRef" :messages="filteredMessages" :is-loading="isLoadingMessages"
                     :active-thread-id="composerThreadContextId" :cwd="composerCwd"
                     :live-overlay="liveOverlay"
@@ -1206,6 +1216,7 @@ import IconTablerBolt from './components/icons/IconTablerBolt.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
+import IconTablerRefresh from './components/icons/IconTablerRefresh.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
 import { useDesktopState } from './composables/useDesktopState'
 import { useMobile } from './composables/useMobile'
@@ -1466,6 +1477,7 @@ const {
   refreshAll,
   refreshSkills,
   selectThread,
+  refreshSelectedThreadMessages,
   ensureThreadMessagesLoaded,
   loadOlderMessages,
   setThreadTerminalOpen,
@@ -1574,6 +1586,7 @@ const projectZipExportStatus = ref<{ phase: 'idle' | 'exporting' | 'ready'; load
   error: '',
 })
 const contentActionFeedback = ref<{ text: string; kind: 'success' | 'error' } | null>(null)
+const isRefreshingThreadMessages = ref(false)
 let contentActionFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: string; message: string }>({
   phase: 'idle',
@@ -4418,6 +4431,26 @@ function showContentActionFeedback(text: string, kind: 'success' | 'error' = 'su
   }, 2600)
 }
 
+async function onRefreshSelectedThreadMessages(): Promise<void> {
+  if (isRefreshingThreadMessages.value || !selectedThreadId.value) return
+  isRefreshingThreadMessages.value = true
+  try {
+    const result = await refreshSelectedThreadMessages()
+    if (result.updated) {
+      showContentActionFeedback(t('Messages synced from server. The page had fallen behind.'))
+    } else if (result.inProgress) {
+      showContentActionFeedback(t('Server still reports this turn as running.'))
+    } else {
+      showContentActionFeedback(t('Messages are already up to date.'))
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : t('Failed to refresh messages')
+    showContentActionFeedback(`${t('Failed to refresh messages')}: ${detail}`, 'error')
+  } finally {
+    isRefreshingThreadMessages.value = false
+  }
+}
+
 function buildThreadMarkdown(): string {
   const lines: string[] = []
   const threadTitle = selectedThread.value?.title?.trim() || 'Untitled thread'
@@ -5359,7 +5392,25 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .content-thread {
-  @apply flex-1 min-h-0;
+  @apply relative flex-1 min-h-0;
+}
+
+.thread-message-refresh {
+  @apply absolute right-3 top-2 z-20 grid h-8 w-8 place-items-center rounded-full border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100;
+}
+
+.thread-message-refresh svg {
+  @apply h-4 w-4;
+}
+
+.thread-message-refresh .is-spinning {
+  animation: thread-message-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes thread-message-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .composer-with-queue {

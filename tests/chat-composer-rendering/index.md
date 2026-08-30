@@ -16,6 +16,7 @@ Return to the [manual test index](../../tests.md).
 | [Composer controls stay editable during responses](composer-controls-stay-editable-during-responses.md) |
 | [Composer context-window indicator](composer-context-window-indicator.md) |
 | [Turn activity and automatic compaction](turn-activity-and-compaction.md) |
+| [Refresh the current thread without reloading the page](refresh-current-thread-messages.md) |
 | [Projectless new chat, plugin menu, and `$` skills](projectless-new-chat-and-contextual-skill-picker.md) |
 | [ChatGPT conversation reference menu](chatgpt-conversation-reference-menu.md) |
 | [Native steer during an active turn and draft recovery](native-steer-active-turn-and-draft-recovery.md) |

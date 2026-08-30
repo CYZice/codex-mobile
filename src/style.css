@@ -52,6 +52,10 @@
   @apply bg-zinc-950;
 }
 
+:root.dark .thread-message-refresh {
+  @apply border-zinc-700 bg-zinc-900/90 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
 :root.dark .sidebar-scrollable {
   @apply bg-zinc-900;
 }
