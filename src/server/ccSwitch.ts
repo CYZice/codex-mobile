@@ -137,7 +137,10 @@ function getCcSwitchPaths(): CcSwitchPaths {
 
 async function openDatabase(databasePath: string, readOnly: boolean): Promise<SqliteDatabase> {
   try {
-    const sqlite = await import('node:sqlite')
+    // Keep this specifier dynamic: esbuild rewrites a literal `node:sqlite`
+    // import to the unrelated npm package `sqlite` when targeting Node 18.
+    const sqliteSpecifier = ['node', 'sqlite'].join(':')
+    const sqlite = await import(sqliteSpecifier)
     return new sqlite.DatabaseSync(databasePath, { readOnly }) as unknown as SqliteDatabase
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

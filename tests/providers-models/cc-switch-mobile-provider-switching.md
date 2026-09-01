@@ -24,6 +24,19 @@ Expected results:
 - Exactly one Codex runtime reload occurs and existing threads remain visible.
 - The SHA-256 hash of `~/.codex/auth.json` is unchanged.
 
+## Packaged CLI built-in module loading
+
+1. Build the CLI with `pnpm run build:cli`.
+2. Confirm `dist-cli/index.js` does not contain `import("sqlite")`.
+3. Start the packaged CLI with the same Node executable used by CodexDesktop on a disposable port.
+4. Request `/codex-api/cc-switch/status` from that packaged server.
+
+Expected results:
+
+- The packaged CLI loads Node's built-in `node:sqlite` implementation rather than looking for an npm package named `sqlite`.
+- The status endpoint returns JSON with `available: true`, schema version 18, and the redacted CC Switch provider list.
+- The test does not change the current provider or `~/.codex/auth.json`.
+
 ## Safety refusals
 
 1. Start a Codex turn and try another provider switch.
