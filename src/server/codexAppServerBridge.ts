@@ -13,6 +13,7 @@ import { once } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { handleAccountRoutes } from './accountRoutes.js'
 import { buildAppServerArgs, resolveAppServerRuntimeConfig } from './appServerRuntimeConfig.js'
+import { handleCcSwitchRoutes } from './ccSwitch.js'
 import { callRpcWithRateLimitDecodeRecovery } from './rateLimitDecodeRecovery.js'
 import { handleReviewRoutes } from './reviewGit.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
@@ -7050,7 +7051,10 @@ class AppServerProcess {
   private readonly threadTurnPageReadPromiseByThreadId = new Map<string, Promise<unknown>>()
   private readonly capturedItemsByThreadId = new Map<string, Map<string, CapturedItem>>()
   private readonly liveStateCache = new Map<string, { data: unknown; turnCount: number; sessionSize: number }>()
+  private readonly activeTurnKeys = new Set<string>()
   private chatgptAuthRefreshPromise: Promise<ChatgptAuthTokensRefreshResponse> | null = null
+  private pendingTurnStarts = 0
+  private runtimeConfigurationChangeActive = false
   private activeConfigSignature = ''
   private reloadPromise: Promise<void> | null = null
 
@@ -7185,6 +7189,7 @@ class AppServerProcess {
   }
 
   private emitNotification(notification: { method: string; params: unknown }): void {
+    this.trackTurnActivity(notification)
     this.recordStreamEvent(notification)
     this.captureItemFromNotification(notification)
     const nThreadId = this.extractThreadIdFromParams(notification.params)
@@ -7194,6 +7199,27 @@ class AppServerProcess {
     }
     for (const listener of this.notificationListeners) {
       listener(notification)
+    }
+  }
+
+  private trackTurnActivity(notification: { method: string; params: unknown }): void {
+    if (notification.method !== 'turn/started' && notification.method !== 'turn/completed') return
+    const params = asRecord(notification.params)
+    if (!params) return
+    const threadId = this.extractThreadIdFromParams(params)
+    const turnId = readStreamTurnId(params)
+    if (!threadId) return
+    const key = `${threadId}:${turnId || 'active'}`
+    if (notification.method === 'turn/started') {
+      this.activeTurnKeys.add(key)
+      return
+    }
+    if (turnId) {
+      this.activeTurnKeys.delete(key)
+      return
+    }
+    for (const activeKey of this.activeTurnKeys) {
+      if (activeKey.startsWith(`${threadId}:`)) this.activeTurnKeys.delete(activeKey)
     }
   }
 
@@ -7517,9 +7543,18 @@ class AppServerProcess {
   }
 
   async rpc(method: string, params: unknown): Promise<unknown> {
+    const startsTurn = method === 'turn/start'
+    if (startsTurn && this.runtimeConfigurationChangeActive) {
+      throw new Error('Codex configuration is changing. Wait for the provider switch to finish.')
+    }
+    if (startsTurn) this.pendingTurnStarts += 1
     this.disposeIfConfigChanged()
-    await this.ensureInitialized()
-    return this.call(method, params)
+    try {
+      await this.ensureInitialized()
+      return await this.call(method, params)
+    } finally {
+      if (startsTurn) this.pendingTurnStarts = Math.max(0, this.pendingTurnStarts - 1)
+    }
   }
 
   getLifecycleStatus(): 'idle' | 'starting' | 'ready' {
@@ -7583,6 +7618,26 @@ class AppServerProcess {
     return Array.from(this.pendingServerRequests.values())
   }
 
+  getRuntimeConfigurationChangeBlockReason(): string {
+    if (this.runtimeConfigurationChangeActive) return 'A Codex configuration change is already in progress.'
+    if (this.reloadPromise) return 'Codex app-server is reloading.'
+    if (this.pendingTurnStarts > 0 || this.activeTurnKeys.size > 0) return 'Wait for all running Codex tasks to finish.'
+    if (this.pendingServerRequests.size > 0) return 'Resolve pending Codex approvals before switching providers.'
+    return ''
+  }
+
+  beginRuntimeConfigurationChange(): () => void {
+    const blockReason = this.getRuntimeConfigurationChangeBlockReason()
+    if (blockReason) throw new Error(blockReason)
+    this.runtimeConfigurationChangeActive = true
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.runtimeConfigurationChangeActive = false
+    }
+  }
+
   dispose(): void {
     if (!this.process) return
 
@@ -7600,6 +7655,7 @@ class AppServerProcess {
     }
     this.pending.clear()
     this.pendingServerRequests.clear()
+    this.activeTurnKeys.clear()
 
     try {
       proc.stdin.end()
@@ -8822,6 +8878,10 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         } catch (error) {
           setJson(res, 503, { error: getErrorMessage(error, 'Failed to reload Codex app-server') })
         }
+        return
+      }
+
+      if (await handleCcSwitchRoutes(req, res, url, { appServer, readJsonBody })) {
         return
       }
 

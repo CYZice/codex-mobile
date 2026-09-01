@@ -291,17 +291,25 @@
                 <span class="sidebar-settings-value">{{ t('Issue detected') }}</span>
               </a>
 
-              <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the API provider for the Codex backend')">
-                <span class="sidebar-settings-label">{{ t('Provider') }}</span>
+              <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose a provider from CC Switch')">
+                <span class="sidebar-settings-label">{{ t('CC Switch provider') }}</span>
                 <ComposerDropdown
                   class="sidebar-settings-provider-dropdown"
-                  :model-value="selectedProvider"
-                  :options="providerDropdownOptions"
-                  :placeholder="t('Provider')"
-                  :disabled="freeModeLoading"
+                  :model-value="ccSwitchCurrentProviderId"
+                  :options="ccSwitchProviderOptions"
+                  :placeholder="ccSwitchLoading ? t('Loading…') : t('Unavailable')"
+                  :disabled="ccSwitchLoading || !ccSwitchStatus?.available || ccSwitchStatus.proxyTakeoverActive || ccSwitchProviderOptions.length === 0"
                   menu-align="end"
-                  @update:model-value="onProviderChange"
+                  :enable-search="ccSwitchProviderOptions.length > 6"
+                  :search-placeholder="t('Search providers...')"
+                  @update:model-value="onCcSwitchProviderChange"
                 />
+              </div>
+              <div v-if="ccSwitchCurrentProviderMeta" class="sidebar-settings-provider-meta">
+                {{ ccSwitchCurrentProviderMeta }}
+              </div>
+              <div v-if="ccSwitchProviderError || ccSwitchStatus?.reason" class="sidebar-settings-row sidebar-settings-error cc-switch-provider-error">
+                <span>{{ ccSwitchProviderError || ccSwitchStatus?.reason }}</span>
               </div>
               <div v-if="providerError" class="sidebar-settings-row sidebar-settings-error sidebar-settings-provider-error">
                 <span>{{ providerError }}</span>
@@ -1260,6 +1268,7 @@ import {
   getReviewSummary,
   getWorktreeBranchOptions,
   getAccounts,
+  getCcSwitchStatus,
   getArchivedThreadGroupsPage,
   completeCodexLogin,
   createLocalDirectory,
@@ -1281,12 +1290,13 @@ import {
   startThreadReview,
   searchThreads,
   switchAccount,
+  switchCcSwitchProvider,
   unarchiveThread,
 } from './api/codexGateway'
 import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiMessage, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
 import type { ComposerCommandPayload, ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { PermissionPreset } from './permissions'
-import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
+import type { CcSwitchStatus, GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
 import { copyTextToClipboard } from './utils/clipboard'
@@ -1765,6 +1775,19 @@ const providerDropdownOptions = computed(() => [
   { value: 'opencode-zen', label: t('OpenCode Zen') },
   { value: 'custom', label: t('Custom endpoint') },
 ])
+const ccSwitchStatus = ref<CcSwitchStatus | null>(null)
+const ccSwitchLoading = ref(false)
+const ccSwitchCurrentProviderId = ref('')
+const ccSwitchProviderError = ref('')
+const ccSwitchProviderOptions = computed(() => (ccSwitchStatus.value?.providers ?? [])
+  .filter((provider) => provider.compatible)
+  .map((provider) => ({ value: provider.id, label: provider.name })))
+const ccSwitchCurrentProviderMeta = computed(() => {
+  if (ccSwitchLoading.value) return t('Switching provider…')
+  const provider = ccSwitchStatus.value?.providers.find((entry) => entry.id === ccSwitchCurrentProviderId.value)
+  if (!provider) return ''
+  return [provider.endpointHost, provider.model].filter(Boolean).join(' · ')
+})
 const customEndpointUrl = ref('')
 const customEndpointKey = ref('')
 const customEndpointWireApi = ref<'responses' | 'chat'>('responses')
@@ -1808,6 +1831,7 @@ const visibleFeedbackErrors = [
   threadBranchCommitsError,
   accountActionError,
   providerError,
+  ccSwitchProviderError,
   codexConfigurationReloadError,
   telegramConfigError,
   createFolderError,
@@ -2256,6 +2280,7 @@ onMounted(() => {
   void refreshTelegramConfig()
   void refreshTelegramStatus()
   void loadFreeModeStatus()
+  void loadCcSwitchStatus()
   void refreshThreadTerminalStatus()
   void refreshTerminalQuickCommands()
 })
@@ -3542,6 +3567,7 @@ function onWindowFocus(): void {
     void loadWorkspaceRootOptionsState()
     void refreshDefaultProjectName()
   }
+  void loadCcSwitchStatus({ silent: true })
   maybeSyncAfterMobileResume()
 }
 
@@ -4623,6 +4649,46 @@ function toggleDictationClickToToggle(): void {
 function toggleDictationAutoSend(): void {
   dictationAutoSend.value = !dictationAutoSend.value
   window.localStorage.setItem(DICTATION_AUTO_SEND_KEY, dictationAutoSend.value ? '1' : '0')
+}
+
+async function loadCcSwitchStatus(options: { silent?: boolean } = {}): Promise<void> {
+  try {
+    const status = await getCcSwitchStatus()
+    ccSwitchStatus.value = status
+    ccSwitchCurrentProviderId.value = status.currentProviderId
+    if (!options.silent) ccSwitchProviderError.value = ''
+  } catch (error) {
+    if (!options.silent) {
+      ccSwitchProviderError.value = error instanceof Error ? error.message : t('Failed to load CC Switch providers')
+    }
+  }
+}
+
+async function onCcSwitchProviderChange(providerId: string): Promise<void> {
+  const normalizedProviderId = providerId.trim()
+  if (!normalizedProviderId || ccSwitchLoading.value) return
+  if (normalizedProviderId === ccSwitchCurrentProviderId.value) return
+  const previousProviderId = ccSwitchCurrentProviderId.value
+  ccSwitchCurrentProviderId.value = normalizedProviderId
+  ccSwitchLoading.value = true
+  ccSwitchProviderError.value = ''
+  try {
+    const status = await switchCcSwitchProvider(normalizedProviderId)
+    ccSwitchStatus.value = status
+    ccSwitchCurrentProviderId.value = status.currentProviderId
+    await refreshAll({
+      includeSelectedThreadMessages: false,
+      forceThreadRefresh: true,
+      providerChanged: true,
+      awaitAncillaryRefreshes: true,
+    })
+  } catch (error) {
+    ccSwitchCurrentProviderId.value = previousProviderId
+    ccSwitchProviderError.value = error instanceof Error ? error.message : t('Failed to switch CC Switch provider')
+    await loadCcSwitchStatus({ silent: true })
+  } finally {
+    ccSwitchLoading.value = false
+  }
 }
 
 
@@ -6181,6 +6247,14 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-settings-provider-dropdown :deep(.composer-dropdown-value) {
   @apply max-w-36;
+}
+
+.sidebar-settings-provider-meta {
+  @apply -mt-1 truncate px-3 pb-2 text-right text-[11px] text-zinc-500;
+}
+
+.cc-switch-provider-error {
+  @apply cursor-default;
 }
 
 .sidebar-settings-segmented {

@@ -1501,6 +1501,52 @@ export async function reloadCodexAppServer(): Promise<void> {
   }
 }
 
+export type CcSwitchProvider = {
+  id: string
+  name: string
+  category: 'official' | 'third-party'
+  current: boolean
+  compatible: boolean
+  incompatibilityReason: string
+  model: string
+  endpointHost: string
+}
+
+export type CcSwitchStatus = {
+  available: boolean
+  switchable: boolean
+  reason: string
+  schemaVersion: number | null
+  currentProviderId: string
+  preserveOfficialAuth: boolean
+  unifyHistory: boolean
+  proxyTakeoverActive: boolean
+  switchingProviderId: string
+  providers: CcSwitchProvider[]
+}
+
+export async function getCcSwitchStatus(): Promise<CcSwitchStatus> {
+  const response = await fetch('/codex-api/cc-switch/status', { cache: 'no-store' })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to load CC Switch providers'))
+  }
+  return payload as CcSwitchStatus
+}
+
+export async function switchCcSwitchProvider(providerId: string): Promise<CcSwitchStatus> {
+  const response = await fetch('/codex-api/cc-switch/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId }),
+  })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to switch CC Switch provider'))
+  }
+  return payload as CcSwitchStatus
+}
+
 export async function startCodexLogin(): Promise<string> {
   const response = await fetch('/codex-api/accounts/login/start', {
     method: 'POST',

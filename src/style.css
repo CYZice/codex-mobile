@@ -97,6 +97,14 @@
   @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
 }
 
+:root.dark .sidebar-settings-provider-meta {
+  @apply text-zinc-400;
+}
+
+:root.dark .cc-switch-provider-error {
+  @apply bg-red-950/50 text-red-300;
+}
+
 :root.dark .sidebar-settings-context-value {
   @apply text-zinc-300;
 }
