@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -43,6 +43,27 @@ describe('Codex app-server runtime reload', () => {
     await reloadCodexAppServer()
 
     expect(fetchMock).toHaveBeenCalledWith('/codex-api/runtime/reload', { method: 'POST' })
+  })
+})
+
+describe('native Codex settings', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the project layer and writes back to its config.toml', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>
+      requests.push(request)
+      return new Response(JSON.stringify({ result: request.method === 'config/read' ? {
+        config: {}, origins: {}, layers: [{ name: { type: 'project', dotCodexFolder: 'D:\\repo\\.codex' }, version: 'v1', config: { model: 'gpt-5.6-sol', sandbox_mode: 'workspace-write' }, disabledReason: null }],
+      } : {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    const settings = await getCodexNativeSettings('project', 'D:\\repo')
+    expect(settings.filePath).toBe('D:\\repo\\.codex/config.toml')
+    expect(settings.model).toBe('gpt-5.6-sol')
+    await saveCodexNativeSettings(settings)
+    expect(requests[1]).toMatchObject({ method: 'config/batchWrite', params: { filePath: 'D:\\repo\\.codex/config.toml', expectedVersion: 'v1' } })
   })
 })
 

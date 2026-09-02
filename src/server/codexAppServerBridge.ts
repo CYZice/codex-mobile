@@ -2168,6 +2168,32 @@ function isTimeoutError(payload: unknown): boolean {
   return payload instanceof Error && (payload.name === 'AbortError' || payload.name === 'TimeoutError')
 }
 
+function readCodexActivitySummary(): Record<string, unknown> {
+  const stateDbPath = join(getCodexHomeDir(), 'state_5.sqlite')
+  const empty = { totalChats: 0, archivedChats: 0, activeDays: 0, totalTokens: 0, firstChatAt: null, latestChatAt: null, topModel: null, topReasoningEffort: null }
+  if (!existsSync(stateDbPath)) return empty
+  const userThreads = "(thread_source = 'user' OR thread_source IS NULL OR thread_source = '')"
+  const summarySql = `SELECT COUNT(*) totalChats, SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END) archivedChats, COUNT(DISTINCT date(created_at, 'unixepoch')) activeDays, COALESCE(SUM(tokens_used), 0) totalTokens, MIN(created_at) firstChatAt, MAX(updated_at) latestChatAt FROM threads WHERE ${userThreads};`
+  const rankedSql = (column: string) => `SELECT ${column} value FROM threads WHERE ${userThreads} AND ${column} IS NOT NULL AND ${column} != '' GROUP BY ${column} ORDER BY COUNT(*) DESC LIMIT 1;`
+  const run = (sql: string): Array<Record<string, unknown>> => {
+    const result = spawnSync('sqlite3', ['-json', stateDbPath, sql], { encoding: 'utf8' })
+    if (result.status !== 0 || !result.stdout.trim()) return []
+    try { const rows = JSON.parse(result.stdout) as unknown; return Array.isArray(rows) ? rows : [] } catch { return [] }
+  }
+  const summary = run(summarySql)[0]
+  if (!summary) return empty
+  return {
+    totalChats: Number(summary.totalChats) || 0,
+    archivedChats: Number(summary.archivedChats) || 0,
+    activeDays: Number(summary.activeDays) || 0,
+    totalTokens: Number(summary.totalTokens) || 0,
+    firstChatAt: Number(summary.firstChatAt) || null,
+    latestChatAt: Number(summary.latestChatAt) || null,
+    topModel: readNonEmptyString(run(rankedSql('model'))[0]?.value),
+    topReasoningEffort: readNonEmptyString(run(rankedSql('reasoning_effort'))[0]?.value),
+  }
+}
+
 function formatProjectlessDateSegment(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -10595,6 +10621,15 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: await readGlobalInstructions() })
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to load global instructions') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/activity-summary') {
+        try {
+          setJson(res, 200, { data: readCodexActivitySummary() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load activity summary') })
         }
         return
       }

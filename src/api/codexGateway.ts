@@ -2769,6 +2769,80 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
   }
 }
 
+export type CodexSettingsScope = 'user' | 'project'
+
+export interface CodexNativeSettings {
+  scope: CodexSettingsScope
+  filePath: string | null
+  version: string | null
+  model: string
+  reasoningEffort: string
+  approvalPolicy: string
+  sandboxMode: string
+  networkAccess: boolean
+  webSearch: string
+  verbosity: string
+  reasoningSummary: string
+}
+
+export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: string): Promise<CodexNativeSettings> {
+  const payload = await callRpc<ConfigReadResponse>('config/read', { includeLayers: true, cwd: cwd?.trim() || null })
+  const layer = payload.layers?.find((candidate) => candidate.name.type === scope)
+  const layerConfig = (layer?.config && typeof layer.config === 'object' ? layer.config : {}) as Record<string, unknown>
+  const source = layer?.name
+  const filePath = source?.type === 'user'
+    ? String(source.file)
+    : source?.type === 'project'
+      ? `${String(source.dotCodexFolder).replace(/[\\/]$/, '')}/config.toml`
+      : null
+  const workspace = layerConfig.sandbox_workspace_write as Record<string, unknown> | undefined
+  return {
+    scope,
+    filePath,
+    version: layer?.version ?? null,
+    model: typeof layerConfig.model === 'string' ? layerConfig.model : '',
+    reasoningEffort: typeof layerConfig.model_reasoning_effort === 'string' ? layerConfig.model_reasoning_effort : '',
+    approvalPolicy: typeof layerConfig.approval_policy === 'string' ? layerConfig.approval_policy : '',
+    sandboxMode: typeof layerConfig.sandbox_mode === 'string' ? layerConfig.sandbox_mode : '',
+    networkAccess: workspace?.network_access === true,
+    webSearch: typeof layerConfig.web_search === 'string' ? layerConfig.web_search : '',
+    verbosity: typeof layerConfig.model_verbosity === 'string' ? layerConfig.model_verbosity : '',
+    reasoningSummary: typeof layerConfig.model_reasoning_summary === 'string' ? layerConfig.model_reasoning_summary : '',
+  }
+}
+
+export async function saveCodexNativeSettings(settings: CodexNativeSettings): Promise<void> {
+  const edits = [
+    ['model', settings.model],
+    ['model_reasoning_effort', settings.reasoningEffort],
+    ['approval_policy', settings.approvalPolicy],
+    ['sandbox_mode', settings.sandboxMode],
+    ['sandbox_workspace_write.network_access', settings.networkAccess],
+    ['web_search', settings.webSearch],
+    ['model_verbosity', settings.verbosity],
+    ['model_reasoning_summary', settings.reasoningSummary],
+  ].map(([keyPath, value]) => ({ keyPath, value: value === '' ? null : value, mergeStrategy: value === '' ? 'replace' : 'upsert' }))
+  await callRpc('config/batchWrite', { edits, filePath: settings.filePath, expectedVersion: settings.version })
+}
+
+export interface CodexActivitySummary {
+  totalChats: number
+  archivedChats: number
+  activeDays: number
+  totalTokens: number
+  firstChatAt: number | null
+  latestChatAt: number | null
+  topModel: string | null
+  topReasoningEffort: string | null
+}
+
+export async function getCodexActivitySummary(): Promise<CodexActivitySummary> {
+  const response = await fetch('/codex-api/activity-summary')
+  if (!response.ok) throw new Error((await response.text()).trim() || 'Failed to load activity summary')
+  const payload = await response.json() as { data: CodexActivitySummary }
+  return payload.data
+}
+
 export async function listChatGptConversations(offset = 0, limit = 50): Promise<ChatGptConversationPage> {
   const query = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(Math.min(50, Math.max(1, limit))) })
   const response = await fetch(`/codex-api/chatgpt-conversations?${query.toString()}`)

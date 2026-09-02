@@ -118,11 +118,13 @@
           @click="onSettingsAreaClick"
         >
           <Teleport v-if="isSettingsRoute" defer to="#settings-center-content">
-            <div class="settings-center-panel">
-              <section id="settings-personalization" class="settings-center-section settings-center-personalization-section">
+            <div class="settings-center-panel" :class="`is-${settingsSection}`">
+              <section v-if="settingsSection === 'personalization'" id="settings-personalization" class="settings-center-section settings-center-personalization-section">
                 <PersonalizationSettings />
               </section>
-              <div id="settings-account" class="sidebar-settings-account-section">
+              <CodexConfigurationSettings v-if="settingsSection === 'agent'" :cwd="directoryCwd" />
+              <ActivitySettings v-if="settingsSection === 'data'" />
+              <div v-if="settingsSection === 'account'" id="settings-account" class="sidebar-settings-account-section">
                 <div class="sidebar-settings-account-header">
                   <div class="sidebar-settings-account-header-main">
                     <button
@@ -226,12 +228,12 @@
                   </div>
                 </template>
               </div>
-              <button id="settings-input" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.sendWithEnter" @click="toggleSendWithEnter">
+              <button v-if="settingsSection === 'general'" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.sendWithEnter" @click="toggleSendWithEnter">
                 <span class="sidebar-settings-label">{{ t('Require ⌘ + enter to send') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': !sendWithEnter }" />
               </button>
               <button
-                id="settings-configuration"
+                v-if="settingsSection === 'agent'"
                 class="sidebar-settings-row"
                 type="button"
                 :disabled="isReloadingCodexConfiguration"
@@ -241,19 +243,19 @@
                 <span class="sidebar-settings-label">{{ t('Reload Codex configuration') }}</span>
                 <span class="sidebar-settings-value">{{ isReloadingCodexConfiguration ? t('Reloading…') : t('Local') }}</span>
               </button>
-              <div v-if="codexConfigurationReloadError" class="sidebar-settings-row sidebar-settings-error">
+              <div v-if="settingsSection === 'agent' && codexConfigurationReloadError" class="sidebar-settings-row sidebar-settings-error">
                 <span>{{ codexConfigurationReloadError }}</span>
                 <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, codexConfigurationReloadError)">{{ t('Send feedback') }}</a>
               </div>
-              <button id="settings-general" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
+              <button v-if="settingsSection === 'general'" id="settings-general" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
                 <span class="sidebar-settings-label">{{ t('When busy, send as') }}</span>
                 <span class="sidebar-settings-value">{{ inProgressSendMode === 'steer' ? t('Steer') : t('Queue') }}</span>
               </button>
-              <button id="settings-appearance" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.appearance" @click="cycleDarkMode">
+              <button v-if="settingsSection === 'appearance'" id="settings-appearance" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.appearance" @click="cycleDarkMode">
                 <span class="sidebar-settings-label">{{ t('Appearance') }}</span>
                 <span class="sidebar-settings-value">{{ darkMode === 'system' ? t('System') : darkMode === 'dark' ? t('Dark') : t('Light') }}</span>
               </button>
-              <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the interface language for the app.')">
+              <div v-if="settingsSection === 'general'" class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the interface language for the app.')">
                 <span class="sidebar-settings-label">{{ t('UI language') }}</span>
                 <ComposerDropdown
                   class="sidebar-settings-provider-dropdown"
@@ -264,20 +266,20 @@
                   @update:model-value="setUiLanguage($event as 'en' | 'zh-CN')"
                 />
               </div>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.chatWidth" @click="cycleChatWidth">
+              <button v-if="settingsSection === 'appearance'" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.chatWidth" @click="cycleChatWidth">
                 <span class="sidebar-settings-label">{{ t('Chat width') }}</span>
                 <span class="sidebar-settings-value">{{ chatWidthLabel }}</span>
               </button>
-              <button id="settings-voice" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationClickToToggle" @click="toggleDictationClickToToggle">
+              <button v-if="settingsSection === 'voice'" id="settings-voice" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationClickToToggle" @click="toggleDictationClickToToggle">
                 <span class="sidebar-settings-label">{{ t('Click to toggle dictation') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': dictationClickToToggle }" />
               </button>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationAutoSend" @click="toggleDictationAutoSend">
+              <button v-if="settingsSection === 'voice'" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationAutoSend" @click="toggleDictationAutoSend">
                 <span class="sidebar-settings-label">{{ t('Auto send dictation') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': dictationAutoSend }" />
               </button>
               <a
-                v-if="hasVisibleFeedbackError"
+                v-if="settingsSection === 'general' && hasVisibleFeedbackError"
                 class="sidebar-settings-row sidebar-settings-feedback-row"
                 :href="feedbackMailto"
                 @click="prepareFeedbackLink"
@@ -286,7 +288,7 @@
                 <span class="sidebar-settings-value">{{ t('Issue detected') }}</span>
               </a>
 
-              <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose a provider from CC Switch')">
+              <div v-if="settingsSection === 'account'" class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose a provider from CC Switch')">
                 <span class="sidebar-settings-label">{{ t('CC Switch provider') }}</span>
                 <ComposerDropdown
                   class="sidebar-settings-provider-dropdown"
@@ -300,17 +302,17 @@
                   @update:model-value="onCcSwitchProviderChange"
                 />
               </div>
-              <div v-if="ccSwitchCurrentProviderMeta" class="sidebar-settings-provider-meta">
+              <div v-if="settingsSection === 'account' && ccSwitchCurrentProviderMeta" class="sidebar-settings-provider-meta">
                 {{ ccSwitchCurrentProviderMeta }}
               </div>
-              <div v-if="ccSwitchProviderError || ccSwitchStatus?.reason" class="sidebar-settings-row sidebar-settings-error cc-switch-provider-error">
+              <div v-if="settingsSection === 'account' && (ccSwitchProviderError || ccSwitchStatus?.reason)" class="sidebar-settings-row sidebar-settings-error cc-switch-provider-error">
                 <span>{{ ccSwitchProviderError || ccSwitchStatus?.reason }}</span>
               </div>
-              <div v-if="providerError" class="sidebar-settings-row sidebar-settings-error sidebar-settings-provider-error">
+              <div v-if="settingsSection === 'account' && providerError" class="sidebar-settings-row sidebar-settings-error sidebar-settings-provider-error">
                 <span>{{ providerError }}</span>
                 <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, providerError)">{{ t('Send feedback') }}</a>
               </div>
-              <div v-if="selectedProvider === 'openrouter'" class="sidebar-settings-row sidebar-settings-row--input">
+              <div v-if="settingsSection === 'account' && selectedProvider === 'openrouter'" class="sidebar-settings-row sidebar-settings-row--input">
                 <div class="sidebar-settings-provider-info">
                   <span class="sidebar-settings-label">{{ t('OpenRouter API key') }}</span>
                   <a
@@ -371,7 +373,7 @@
                   </div>
                 </div>
               </div>
-              <div v-if="selectedProvider === 'opencode-zen'" class="sidebar-settings-row sidebar-settings-row--input">
+              <div v-if="settingsSection === 'account' && selectedProvider === 'opencode-zen'" class="sidebar-settings-row sidebar-settings-row--input">
                 <div class="sidebar-settings-provider-info">
                   <span class="sidebar-settings-label">{{ t('OpenCode Zen API key') }}</span>
                   <a
@@ -397,7 +399,7 @@
                   >{{ freeModeCustomKeySaving ? '...' : t('Save') }}</button>
                 </div>
               </div>
-              <div v-if="selectedProvider === 'custom'" class="sidebar-settings-row sidebar-settings-row--input">
+              <div v-if="settingsSection === 'account' && selectedProvider === 'custom'" class="sidebar-settings-row sidebar-settings-row--input">
                 <span class="sidebar-settings-label">{{ t('Custom endpoint URL') }}</span>
                 <div class="sidebar-settings-key-group">
                   <input
@@ -446,7 +448,7 @@
                   </div>
                 </div>
               </div>
-              <div class="sidebar-settings-row sidebar-settings-row--select" :title="SETTINGS_HELP.dictationLanguage">
+              <div v-if="settingsSection === 'voice'" class="sidebar-settings-row sidebar-settings-row--select" :title="SETTINGS_HELP.dictationLanguage">
                 <span class="sidebar-settings-label">{{ t('Dictation language') }}</span>
                 <ComposerDropdown
                   class="sidebar-settings-language-dropdown"
@@ -459,11 +461,11 @@
                   @update:model-value="onDictationLanguageChange"
                 />
               </div>
-              <button id="settings-archived" class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
+              <button v-if="settingsSection === 'data'" id="settings-archived" class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
                 <span class="sidebar-settings-label">{{ t('Archived chats') }}</span>
                 <span class="sidebar-settings-value">{{ isArchivedChatsOpen ? t('Hide') : t('Manage') }}</span>
               </button>
-              <div v-if="isArchivedChatsOpen" class="sidebar-settings-archived-panel">
+              <div v-if="settingsSection === 'data' && isArchivedChatsOpen" class="sidebar-settings-archived-panel">
                 <p v-if="archivedThreadsError" class="sidebar-settings-telegram-error">{{ archivedThreadsError }}</p>
                 <p v-else-if="isLoadingArchivedThreads && archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('Loading archived chats…') }}</p>
                 <p v-else-if="archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('No archived chats') }}</p>
@@ -484,10 +486,10 @@
                   {{ isLoadingArchivedThreads ? t('Loading…') : t('Load more') }}
                 </button>
               </div>
-              <div class="sidebar-settings-rate-limits">
+              <div v-if="settingsSection === 'account'" class="sidebar-settings-rate-limits">
                 <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
               </div>
-              <div class="sidebar-settings-build-label" :aria-label="t('Worktree name and version')">
+              <div v-if="settingsSection === 'general'" class="sidebar-settings-build-label" :aria-label="t('Worktree name and version')">
                 WT {{ worktreeName }} · v{{ appVersion }}
               </div>
             </div>
@@ -1183,6 +1185,8 @@ import ComposerDropdown from './components/content/ComposerDropdown.vue'
 import HeaderGitBranchDropdown from './components/content/HeaderGitBranchDropdown.vue'
 import ComposerRuntimeDropdown from './components/content/ComposerRuntimeDropdown.vue'
 import SettingsCenter from './components/content/SettingsCenter.vue'
+import CodexConfigurationSettings from './components/content/CodexConfigurationSettings.vue'
+import ActivitySettings from './components/content/ActivitySettings.vue'
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
 import IconTablerBolt from './components/icons/IconTablerBolt.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
@@ -1815,7 +1819,7 @@ const isAutomationsRoute = computed(() => route.name === 'automations')
 const isSettingsRoute = computed(() => route.name === 'settings')
 const settingsSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : ''
-  return ['general', 'appearance', 'input', 'voice', 'configuration', 'archived', 'personalization', 'account'].includes(section)
+  return ['general', 'agent', 'appearance', 'voice', 'personalization', 'data', 'account'].includes(section)
     ? section
     : 'general'
 })

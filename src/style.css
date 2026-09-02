@@ -255,6 +255,22 @@
   @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
 }
 
+:root.dark .settings-center-search,
+:root.dark .native-config,
+:root.dark .activity {
+  @apply border-zinc-800 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .native-config input,
+:root.dark .native-config button,
+:root.dark .activity button {
+  @apply border-zinc-700 bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .activity .stats article {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
 :root.dark .sidebar-skills-link {
   @apply border-transparent bg-transparent text-zinc-200 hover:border-transparent hover:bg-zinc-800 hover:text-zinc-50;
 }

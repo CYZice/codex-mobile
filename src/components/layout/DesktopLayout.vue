@@ -10,6 +10,11 @@
       </Transition>
     </Teleport>
 
+    <!-- Keep sidebar-owned teleports mounted while the mobile drawer is closed. -->
+    <div v-if="isMobile && isSidebarCollapsed" class="mobile-collapsed-sidebar-host" aria-hidden="true">
+      <slot name="sidebar" />
+    </div>
+
     <template v-if="!isMobile">
       <aside v-if="!isSidebarCollapsed" class="desktop-sidebar">
         <slot name="sidebar" />
@@ -114,6 +119,10 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
   height: 100vh;
   height: 100dvh;
   grid-template-columns: var(--layout-columns);
+}
+
+.mobile-collapsed-sidebar-host {
+  @apply hidden;
 }
 
 .desktop-sidebar {
