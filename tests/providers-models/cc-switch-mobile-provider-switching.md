@@ -19,6 +19,7 @@
 Expected results:
 
 - The provider row updates without exposing an API key or full endpoint configuration.
+- Providers with a CC Switch `modelCatalog` (such as DeepSeek V4) remain selectable when their generated Codex configuration is safely projectable.
 - `~/.codex/config.toml` contains the selected provider projection.
 - CC Switch desktop and `settings.json.currentProviderCodex` show the selected provider.
 - Exactly one Codex runtime reload occurs and existing threads remain visible.

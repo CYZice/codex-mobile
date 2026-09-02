@@ -8,7 +8,6 @@ import { parse as parseToml } from 'smol-toml'
 
 const SUPPORTED_SCHEMA_VERSION = 18
 const APP_TYPE = 'codex'
-const MODEL_CATALOG_FILE = 'cc-switch-model-catalog.json'
 
 type SqliteStatement = {
   all(...params: unknown[]): unknown[]
@@ -424,9 +423,6 @@ function getActiveProviderTable(parsed: Record<string, unknown>): {
 
 function getProviderCompatibility(provider: StoredProvider, state: LoadedCcSwitchState): string {
   if (!provider.config.trim()) return 'Missing config.toml content.'
-  if (provider.settingsConfig.modelCatalog !== undefined || provider.config.includes(MODEL_CATALOG_FILE)) {
-    return 'Providers with a CC Switch model catalog must be switched in CC Switch.'
-  }
   try {
     projectCcSwitchCodexConfig(provider, state)
     return ''

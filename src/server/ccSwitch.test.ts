@@ -15,6 +15,7 @@ type FixtureProvider = {
   category: string
   config: string
   auth: Record<string, unknown>
+  modelCatalog?: unknown
   isCurrent?: boolean
 }
 
@@ -82,7 +83,11 @@ async function createFixture(options: {
     insertProvider.run(
       provider.id,
       provider.name,
-      JSON.stringify({ config: provider.config, auth: provider.auth }),
+      JSON.stringify({
+        config: provider.config,
+        auth: provider.auth,
+        ...(provider.modelCatalog === undefined ? {} : { modelCatalog: provider.modelCatalog }),
+      }),
       provider.category || null,
       index + 1,
       index,
@@ -192,6 +197,32 @@ describe('CC Switch status and switching', () => {
     })
     expect(JSON.stringify(status)).not.toContain('third-party-secret')
     expect(JSON.stringify(status)).not.toContain('provider comment')
+  })
+
+  it('keeps providers with a CC Switch model catalog switchable', async () => {
+    const catalogProvider: FixtureProvider = {
+      ...thirdPartyProvider,
+      id: 'catalog-provider',
+      name: 'Catalog Provider',
+      modelCatalog: {
+        models: [{ model: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash' }],
+      },
+    }
+    const fixture = await createFixture({
+      providers: [officialProvider, catalogProvider],
+      currentProviderId: 'official',
+    })
+    const reloadRuntime = vi.fn(async () => undefined)
+
+    const status = await readCcSwitchStatus(fixture.paths)
+    expect(status.providers.find((provider) => provider.id === 'catalog-provider')).toMatchObject({
+      compatible: true,
+      model: 'gpt-custom',
+    })
+
+    await switchCcSwitchProvider('catalog-provider', { paths: fixture.paths, reloadRuntime })
+    expect(await readFile(fixture.configPath, 'utf8')).toContain('experimental_bearer_token = "third-party-secret"')
+    expect(reloadRuntime).toHaveBeenCalledTimes(1)
   })
 
   it('switches config and current markers without changing auth.json', async () => {
