@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, readdir, rm, mkdir, stat, lstat, readlink, symlink } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, mkdir, stat, lstat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
@@ -1281,43 +1281,24 @@ async function autoPushSyncedSkills(appServer: AppServerLike): Promise<void> {
   await syncInstalledSkillsFolderToRepo(state.githubToken, state.repoOwner, state.repoName, installedMap)
 }
 
-async function ensureCodexAgentsSymlinkToSkillsAgents(): Promise<void> {
+async function migrateLegacyCodexAgentsSymlink(): Promise<void> {
   const codexHomeDir = getCodexHomeDir()
-  const skillsAgentsPath = join(codexHomeDir, 'skills', 'AGENTS.md')
   const codexAgentsPath = join(codexHomeDir, 'AGENTS.md')
-  await mkdir(join(codexHomeDir, 'skills'), { recursive: true })
-  let copiedFromCodex = false
+
   try {
     const codexAgentsStat = await lstat(codexAgentsPath)
-    if (codexAgentsStat.isFile() || codexAgentsStat.isSymbolicLink()) {
-      const content = await readFile(codexAgentsPath, 'utf8')
-      await writeFile(skillsAgentsPath, content, 'utf8')
-      copiedFromCodex = true
-    } else {
-      await rm(codexAgentsPath, { force: true, recursive: true })
-    }
-  } catch {}
-  if (!copiedFromCodex) {
-    try {
-      const skillsAgentsStat = await stat(skillsAgentsPath)
-      if (!skillsAgentsStat.isFile()) {
-        await rm(skillsAgentsPath, { force: true, recursive: true })
-        await writeFile(skillsAgentsPath, '', 'utf8')
-      }
-    } catch {
-      await writeFile(skillsAgentsPath, '', 'utf8')
-    }
+    if (!codexAgentsStat.isSymbolicLink()) return
+
+    // Older builds linked the global personalization file into the Skills
+    // checkout. Read it before removing the link so a broken link is never
+    // silently replaced with an empty file.
+    const content = await readFile(codexAgentsPath, 'utf8')
+    await rm(codexAgentsPath, { force: true })
+    await writeFile(codexAgentsPath, content, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
   }
-  const relativeTarget = join('skills', 'AGENTS.md')
-  try {
-    const current = await lstat(codexAgentsPath)
-    if (current.isSymbolicLink()) {
-      const existingTarget = await readlink(codexAgentsPath)
-      if (existingTarget === relativeTarget) return
-    }
-    await rm(codexAgentsPath, { force: true, recursive: true })
-  } catch {}
-  await symlink(relativeTarget, codexAgentsPath)
 }
 
 async function runSkillsSyncStartup(appServer: AppServerLike): Promise<void> {
@@ -1327,9 +1308,9 @@ async function runSkillsSyncStartup(appServer: AppServerLike): Promise<void> {
   startupSyncStatus.lastError = ''
   startupSyncStatus.branch = PRIVATE_SYNC_BRANCH
   try {
+    await migrateLegacyCodexAgentsSymlink()
     const state = await readSkillsSyncState()
     if (!state.githubToken) {
-      await ensureCodexAgentsSymlinkToSkillsAgents()
       if (!isAndroidLikeRuntime()) {
         startupSyncStatus.mode = 'idle'
         startupSyncStatus.lastAction = 'skip-upstream-non-android'

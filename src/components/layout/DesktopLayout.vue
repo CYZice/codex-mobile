@@ -10,6 +10,11 @@
       </Transition>
     </Teleport>
 
+    <!-- Keep sidebar-owned teleports mounted while the mobile drawer is closed. -->
+    <div v-if="isMobile && isSidebarCollapsed" class="mobile-collapsed-sidebar-host" aria-hidden="true">
+      <slot name="sidebar" />
+    </div>
+
     <template v-if="!isMobile">
       <aside v-if="!isSidebarCollapsed" class="desktop-sidebar">
         <slot name="sidebar" />
@@ -110,18 +115,22 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
 @reference "tailwindcss";
 
 .desktop-layout {
-  @apply isolate grid bg-slate-100 text-slate-900 overflow-hidden;
+  @apply isolate grid bg-zinc-100 text-zinc-900 overflow-hidden;
   height: 100vh;
   height: 100dvh;
   grid-template-columns: var(--layout-columns);
 }
 
+.mobile-collapsed-sidebar-host {
+  @apply hidden;
+}
+
 .desktop-sidebar {
-  @apply relative z-0 bg-slate-100 min-h-0 overflow-hidden;
+  @apply relative z-0 bg-zinc-100 min-h-0 overflow-hidden;
 }
 
 .desktop-resize-handle {
-  @apply relative w-px cursor-col-resize bg-slate-300 hover:bg-slate-400 transition;
+  @apply relative w-px cursor-col-resize bg-zinc-200 hover:bg-zinc-300 transition;
 }
 
 .desktop-resize-handle::before {
@@ -138,7 +147,7 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
 }
 
 .mobile-drawer {
-  @apply absolute top-0 left-0 bottom-0 w-[85vw] max-w-80 bg-slate-100 overflow-hidden shadow-2xl;
+  @apply absolute top-0 left-0 bottom-0 w-[85vw] max-w-80 bg-zinc-100 overflow-hidden shadow-2xl;
 }
 
 .drawer-enter-active,

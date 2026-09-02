@@ -409,12 +409,17 @@ async function startCloudflaredTunnel(command: string, localPort: number): Promi
   })
 }
 
-function listenWithFallback(server: ReturnType<typeof createServer>, startPort: number): Promise<number> {
+function listenWithFallback(
+  server: ReturnType<typeof createServer>,
+  startPort: number,
+  host: string,
+  strictPort: boolean,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const attempt = (port: number) => {
       const onError = (error: NodeJS.ErrnoException) => {
         server.off('listening', onListening)
-        if (error.code === 'EADDRINUSE' || error.code === 'EACCES') {
+        if (!strictPort && (error.code === 'EADDRINUSE' || error.code === 'EACCES')) {
           attempt(port + 1)
           return
         }
@@ -427,7 +432,7 @@ function listenWithFallback(server: ReturnType<typeof createServer>, startPort: 
 
       server.once('error', onError)
       server.once('listening', onListening)
-      server.listen(port, '0.0.0.0')
+      server.listen(port, host)
     }
 
     attempt(startPort)
@@ -494,7 +499,9 @@ async function addProjectOnly(projectPath: string): Promise<void> {
 }
 
 async function startServer(options: {
+  host: string
   port: string
+  strictPort: boolean
   password: string | boolean
   tunnel: boolean
   open: boolean
@@ -537,7 +544,7 @@ async function startServer(options: {
   const { app, dispose, attachWebSocket } = createApp({ password })
   const server = createServer(app)
   attachWebSocket(server)
-  const port = await listenWithFallback(server, requestedPort)
+  const port = await listenWithFallback(server, requestedPort, options.host, options.strictPort)
   process.env.CODEXUI_SERVER_PORT = String(port)
   let tunnelChild: ReturnType<typeof spawn> | null = null
   let tunnelUrl: string | null = null
@@ -563,7 +570,7 @@ async function startServer(options: {
     `  Version:  ${version}`,
     '  GitHub:   https://github.com/friuns2/codexui',
     '',
-    `  Bind:     http://0.0.0.0:${String(port)}`,
+    `  Bind:     http://${options.host}:${String(port)}`,
     `  Codex sandbox: ${runtimeConfig.sandboxMode}`,
     `  Approval policy: ${runtimeConfig.approvalPolicy}`,
   ]
@@ -629,7 +636,9 @@ async function runLogin() {
 program
   .argument('[projectPath]', 'project directory to open on launch')
   .option('--open-project <path>', 'open project directory on launch (Codex desktop parity)')
+  .option('--host <host>', 'host to bind', '0.0.0.0')
   .option('-p, --port <port>', 'port to listen on', '5900')
+  .option('--strict-port', 'fail instead of selecting another port when the requested port is unavailable')
   .option('--password <pass>', 'set a specific password')
   .option('--no-password', 'disable password protection')
   .option('--tunnel', 'start cloudflared tunnel (default is auto by Tailscale detection)', true)
@@ -645,7 +654,9 @@ program
   .action(async (
     projectPath: string | undefined,
     opts: {
+      host: string
       port: string
+      strictPort: boolean
       password: string | boolean
       tunnel: boolean
       open: boolean

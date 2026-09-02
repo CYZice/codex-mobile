@@ -22,6 +22,8 @@ Desktop `local-projects` discovery and web-added project persistence use one bac
 7. Confirm the new project appears in browser B without re-adding it.
 8. Rename the project in browser A and confirm the existing local-project record keeps unknown fields while its name and `updatedAt` change.
 9. Remove the test project in browser A and confirm the matching saved root, local-project record, and project-order ID are removed.
+10. In browser A add and start a thread in another local project. In browser B, which was already open, reorder only its older visible projects.
+11. Refresh both browser A and browser B, then open the same server through `127.0.0.1:5900`.
 
 ## Expected Results
 
@@ -29,6 +31,8 @@ Desktop `local-projects` discovery and web-added project persistence use one bac
 - Web-added projects are registered in the Desktop local project model and survive a new browser/device session on the same host.
 - Disk `project-order` remains ID-based while the web API remains path-based.
 - Existing pages revalidate external project-state changes after the bounded cache window.
+- A stale reorder preserves projects added by another page; it changes only the ordering of projects it knows.
+- Starting a local thread in an existing unregistered directory registers it in the Desktop project model before the thread becomes visible.
 - Unrelated global-state fields remain semantically unchanged after JSON parsing and serialization.
 
 ## Rollback/Cleanup

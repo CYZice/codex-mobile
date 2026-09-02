@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCurrentModelConfig, getThreadDetail, listDirectoryComposioConnectors, resumeThread, startThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -27,6 +27,110 @@ function mockRpcFetch(): { requests: Array<{ method: string, params: Record<stri
 
   return { requests }
 }
+
+describe('Codex app-server runtime reload', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('requests the dedicated runtime reload endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await reloadCodexAppServer()
+
+    expect(fetchMock).toHaveBeenCalledWith('/codex-api/runtime/reload', { method: 'POST' })
+  })
+})
+
+describe('Codex activity summary', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('returns the current JSON summary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        totalChats: 12,
+        archivedChats: 2,
+        activeDays: 4,
+        totalTokens: 3200,
+        topModel: 'gpt-5.6-terra',
+        topReasoningEffort: 'medium',
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } })))
+
+    await expect(getCodexActivitySummary()).resolves.toMatchObject({ totalChats: 12, topModel: 'gpt-5.6-terra' })
+  })
+
+  it('explains when an old web host serves the app shell instead of JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    })))
+
+    await expect(getCodexActivitySummary()).rejects.toThrow('Restart Codex Mobile to load Activity data')
+  })
+})
+
+describe('native Codex settings', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the project layer and writes back to its config.toml', async () => {
+    const requests: Array<Record<string, unknown>> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>
+      requests.push(request)
+      return new Response(JSON.stringify({ result: request.method === 'config/read' ? {
+        config: {}, origins: {}, layers: [{ name: { type: 'project', dotCodexFolder: 'D:\\repo\\.codex' }, version: 'v1', config: { model: 'gpt-5.6-sol', sandbox_mode: 'workspace-write' }, disabledReason: null }],
+      } : {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    const settings = await getCodexNativeSettings('project', 'D:\\repo')
+    expect(settings.filePath).toBe('D:\\repo\\.codex/config.toml')
+    expect(settings.model).toBe('gpt-5.6-sol')
+    await saveCodexNativeSettings(settings)
+    expect(requests[1]).toMatchObject({ method: 'config/batchWrite', params: { filePath: 'D:\\repo\\.codex/config.toml', expectedVersion: 'v1' } })
+  })
+
+  it('never falls back from a missing project path to the user config', async () => {
+    await expect(saveCodexNativeSettings({
+      scope: 'project', filePath: null, version: null, model: '', reasoningEffort: '', approvalPolicy: '', sandboxMode: '', networkAccess: false, webSearch: '', verbosity: '', reasoningSummary: '',
+    })).rejects.toThrow('did not expose a Project config path')
+  })
+})
+
+describe('ChatGPT conversation loading', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('surfaces the server connection detail when loading fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: 'Unable to connect to ChatGPT via http://127.0.0.1:7897 proxy',
+    }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(listChatGptConversations()).rejects.toThrow('Unable to connect to ChatGPT via http://127.0.0.1:7897 proxy')
+  })
+
+  it('requests a bounded page and returns its next offset', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ conversationId: 'conversation-1', title: 'First chat' }],
+      nextOffset: 50,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listChatGptConversations(0, 100)).resolves.toEqual({
+      conversations: [{ conversationId: 'conversation-1', title: 'First chat', updatedAt: null }],
+      nextOffset: 50,
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/codex-api/chatgpt-conversations?offset=0&limit=50')
+  })
+})
 
 describe('startThreadTurn collaboration mode payloads', () => {
   afterEach(() => {
@@ -74,6 +178,71 @@ describe('startThreadTurn collaboration mode payloads', () => {
         developer_instructions: null,
       },
     })
+  })
+
+  it('sends the thread permission configuration with each turn', async () => {
+    const { requests } = mockRpcFetch()
+
+    await startThreadTurn(
+      'thread-1',
+      'update the project',
+      [],
+      'gpt-5.4',
+      'medium',
+      undefined,
+      [],
+      'default',
+      {
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: ['D:\\Projects\\LiDAR FPGA'],
+          networkAccess: true,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      },
+    )
+
+    expect(requests[0].params).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandboxPolicy: {
+        type: 'workspaceWrite',
+        writableRoots: ['D:\\Projects\\LiDAR FPGA'],
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    })
+  })
+})
+
+describe('steerThreadTurn', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('appends input to the active turn without turn-level overrides', async () => {
+    const requests: Array<{ method: string, params: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { method: string, params: Record<string, unknown> })
+      return new Response(JSON.stringify({ result: { turnId: 'turn-active' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(steerThreadTurn('thread-1', 'turn-active', 'Focus on tests first.')).resolves.toBe('turn-active')
+    expect(requests).toEqual([{
+      method: 'turn/steer',
+      params: {
+        threadId: 'thread-1',
+        expectedTurnId: 'turn-active',
+        input: [{ type: 'text', text: 'Focus on tests first.' }],
+      },
+    }])
   })
 })
 
@@ -300,6 +469,41 @@ describe('resumeThread', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('reads the reasoning effort reported by thread/resume', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as { method: string; params: Record<string, unknown> }
+        : { method: '', params: {} }
+      expect(body).toEqual({
+        method: 'thread/resume',
+        params: { threadId: 'thread-with-ultra-effort' },
+      })
+      return new Response(JSON.stringify({
+        result: {
+          approvalPolicy: 'on-request',
+          cwd: '/workspace',
+          model: 'gpt-5.6-sol',
+          modelProvider: 'openai',
+          reasoningEffort: 'ultra',
+          sandbox: { type: 'workspace-write' },
+          thread: {
+            id: 'thread-with-ultra-effort',
+            turns: [],
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(resumeThread('thread-with-ultra-effort')).resolves.toMatchObject({
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      reasoningEffort: 'ultra',
+    })
   })
 
   it('coalesces repeated resume failures for the same thread', async () => {

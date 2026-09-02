@@ -12,15 +12,26 @@
 - [concepts/merge-to-main-workflow.md](./concepts/merge-to-main-workflow.md): branch integration and conflict-resolution workflow.
 - [concepts/opencode-zen-big-pickle.md](./concepts/opencode-zen-big-pickle.md): OpenCode Zen Big Pickle model configuration, local proxy behavior, Docker auth switching, and provider model loading.
 - [concepts/realtime-chat-rendering.md](./concepts/realtime-chat-rendering.md): realtime chat rendering, sync-churn reduction, and inline media sanitization.
+- [concepts/composer-desktop-parity.md](./concepts/composer-desktop-parity.md): Codex Desktop composer parity, mobile capsule layout, shared add/skill menus, and turn-action visibility.
+- [concepts/chatgpt-conversation-reference.md](./concepts/chatgpt-conversation-reference.md): bounded ChatGPT conversation references, bridge authentication, menu grouping, and graceful unavailable-auth behavior.
 - [concepts/skills-route-ui.md](./concepts/skills-route-ui.md): Skills route naming, first-launch Plugins card persistence, dark-theme fixes, and verification lessons.
 - [concepts/thread-heartbeat-automations.md](./concepts/thread-heartbeat-automations.md): thread-scoped heartbeat automation storage, multi-automation management, and manual run behavior.
 - [concepts/project-cron-automations.md](./concepts/project-cron-automations.md): project-scoped cron automation storage and sidebar management UI.
 - [concepts/project-zip-portability.md](./concepts/project-zip-portability.md): project ZIP export/import, chat JSONL portability, and local-only security posture.
+- [concepts/personalization-and-priority-sidebar.md](./concepts/personalization-and-priority-sidebar.md): global AGENTS.md editing, symbolic-link preservation, status-driven Priority grouping, and ChatGPT retry visibility.
+- [concepts/routed-settings-and-native-config.md](./concepts/routed-settings-and-native-config.md): routed settings categories, native User/Project Codex configuration, activity aggregation, and Telegram UI scope.
 
 ## Sources
 - [../raw/features/integrated-terminal.md](../raw/features/integrated-terminal.md): source facts for the integrated terminal implementation and follow-up tests.
 - [../raw/features/directory-hub-composio-skills-search.md](../raw/features/directory-hub-composio-skills-search.md): source facts for Directory Hub, Composio connectors, Skills search/install, and edge-case tests.
 - [../raw/features/realtime-chat-rendering-inline-media.md](../raw/features/realtime-chat-rendering-inline-media.md): source facts for realtime chat rendering and inline media sanitization.
+- [../raw/features/inline-user-message-edit.md](../raw/features/inline-user-message-edit.md): source facts for Codex Desktop-style inline user-message editing and direct retry.
+- [../raw/features/composer-desktop-parity-and-turn-actions.md](../raw/features/composer-desktop-parity-and-turn-actions.md): current source facts that supersede Retry and define composer/menu/action parity.
+- [../raw/features/chatgpt-conversation-reference-menu.md](../raw/features/chatgpt-conversation-reference-menu.md): source facts for ChatGPT conversation references and the updated composer menu grouping.
+- [../raw/features/codex-desktop-chatgpt-conversation-reference-protocol.md](../raw/features/codex-desktop-chatgpt-conversation-reference-protocol.md): installed Desktop evidence for inline mention serialization, bounded previews, and `read_thread` fallback.
+- [../raw/features/projectless-chat-and-chatgpt-proxy-2026-08-30.md](../raw/features/projectless-chat-and-chatgpt-proxy-2026-08-30.md): Desktop-style ordinary-chat workspace creation and Windows proxy-aware ChatGPT bridge requests.
+- [../raw/features/global-instructions-and-priority-sidebar-2026-08-30.md](../raw/features/global-instructions-and-priority-sidebar-2026-08-30.md): source facts for global AGENTS.md settings, sidebar activity grouping, and visible ChatGPT failures.
+- [../raw/features/routed-settings-native-config-activity-2026-09-02.md](../raw/features/routed-settings-native-config-activity-2026-09-02.md): source facts for routed settings, native config scopes, local activity, and reliable composer lists.
 - [../raw/features/skills-route-ui-and-first-launch-card.md](../raw/features/skills-route-ui-and-first-launch-card.md): source facts for the Skills route rename, first-launch Plugins card, dark-theme fix, and dev-server workflow adjustment.
 - [../raw/features/thread-heartbeat-automations.md](../raw/features/thread-heartbeat-automations.md): source facts for thread heartbeat automations, multiple automations per thread, and Run now queue behavior.
 - [../raw/features/project-cron-automations.md](../raw/features/project-cron-automations.md): source facts for project cron automations in the sidebar.

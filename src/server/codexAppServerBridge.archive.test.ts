@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  buildProjectlessFolderName,
   callRpcWithArchiveRecovery,
   canonicalizeThreadListResponseForRead,
   canonicalizeWorkspaceRootsStateForRead,
@@ -136,22 +135,6 @@ describe('callRpcWithArchiveRecovery', () => {
         params: { threadId: 'test-thread', input: [{ type: 'text', text: 'hi' }] },
       },
     ])
-  })
-})
-
-describe('buildProjectlessFolderName', () => {
-  it('falls back to unique suffixes after the readable collision range', () => {
-    expect(buildProjectlessFolderName('hi', 0, 'ignored')).toBe('hi')
-    expect(buildProjectlessFolderName('hi', 1, 'ignored')).toBe('hi-2')
-    expect(buildProjectlessFolderName('hi', 19, 'ignored')).toBe('hi-20')
-    expect(buildProjectlessFolderName('hi', 20, 'mabc1234-deadbeef')).toBe('hi-mabc1234-deadbeef')
-  })
-
-  it('keeps long unique fallback names within the slug length limit', () => {
-    const slug = 'a'.repeat(80)
-    const folderName = buildProjectlessFolderName(slug, 20, 'mabc1234-deadbeef')
-    expect(folderName).toHaveLength(80)
-    expect(folderName).toMatch(/-mabc1234-deadbeef$/)
   })
 })
 

@@ -473,6 +473,17 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
     return []
   }
 
+  if ((item as { type?: string }).type === 'contextCompaction') {
+    return [
+      {
+        id: item.id,
+        role: 'system',
+        text: 'Context automatically compacted',
+        messageType: 'contextCompaction',
+      },
+    ]
+  }
+
 
   if (item.type === 'plan') {
     const text = typeof item.text === 'string' ? item.text : ''
@@ -508,7 +519,7 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
   if (item.type === 'fileChange') {
     const fileChanges = toUiFileChanges(item.changes)
     const fileChangeStatus = normalizeFileChangeStatus(item.status)
-    if (fileChanges.length === 0 || fileChangeStatus !== 'completed') {
+    if (fileChanges.length === 0) {
       return []
     }
     return [

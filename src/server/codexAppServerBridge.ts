@@ -12,7 +12,8 @@ import { createInterface } from 'node:readline'
 import { once } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { handleAccountRoutes } from './accountRoutes.js'
-import { buildAppServerArgs } from './appServerRuntimeConfig.js'
+import { buildAppServerArgs, resolveAppServerRuntimeConfig } from './appServerRuntimeConfig.js'
+import { handleCcSwitchRoutes } from './ccSwitch.js'
 import { callRpcWithRateLimitDecodeRecovery } from './rateLimitDecodeRecovery.js'
 import { handleReviewRoutes } from './reviewGit.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
@@ -41,13 +42,22 @@ import { handleOpenRouterProxyRequest } from './openRouterProxy.js'
 import { handleZenProxyRequest } from './zenProxy.js'
 import { handleCustomEndpointProxyRequest } from './customEndpointProxy.js'
 import { ThreadTerminalManager } from './terminalManager.js'
+import { describeProxyRoute, proxyAwareFetch } from './proxyAwareFetch.js'
 import { getSpawnInvocation } from '../utils/commandInvocation.js'
 import {
   resolveCodexCommand,
   resolveRipgrepCommand,
 } from '../commandResolution.js'
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
-import { isAbsoluteLikePath } from '../pathUtils.js'
+import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
+import {
+  DEFAULT_PERMISSION_PRESET,
+  normalizePermissionPreset,
+  normalizePermissionState,
+  resolvePermissionPreset,
+  type PermissionPreset,
+  type PermissionState,
+} from '../permissions.js'
 
 type JsonRpcCall = {
   jsonrpc: '2.0'
@@ -72,8 +82,60 @@ type RpcProxyRequest = {
   params?: unknown
 }
 
-type RpcExecutor = {
+export type RpcExecutor = {
   rpc: (method: string, params: unknown) => Promise<unknown>
+}
+
+export type DevCodexTurnState =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'waiting_approval'
+  | 'interrupt_requested'
+  | 'unknown'
+
+export type DevCodexDispatchResult = {
+  threadId: string
+  turnId?: string
+  cwd?: string
+  state: DevCodexTurnState
+}
+
+export type DevCodexQueueStart = {
+  messageId: string
+  turnId: string
+}
+
+export type DevCodexQueueProcessor = {
+  processThreadQueue: (threadId: string, threadReadResult?: unknown) => Promise<DevCodexQueueStart | undefined>
+  startMessageTurn: (
+    threadId: string,
+    message: StoredQueuedMessage,
+    options?: { cwd?: string; resume?: boolean },
+  ) => Promise<string>
+}
+
+export class DevCodexBridgeOperationError extends Error {
+  constructor(
+    readonly code:
+      | 'THREAD_NOT_FOUND'
+      | 'THREAD_BUSY'
+      | 'NO_ACTIVE_TURN'
+      | 'TURN_NOT_FOUND'
+      | 'TURN_NOT_ACTIVE'
+      | 'INVALID_TARGET'
+      | 'INVALID_MODE'
+      | 'INVALID_ARGUMENT'
+      | 'STEER_NOT_SUPPORTED'
+      | 'INTERRUPT_NOT_SUPPORTED'
+      | 'APP_SERVER_UNAVAILABLE',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DevCodexBridgeOperationError'
+  }
 }
 
 type ServerRequestReply = {
@@ -133,6 +195,8 @@ type ThreadSearchDocument = {
 
 type ThreadSearchIndex = {
   docsById: Map<string, ThreadSearchDocument>
+  pendingThreadIds: Set<string>
+  isIndexing: boolean
 }
 
 type ProviderModelsResponse = {
@@ -239,7 +303,6 @@ const THREAD_RESPONSE_TURN_LIMIT = 10
 const THREAD_TURN_PAGE_READ_CACHE_TTL_MS = 30_000
 const THREAD_METHODS_WITH_TURNS = new Set(['thread/read', 'thread/resume', 'thread/fork', 'thread/rollback'])
 const THREAD_METHODS_WITH_THREAD_SNAPSHOT = new Set([...THREAD_METHODS_WITH_TURNS, 'thread/start'])
-const THREAD_SEARCH_FULL_TEXT_THREAD_LIMIT = 100
 const PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS = 100
 const PROJECTLESS_THREAD_READABLE_DIRECTORY_ATTEMPTS = 20
 const PROJECTLESS_THREAD_SLUG_MAX_LENGTH = 80
@@ -1070,6 +1133,29 @@ function setJson(res: ServerResponse, statusCode: number, payload: unknown): voi
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.end(JSON.stringify(payload))
+}
+
+function setDevCodexBridgeError(res: ServerResponse, error: unknown): void {
+  const normalized = error instanceof DevCodexBridgeOperationError
+    ? error
+    : new DevCodexBridgeOperationError(
+        'APP_SERVER_UNAVAILABLE',
+        error instanceof Error ? error.message : String(error),
+      )
+  const statusCode = normalized.code === 'THREAD_NOT_FOUND' || normalized.code === 'TURN_NOT_FOUND'
+    ? 404
+    : normalized.code === 'THREAD_BUSY' || normalized.code === 'NO_ACTIVE_TURN' || normalized.code === 'TURN_NOT_ACTIVE'
+      ? 409
+      : normalized.code === 'APP_SERVER_UNAVAILABLE'
+          || normalized.code === 'STEER_NOT_SUPPORTED'
+          || normalized.code === 'INTERRUPT_NOT_SUPPORTED'
+        ? 503
+        : 400
+  setJson(res, statusCode, {
+    bridgeVersion: 2,
+    code: normalized.code,
+    message: normalized.message,
+  })
 }
 
 const PROJECT_ZIP_SKIPPED_NAMES = new Set([
@@ -2082,13 +2168,39 @@ function isTimeoutError(payload: unknown): boolean {
   return payload instanceof Error && (payload.name === 'AbortError' || payload.name === 'TimeoutError')
 }
 
+function readCodexActivitySummary(): Record<string, unknown> {
+  const stateDbPath = join(getCodexHomeDir(), 'state_5.sqlite')
+  const empty = { totalChats: 0, archivedChats: 0, activeDays: 0, totalTokens: 0, firstChatAt: null, latestChatAt: null, topModel: null, topReasoningEffort: null }
+  if (!existsSync(stateDbPath)) return empty
+  const userThreads = "(thread_source = 'user' OR thread_source IS NULL OR thread_source = '')"
+  const summarySql = `SELECT COUNT(*) totalChats, SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END) archivedChats, COUNT(DISTINCT date(created_at, 'unixepoch')) activeDays, COALESCE(SUM(tokens_used), 0) totalTokens, MIN(created_at) firstChatAt, MAX(updated_at) latestChatAt FROM threads WHERE ${userThreads};`
+  const rankedSql = (column: string) => `SELECT ${column} value FROM threads WHERE ${userThreads} AND ${column} IS NOT NULL AND ${column} != '' GROUP BY ${column} ORDER BY COUNT(*) DESC LIMIT 1;`
+  const run = (sql: string): Array<Record<string, unknown>> => {
+    const result = spawnSync('sqlite3', ['-json', stateDbPath, sql], { encoding: 'utf8' })
+    if (result.status !== 0 || !result.stdout.trim()) return []
+    try { const rows = JSON.parse(result.stdout) as unknown; return Array.isArray(rows) ? rows : [] } catch { return [] }
+  }
+  const summary = run(summarySql)[0]
+  if (!summary) return empty
+  return {
+    totalChats: Number(summary.totalChats) || 0,
+    archivedChats: Number(summary.archivedChats) || 0,
+    activeDays: Number(summary.activeDays) || 0,
+    totalTokens: Number(summary.totalTokens) || 0,
+    firstChatAt: Number(summary.firstChatAt) || null,
+    latestChatAt: Number(summary.latestChatAt) || null,
+    topModel: readNonEmptyString(run(rankedSql('model'))[0]?.value),
+    topReasoningEffort: readNonEmptyString(run(rankedSql('reasoning_effort'))[0]?.value),
+  }
+}
+
 function formatProjectlessDateSegment(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${date.getFullYear()}-${month}-${day}`
 }
 
-function buildProjectlessPromptSlug(prompt: string | null): string {
+export function buildProjectlessPromptSlug(prompt: string | null): string {
   const slug = prompt
     ?.toLowerCase()
     .match(/[a-z0-9]+/g)
@@ -2116,34 +2228,6 @@ async function ensureRealDirectory(path: string, label: string): Promise<void> {
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new Error(`${label} must be a real directory`)
   }
-}
-
-async function createProjectlessThreadDirectory(prompt: string | null): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
-  const workspaceRoot = join(homedir(), 'Documents', 'Codex')
-  await mkdir(workspaceRoot, { recursive: true })
-  await ensureRealDirectory(workspaceRoot, 'Projectless workspace root')
-
-  const dateDir = join(workspaceRoot, formatProjectlessDateSegment())
-  await mkdir(dateDir, { recursive: true })
-  await ensureRealDirectory(dateDir, 'Projectless thread date directory')
-
-  const slug = buildProjectlessPromptSlug(prompt)
-  for (let index = 0; index < PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS; index += 1) {
-    const folderName = buildProjectlessFolderName(slug, index)
-    const cwd = join(dateDir, folderName)
-    try {
-      await mkdir(cwd, { recursive: false })
-      return { cwd, outputDirectory: cwd, workspaceRoot }
-    } catch {
-      try {
-        await stat(cwd)
-      } catch {
-        throw new Error('Failed to create new chat folder')
-      }
-    }
-  }
-
-  throw new Error('Unable to create a unique new chat folder')
 }
 
 function normalizeGithubCloneUrl(rawUrl: string): { url: string; repoName: string } {
@@ -4062,6 +4146,89 @@ function getCodexHomeDir(): string {
   return codexHome && codexHome.length > 0 ? codexHome : join(homedir(), '.codex')
 }
 
+export type GlobalInstructionsState = {
+  content: string
+  path: string
+  targetPath: string | null
+  isSymlink: boolean
+  overridePath: string
+  overrideActive: boolean
+  effectiveSource: 'AGENTS.override.md' | 'AGENTS.md' | 'none'
+}
+
+async function readTextFileIfPresent(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
+}
+
+export async function readGlobalInstructions(): Promise<GlobalInstructionsState> {
+  const codexHome = getCodexHomeDir()
+  const agentsPath = join(codexHome, 'AGENTS.md')
+  const overridePath = join(codexHome, 'AGENTS.override.md')
+  let isSymlink = false
+  let targetPath: string | null = null
+
+  try {
+    const info = await lstat(agentsPath)
+    isSymlink = info.isSymbolicLink()
+    if (isSymlink) {
+      try {
+        targetPath = await realpath(agentsPath)
+      } catch {
+        const linkTarget = await readlink(agentsPath)
+        targetPath = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(agentsPath), linkTarget)
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  const [content, overrideContent] = await Promise.all([
+    readTextFileIfPresent(agentsPath),
+    readTextFileIfPresent(overridePath),
+  ])
+  const overrideActive = overrideContent.trim().length > 0
+
+  return {
+    content,
+    path: agentsPath,
+    targetPath,
+    isSymlink,
+    overridePath,
+    overrideActive,
+    effectiveSource: overrideActive
+      ? 'AGENTS.override.md'
+      : content.trim().length > 0
+        ? 'AGENTS.md'
+        : 'none',
+  }
+}
+
+export async function writeGlobalInstructions(content: string): Promise<GlobalInstructionsState> {
+  const codexHome = getCodexHomeDir()
+  const agentsPath = join(codexHome, 'AGENTS.md')
+  await mkdir(codexHome, { recursive: true })
+
+  let writePath = agentsPath
+  try {
+    const info = await lstat(agentsPath)
+    if (info.isSymbolicLink()) {
+      const linkTarget = await readlink(agentsPath)
+      writePath = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(agentsPath), linkTarget)
+      await mkdir(dirname(writePath), { recursive: true })
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  await writeFile(writePath, content, 'utf8')
+  return readGlobalInstructions()
+}
+
 function getSkillsInstallDir(): string {
   return join(getCodexHomeDir(), 'skills')
 }
@@ -4915,6 +5082,131 @@ function getCodexGlobalStatePath(): string {
   return join(getCodexHomeDir(), '.codex-global-state.json')
 }
 
+async function createProjectlessThreadDirectory(prompt: string | null): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
+  const workspaceRoot = join(homedir(), 'Documents', 'Codex')
+  await mkdir(workspaceRoot, { recursive: true })
+  await ensureRealDirectory(workspaceRoot, 'Projectless workspace root')
+
+  const dateDir = join(workspaceRoot, formatProjectlessDateSegment())
+  await mkdir(dateDir, { recursive: true })
+  await ensureRealDirectory(dateDir, 'Projectless thread date directory')
+
+  const slug = buildProjectlessPromptSlug(prompt)
+  for (let index = 0; index < PROJECTLESS_THREAD_DIRECTORY_MAX_ATTEMPTS; index += 1) {
+    const folderName = buildProjectlessFolderName(slug, index)
+    const cwd = join(dateDir, folderName)
+    try {
+      await mkdir(cwd, { recursive: false })
+      return { cwd, outputDirectory: cwd, workspaceRoot }
+    } catch {
+      try {
+        await stat(cwd)
+      } catch {
+        throw new Error('Failed to create new chat folder')
+      }
+    }
+  }
+
+  throw new Error('Unable to create a unique new chat folder')
+}
+
+async function fetchChatgptBackend(pathname: string): Promise<unknown> {
+  const auth = await readCodexAuth()
+  if (!auth) throw new Error('ChatGPT authentication is unavailable')
+  const endpoint = `https://chatgpt.com/backend-api${pathname}`
+  let response: Response
+  try {
+    response = await proxyAwareFetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${auth.accessToken}`,
+        originator: 'Codex Desktop',
+        'User-Agent': `Codex Desktop/0.1.0 (${process.platform}; ${process.arch})`,
+        ...(auth.accountId ? { 'ChatGPT-Account-Id': auth.accountId } : {}),
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error'
+    throw new Error(`Unable to connect to ChatGPT via ${describeProxyRoute(endpoint)} network route: ${message}`)
+  }
+  const text = await response.text()
+  let payload: unknown = null
+  try { payload = JSON.parse(text) as unknown } catch { payload = null }
+  if (!response.ok) throw new Error(`ChatGPT backend request failed (${response.status})`)
+  return payload
+}
+
+type ChatgptPreviewMessage = {
+  role: 'user' | 'assistant'
+  content: Array<{ content_type: 'text'; text: string }>
+}
+
+export function extractChatgptPreview(payload: unknown): { conversation: ChatgptPreviewMessage[]; diff: null } | null {
+  const record = asRecord(payload)
+  const mapping = asRecord(record?.mapping)
+  if (!mapping) return null
+  const orderedNodes: Record<string, unknown>[] = []
+  const visited = new Set<string>()
+  let nodeId = readNonEmptyString(record?.current_node ?? record?.currentNode)
+  while (nodeId && !visited.has(nodeId)) {
+    visited.add(nodeId)
+    const node = asRecord(mapping[nodeId])
+    if (!node) break
+    orderedNodes.push(node)
+    nodeId = readNonEmptyString(node.parent)
+  }
+  orderedNodes.reverse()
+
+  const rows: Array<{ role: 'user' | 'assistant'; text: string }> = []
+  for (const node of orderedNodes) {
+    const message = asRecord(node.message)
+    const author = asRecord(message?.author)
+    const role = readNonEmptyString(author?.role) ?? ''
+    const status = readNonEmptyString(message?.status)
+    if (role === 'assistant' && status && status !== 'finished_successfully') continue
+    const content = asRecord(message?.content)
+    const parts = Array.isArray(content?.parts) ? content.parts : []
+    const text = parts.filter((part): part is string => typeof part === 'string').join('\n').trim()
+    if ((role === 'user' || role === 'assistant') && text) {
+      rows.push({ role, text: text.slice(0, 2000) })
+    }
+  }
+  const userIndexes = rows.flatMap((row, index) => row.role === 'user' ? [index] : [])
+  const start = userIndexes[Math.max(0, userIndexes.length - 3)] ?? Math.max(0, rows.length - 6)
+  const conversation = rows.slice(start).map((row): ChatgptPreviewMessage => ({
+    role: row.role,
+    content: [{ content_type: 'text', text: row.text }],
+  }))
+  return conversation.length > 0 ? { conversation, diff: null } : null
+}
+
+let codexGlobalStateMutationChain: Promise<unknown> = Promise.resolve()
+
+async function readCodexGlobalStatePayload(): Promise<Record<string, unknown>> {
+  try {
+    return asRecord(JSON.parse(await readFile(getCodexGlobalStatePath(), 'utf8'))) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function withCodexGlobalStateUpdate<T>(
+  update: (payload: Record<string, unknown>) => T | Promise<T>,
+): Promise<T> {
+  const run = codexGlobalStateMutationChain.then(async () => {
+    const payload = await readCodexGlobalStatePayload()
+    const result = await update(payload)
+    await writeFile(getCodexGlobalStatePath(), JSON.stringify(payload), 'utf8')
+    return result
+  })
+  codexGlobalStateMutationChain = run.catch(() => {})
+  return run
+}
+
+function getCodexPermissionsStatePath(): string {
+  return join(getCodexHomeDir(), 'codexapp-permissions.json')
+}
+
 function getTelegramBridgeConfigPath(): string {
   return join(getCodexHomeDir(), 'telegram-bridge.json')
 }
@@ -5399,6 +5691,7 @@ type ThreadTitleCache = { titles: Record<string, string>; order: string[] }
 const MAX_THREAD_TITLES = 500
 const EMPTY_THREAD_TITLE_CACHE: ThreadTitleCache = { titles: {}, order: [] }
 const PINNED_THREAD_IDS_KEY = 'pinned-thread-ids'
+const THREAD_UNREAD_STATE_KEY = 'thread-unread-state'
 
 type SessionIndexThreadTitleCacheState = {
   fileSignature: string | null
@@ -5431,6 +5724,10 @@ function normalizeThreadTitleCache(value: unknown): ThreadTitleCache {
 }
 
 function normalizePinnedThreadIds(value: unknown): string[] {
+  return normalizeStringArray(value)
+}
+
+function normalizeThreadUnreadState(value: unknown): string[] {
   return normalizeStringArray(value)
 }
 
@@ -5518,16 +5815,9 @@ async function readThreadTitleCache(): Promise<ThreadTitleCache> {
 }
 
 async function writeThreadTitleCache(cache: ThreadTitleCache): Promise<void> {
-  const statePath = getCodexGlobalStatePath()
-  let payload: Record<string, unknown> = {}
-  try {
-    const raw = await readFile(statePath, 'utf8')
-    payload = asRecord(JSON.parse(raw)) ?? {}
-  } catch {
-    payload = {}
-  }
-  payload['thread-titles'] = cache
-  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+  await withCodexGlobalStateUpdate((payload) => {
+    payload['thread-titles'] = cache
+  })
 }
 
 async function readPinnedThreadIds(): Promise<string[]> {
@@ -5542,29 +5832,44 @@ async function readPinnedThreadIds(): Promise<string[]> {
 }
 
 async function writePinnedThreadIds(threadIds: string[]): Promise<void> {
+  await withCodexGlobalStateUpdate((payload) => {
+    payload[PINNED_THREAD_IDS_KEY] = normalizePinnedThreadIds(threadIds)
+  })
+}
+
+async function readThreadUnreadState(): Promise<string[]> {
   const statePath = getCodexGlobalStatePath()
-  let payload: Record<string, unknown> = {}
   try {
     const raw = await readFile(statePath, 'utf8')
-    payload = asRecord(JSON.parse(raw)) ?? {}
+    const payload = asRecord(JSON.parse(raw)) ?? {}
+    return normalizeThreadUnreadState(payload[THREAD_UNREAD_STATE_KEY])
   } catch {
-    payload = {}
+    return []
   }
+}
 
-  payload[PINNED_THREAD_IDS_KEY] = normalizePinnedThreadIds(threadIds)
-  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+async function setThreadUnreadState(threadId: string, unread: boolean): Promise<string[]> {
+  return await withCodexGlobalStateUpdate((payload) => {
+    const current = new Set(normalizeThreadUnreadState(payload[THREAD_UNREAD_STATE_KEY]))
+    if (unread) current.add(threadId)
+    else current.delete(threadId)
+    const next = [...current]
+    payload[THREAD_UNREAD_STATE_KEY] = next
+    return next
+  })
 }
 
 const FIRST_LAUNCH_PLUGINS_CARD_DISMISSED_KEY = 'first-launch-plugins-card-dismissed'
 const THREAD_QUEUE_STATE_KEY = 'thread-queue-state'
 
-type StoredQueuedMessage = {
+export type StoredQueuedMessage = {
   id: string
   text: string
   imageUrls: string[]
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
   collaborationMode: 'default' | 'plan'
+  permissionPreset: PermissionPreset
 }
 
 type ThreadQueueState = Record<string, StoredQueuedMessage[]>
@@ -5621,7 +5926,58 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     skills: normalizeNamedPathItems(record.skills),
     fileAttachments: normalizeFileAttachments(record.fileAttachments),
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
+    permissionPreset: normalizePermissionPreset(record.permissionPreset, resolveDefaultPermissionPreset()),
   }
+}
+
+function resolveDefaultPermissionPreset(): PermissionPreset {
+  return DEFAULT_PERMISSION_PRESET
+}
+
+const PERMISSION_STATE_SCHEMA_VERSION = 2
+
+export async function readPermissionState(): Promise<PermissionState> {
+  const statePath = getCodexPermissionsStatePath()
+  try {
+    const raw = await readFile(statePath, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    const record = asRecord(parsed)
+    const normalized = normalizePermissionState(parsed, resolveDefaultPermissionPreset())
+    if (record?.version !== PERMISSION_STATE_SCHEMA_VERSION) {
+      const migrated = {
+        ...normalized,
+        defaultPreset: DEFAULT_PERMISSION_PRESET,
+      }
+      try {
+        await writePermissionState(migrated)
+      } catch {
+        // Keep the in-memory migration result even when persistence is temporarily unavailable.
+      }
+      return migrated
+    }
+    return normalized
+  } catch {
+    return normalizePermissionState(null, resolveDefaultPermissionPreset())
+  }
+}
+
+let permissionStateMutationChain: Promise<unknown> = Promise.resolve()
+
+export async function writePermissionState(nextState: PermissionState): Promise<void> {
+  const statePath = getCodexPermissionsStatePath()
+  const run = permissionStateMutationChain.then(async () => {
+    await mkdir(dirname(statePath), { recursive: true })
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        version: PERMISSION_STATE_SCHEMA_VERSION,
+        ...normalizePermissionState(nextState, resolveDefaultPermissionPreset()),
+      }),
+      'utf8',
+    )
+  })
+  permissionStateMutationChain = run.catch(() => {})
+  await run
 }
 
 function normalizeThreadQueueState(value: unknown): ThreadQueueState {
@@ -5657,21 +6013,11 @@ async function readThreadQueueState(): Promise<ThreadQueueState> {
 }
 
 async function writeThreadQueueStateUnlocked(nextState: ThreadQueueState): Promise<void> {
-  const statePath = getCodexGlobalStatePath()
-  let payload: Record<string, unknown> = {}
-  try {
-    const raw = await readFile(statePath, 'utf8')
-    payload = asRecord(JSON.parse(raw)) ?? {}
-  } catch {
-    payload = {}
-  }
-  const normalized = normalizeThreadQueueState(nextState)
-  if (Object.keys(normalized).length > 0) {
-    payload[THREAD_QUEUE_STATE_KEY] = normalized
-  } else {
-    delete payload[THREAD_QUEUE_STATE_KEY]
-  }
-  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+  await withCodexGlobalStateUpdate((payload) => {
+    const normalized = normalizeThreadQueueState(nextState)
+    if (Object.keys(normalized).length > 0) payload[THREAD_QUEUE_STATE_KEY] = normalized
+    else delete payload[THREAD_QUEUE_STATE_KEY]
+  })
 }
 
 async function withThreadQueueStateUpdate<T>(
@@ -5742,7 +6088,10 @@ function escapeHeartbeatXmlText(value: string): string {
     .replace(/>/gu, '&gt;')
 }
 
-function buildHeartbeatQueuedMessage(automation: ThreadAutomationRecord): StoredQueuedMessage {
+function buildHeartbeatQueuedMessage(
+  automation: ThreadAutomationRecord,
+  permissionPreset: PermissionPreset,
+): StoredQueuedMessage {
   return {
     id: `automation-${automation.id}-${Date.now()}-${randomBytes(3).toString('hex')}`,
     text: `<heartbeat>
@@ -5756,6 +6105,7 @@ ${escapeHeartbeatXmlText(automation.prompt)}
     skills: [],
     fileAttachments: [],
     collaborationMode: 'default',
+    permissionPreset,
   }
 }
 
@@ -5802,16 +6152,9 @@ async function readFirstLaunchPluginsCardDismissed(): Promise<boolean> {
 }
 
 async function writeFirstLaunchPluginsCardDismissed(dismissed: boolean): Promise<void> {
-  const statePath = getCodexGlobalStatePath()
-  let payload: Record<string, unknown> = {}
-  try {
-    const raw = await readFile(statePath, 'utf8')
-    payload = asRecord(JSON.parse(raw)) ?? {}
-  } catch {
-    payload = {}
-  }
-  payload[FIRST_LAUNCH_PLUGINS_CARD_DISMISSED_KEY] = dismissed === true
-  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+  await withCodexGlobalStateUpdate((payload) => {
+    payload[FIRST_LAUNCH_PLUGINS_CARD_DISMISSED_KEY] = dismissed === true
+  })
 }
 
 function getSessionIndexFileSignature(stats: { mtimeMs: number; size: number }): string {
@@ -6190,32 +6533,23 @@ export async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
 
 export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): Promise<void> {
   const state = await canonicalizeWorkspaceRootsState(nextState)
-  const statePath = getCodexGlobalStatePath()
-  let payload: Record<string, unknown> = {}
-  try {
-    const raw = await readFile(statePath, 'utf8')
-    payload = asRecord(JSON.parse(raw)) ?? {}
-  } catch {
-    payload = {}
-  }
+  await withCodexGlobalStateUpdate(async (payload) => {
+    const existingProjects = await canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects']))
+    const reconciled = reconcileLocalProjectsForWorkspaceState(
+      payload['local-projects'],
+      existingProjects,
+      normalizeStringArray(payload['project-order']),
+      state,
+    )
 
-  const existingProjects = await canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects']))
-  const reconciled = reconcileLocalProjectsForWorkspaceState(
-    payload['local-projects'],
-    existingProjects,
-    normalizeStringArray(payload['project-order']),
-    state,
-  )
-
-  payload['electron-saved-workspace-roots'] = normalizeStringArray(reconciled.localOrder)
-  payload['electron-workspace-root-labels'] = normalizeStringRecord(state.labels)
-  const localRootKeys = new Set(reconciled.localOrder.map(workspaceRootComparisonKey))
-  payload['active-workspace-roots'] = normalizeStringArray(state.active)
-    .filter((rootPath) => localRootKeys.has(workspaceRootComparisonKey(rootPath)))
-  payload['local-projects'] = reconciled.localProjects
-  payload['project-order'] = reconciled.projectOrder
-
-  await writeFile(statePath, JSON.stringify(payload), 'utf8')
+    payload['electron-saved-workspace-roots'] = normalizeStringArray(reconciled.localOrder)
+    payload['electron-workspace-root-labels'] = normalizeStringRecord(state.labels)
+    const localRootKeys = new Set(reconciled.localOrder.map(workspaceRootComparisonKey))
+    payload['active-workspace-roots'] = normalizeStringArray(state.active)
+      .filter((rootPath) => localRootKeys.has(workspaceRootComparisonKey(rootPath)))
+    payload['local-projects'] = reconciled.localProjects
+    payload['project-order'] = reconciled.projectOrder
+  })
 }
 
 let workspaceRootsMutation: Promise<void> = Promise.resolve()
@@ -6235,10 +6569,11 @@ function prependUniqueString(value: string, items: string[]): string[] {
 
 async function updateWorkspaceRootsState(
   updater: (existingState: WorkspaceRootsState) => WorkspaceRootsState,
-): Promise<void> {
-  await queueWorkspaceRootsMutation(async () => {
+): Promise<WorkspaceRootsState> {
+  return await queueWorkspaceRootsMutation(async () => {
     const existingState = await readWorkspaceRootsState()
     await writeWorkspaceRootsState(updater(existingState))
+    return await readWorkspaceRootsState()
   })
 }
 
@@ -6287,6 +6622,116 @@ async function persistWorkspaceRoot(workspaceRoot: string, label = ''): Promise<
       active: prependUniqueString(normalizedRoot, existingState.active),
       projectOrder: prependUniqueString(normalizedRoot, existingState.projectOrder),
       remoteProjects: existingState.remoteProjects,
+    }
+  })
+}
+
+export async function ensureWorkspaceRootForThread(workspaceRoot: string): Promise<boolean> {
+  const normalizedRoot = workspaceRoot.trim()
+  if (!normalizedRoot || !isAbsolute(normalizedRoot)) return false
+  try {
+    if (!(await stat(normalizedRoot)).isDirectory()) return false
+  } catch {
+    return false
+  }
+  await persistWorkspaceRoot(normalizedRoot)
+  return true
+}
+
+function isRunningThreadSummary(value: unknown): boolean {
+  const record = asRecord(value)
+  if (!record) return false
+  if (record.inProgress === true || record.status === 'inProgress' || record.turnStatus === 'inProgress') return true
+  const status = asRecord(record.status)
+  return status?.type === 'active' || status?.type === 'inProgress'
+}
+
+export async function recoverWorkspaceRootsForRunningThreads(threadSummaries: unknown[]): Promise<boolean> {
+  const candidates = Array.from(new Set(threadSummaries
+    .filter(isRunningThreadSummary)
+    .map((summary) => readNonEmptyString(asRecord(summary)?.cwd))
+    .filter((cwd) => cwd && isAbsolute(cwd))))
+  const existingDirectories = (await Promise.all(candidates.map(async (cwd) => {
+    try {
+      return (await stat(cwd)).isDirectory() ? cwd : ''
+    } catch {
+      return ''
+    }
+  }))).filter(Boolean)
+  if (existingDirectories.length === 0) return false
+
+  let recovered = false
+  await updateWorkspaceRootsState((existingState) => {
+    const existingKeys = new Set(existingState.order.map(workspaceRootComparisonKey))
+    const missing = existingDirectories.filter((cwd) => !existingKeys.has(workspaceRootComparisonKey(cwd)))
+    if (missing.length === 0) return existingState
+    recovered = true
+    return {
+      ...existingState,
+      order: [...missing, ...existingState.order],
+      active: existingState.active.length > 0 ? existingState.active : [missing[0]],
+      projectOrder: [...missing, ...existingState.projectOrder],
+    }
+  })
+  return recovered
+}
+
+export async function reorderWorkspaceRoots(requestedOrder: string[]): Promise<WorkspaceRootsState> {
+  return await updateWorkspaceRootsState((existingState) => {
+    const currentOrder = [...existingState.order, ...existingState.remoteProjects.map((project) => project.id)]
+    const currentByKey = new Map(currentOrder.map((item) => [workspaceRootComparisonKey(item), item]))
+    const nextProjectOrder: string[] = []
+    const seen = new Set<string>()
+    const append = (item: string): void => {
+      const key = workspaceRootComparisonKey(item)
+      if (!seen.has(key)) {
+        seen.add(key)
+        nextProjectOrder.push(item)
+      }
+    }
+    for (const item of requestedOrder) {
+      const current = currentByKey.get(workspaceRootComparisonKey(item))
+      if (current) append(current)
+    }
+    for (const item of currentOrder) append(item)
+    const remoteProjectIds = new Set(existingState.remoteProjects.map((project) => project.id))
+    const nextOrder = nextProjectOrder.filter((item) => !remoteProjectIds.has(item))
+    return {
+      order: nextOrder,
+      labels: { ...existingState.labels },
+      active: existingState.active.filter((item) => nextOrder.some((root) => workspaceRootComparisonKey(root) === workspaceRootComparisonKey(item))),
+      projectOrder: nextProjectOrder,
+      remoteProjects: existingState.remoteProjects,
+    }
+  })
+}
+
+export async function renameWorkspaceRoots(rootPaths: string[], label: string): Promise<WorkspaceRootsState> {
+  const targetKeys = new Set(normalizeStringArray(rootPaths).map(workspaceRootComparisonKey))
+  return await updateWorkspaceRootsState((existingState) => {
+    const labels = { ...existingState.labels }
+    for (const rootPath of existingState.order) {
+      if (!targetKeys.has(workspaceRootComparisonKey(rootPath))) continue
+      if (label.trim()) labels[rootPath] = label.trim()
+      else delete labels[rootPath]
+    }
+    return { ...existingState, labels }
+  })
+}
+
+export async function removeWorkspaceRoots(rootPaths: string[]): Promise<WorkspaceRootsState> {
+  const targetKeys = new Set(normalizeStringArray(rootPaths).map(workspaceRootComparisonKey))
+  return await updateWorkspaceRootsState((existingState) => {
+    const order = existingState.order.filter((rootPath) => !targetKeys.has(workspaceRootComparisonKey(rootPath)))
+    const labels = Object.fromEntries(Object.entries(existingState.labels)
+      .filter(([rootPath]) => !targetKeys.has(workspaceRootComparisonKey(rootPath))))
+    const active = existingState.active.filter((rootPath) => !targetKeys.has(workspaceRootComparisonKey(rootPath)))
+    return {
+      ...existingState,
+      order,
+      labels,
+      active: active.length > 0 || order.length === 0 ? active : [order[0]],
+      projectOrder: existingState.projectOrder.filter((item) => !targetKeys.has(workspaceRootComparisonKey(item))),
     }
   })
 }
@@ -6568,7 +7013,7 @@ async function fetchConnectorLogo(rawUrl: string): Promise<{ contentType: string
   if (!auth) throw new Error('No auth token available for connector logo')
 
   const endpoint = `https://chatgpt.com/backend-api/aip/connectors/${encodeURIComponent(parsed.connectorId)}/logo?theme=${parsed.theme}`
-  const response = await fetch(endpoint, {
+  const response = await proxyAwareFetch(endpoint, {
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
       originator: 'Codex Desktop',
@@ -6632,8 +7077,12 @@ class AppServerProcess {
   private readonly threadTurnPageReadPromiseByThreadId = new Map<string, Promise<unknown>>()
   private readonly capturedItemsByThreadId = new Map<string, Map<string, CapturedItem>>()
   private readonly liveStateCache = new Map<string, { data: unknown; turnCount: number; sessionSize: number }>()
+  private readonly activeTurnKeys = new Set<string>()
   private chatgptAuthRefreshPromise: Promise<ChatgptAuthTokensRefreshResponse> | null = null
+  private pendingTurnStarts = 0
+  private runtimeConfigurationChangeActive = false
   private activeConfigSignature = ''
+  private reloadPromise: Promise<void> | null = null
 
 
   private getCodexCommand(): string {
@@ -6645,21 +7094,9 @@ class AppServerProcess {
   }
 
   private buildAppServerConfig(): { args: string[]; env: Record<string, string> } {
-    const args = buildAppServerArgs()
-    let extraEnv: Record<string, string> = {}
-    const serverPort = parseInt(process.env.CODEXUI_SERVER_PORT ?? '', 10) || undefined
-    args.push(...getProviderCompatibilityConfigArgs(serverPort))
-    const statePath = join(getCodexHomeDir(), FREE_MODE_STATE_FILE)
-    try {
-      const state = ensureDefaultFreeModeStateForMissingAuthSync(statePath)
-      if (state) {
-        args.push(...getFreeModeConfigArgs(state, serverPort))
-        extraEnv = getFreeModeEnvVars(state)
-      }
-    } catch {
-      // No free-mode state or invalid — use defaults
-    }
-    return { args, env: extraEnv }
+    // Provider selection is owned by the local Codex configuration (for example,
+    // CC Switch). Do not inject web-only free-mode settings into app-server.
+    return { args: buildAppServerArgs(), env: {} }
   }
 
   private getAppServerConfigSignature(config: { args: string[]; env: Record<string, string> }): string {
@@ -6778,6 +7215,7 @@ class AppServerProcess {
   }
 
   private emitNotification(notification: { method: string; params: unknown }): void {
+    this.trackTurnActivity(notification)
     this.recordStreamEvent(notification)
     this.captureItemFromNotification(notification)
     const nThreadId = this.extractThreadIdFromParams(notification.params)
@@ -6787,6 +7225,27 @@ class AppServerProcess {
     }
     for (const listener of this.notificationListeners) {
       listener(notification)
+    }
+  }
+
+  private trackTurnActivity(notification: { method: string; params: unknown }): void {
+    if (notification.method !== 'turn/started' && notification.method !== 'turn/completed') return
+    const params = asRecord(notification.params)
+    if (!params) return
+    const threadId = this.extractThreadIdFromParams(params)
+    const turnId = readStreamTurnId(params)
+    if (!threadId) return
+    const key = `${threadId}:${turnId || 'active'}`
+    if (notification.method === 'turn/started') {
+      this.activeTurnKeys.add(key)
+      return
+    }
+    if (turnId) {
+      this.activeTurnKeys.delete(key)
+      return
+    }
+    for (const activeKey of this.activeTurnKeys) {
+      if (activeKey.startsWith(`${threadId}:`)) this.activeTurnKeys.delete(activeKey)
     }
   }
 
@@ -7110,9 +7569,36 @@ class AppServerProcess {
   }
 
   async rpc(method: string, params: unknown): Promise<unknown> {
+    const startsTurn = method === 'turn/start'
+    if (startsTurn && this.runtimeConfigurationChangeActive) {
+      throw new Error('Codex configuration is changing. Wait for the provider switch to finish.')
+    }
+    if (startsTurn) this.pendingTurnStarts += 1
     this.disposeIfConfigChanged()
-    await this.ensureInitialized()
-    return this.call(method, params)
+    try {
+      await this.ensureInitialized()
+      return await this.call(method, params)
+    } finally {
+      if (startsTurn) this.pendingTurnStarts = Math.max(0, this.pendingTurnStarts - 1)
+    }
+  }
+
+  getLifecycleStatus(): 'idle' | 'starting' | 'ready' {
+    if (this.initialized) return 'ready'
+    return this.process ? 'starting' : 'idle'
+  }
+
+  async reload(): Promise<void> {
+    if (this.reloadPromise) return await this.reloadPromise
+
+    this.reloadPromise = (async () => {
+      this.dispose()
+      await this.ensureInitialized()
+    })().finally(() => {
+      this.reloadPromise = null
+    })
+
+    return await this.reloadPromise
   }
 
   onNotification(listener: (value: { method: string; params: unknown }) => void): () => void {
@@ -7158,6 +7644,26 @@ class AppServerProcess {
     return Array.from(this.pendingServerRequests.values())
   }
 
+  getRuntimeConfigurationChangeBlockReason(): string {
+    if (this.runtimeConfigurationChangeActive) return 'A Codex configuration change is already in progress.'
+    if (this.reloadPromise) return 'Codex app-server is reloading.'
+    if (this.pendingTurnStarts > 0 || this.activeTurnKeys.size > 0) return 'Wait for all running Codex tasks to finish.'
+    if (this.pendingServerRequests.size > 0) return 'Resolve pending Codex approvals before switching providers.'
+    return ''
+  }
+
+  beginRuntimeConfigurationChange(): () => void {
+    const blockReason = this.getRuntimeConfigurationChangeBlockReason()
+    if (blockReason) throw new Error(blockReason)
+    this.runtimeConfigurationChangeActive = true
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.runtimeConfigurationChangeActive = false
+    }
+  }
+
   dispose(): void {
     if (!this.process) return
 
@@ -7175,6 +7681,7 @@ class AppServerProcess {
     }
     this.pending.clear()
     this.pendingServerRequests.clear()
+    this.activeTurnKeys.clear()
 
     try {
       proc.stdin.end()
@@ -7260,31 +7767,34 @@ export class BackendQueueProcessor {
     this.queueDrainDueAtByThreadId.set(threadId, nextDueAt)
   }
 
-  async processThreadQueue(threadId: string): Promise<void> {
-    if (this.processingThreadIds.has(threadId)) return
+  async processThreadQueue(threadId: string, threadReadResult?: unknown): Promise<DevCodexQueueStart | undefined> {
+    if (this.processingThreadIds.has(threadId)) return undefined
     this.processingThreadIds.add(threadId)
     try {
-      const canStart = await this.canStartQueuedTurn(threadId)
+      const canStart = await this.canStartQueuedTurn(threadId, threadReadResult)
       if (!canStart) {
         if (await this.hasQueuedTurns(threadId)) {
           this.scheduleThreadQueueDrain(threadId)
         }
-        return
+        return undefined
       }
       const next = await this.popNextQueuedTurn(threadId)
-      if (!next) return
+      if (!next) return undefined
       try {
-        await this.startQueuedTurn(next)
+        const turnId = await this.startQueuedTurn(next)
         if (await this.hasQueuedTurns(threadId)) {
           this.scheduleThreadQueueDrain(threadId)
         }
+        return { messageId: next.message.id, turnId }
       } catch {
         await this.restoreQueuedTurn(next)
         this.scheduleThreadQueueDrain(threadId)
+        return undefined
       }
     } catch {
       // Queue processing is best-effort. Keep the bridge alive if app-server is unavailable.
       this.scheduleThreadQueueDrain(threadId)
+      return undefined
     } finally {
       this.processingThreadIds.delete(threadId)
     }
@@ -7296,17 +7806,11 @@ export class BackendQueueProcessor {
     return Array.isArray(queue) && queue.length > 0
   }
 
-  private async canStartQueuedTurn(threadId: string): Promise<boolean> {
-    const response = asRecord(await this.appServer.rpc('thread/read', { threadId, includeTurns: true }))
+  private async canStartQueuedTurn(threadId: string, threadReadResult?: unknown): Promise<boolean> {
+    const response = asRecord(threadReadResult ?? await this.appServer.rpc('thread/read', { threadId, includeTurns: true }))
     const thread = asRecord(response?.thread)
     if (!thread) return false
-
-    const status = asRecord(thread.status)
-    const statusType = readNonEmptyString(status?.type)
-    if (statusType === 'inProgress' || statusType === 'running' || statusType === 'active') return false
-
-    const turns = Array.isArray(thread.turns) ? thread.turns : []
-    return !turns.some((turn) => readNonEmptyString(asRecord(turn)?.status) === 'inProgress')
+    return !isDevCodexThreadBusy(response)
   }
 
   private async popNextQueuedTurn(threadId: string): Promise<BackendQueuedTurn | null> {
@@ -7377,7 +7881,7 @@ export class BackendQueueProcessor {
     throw new Error(`${mode === 'plan' ? 'Plan' : 'Default'} mode requires an available model.`)
   }
 
-  private async buildQueuedTurnParams(turn: BackendQueuedTurn): Promise<Record<string, unknown>> {
+  private async buildQueuedTurnParams(turn: BackendQueuedTurn, cwd?: string): Promise<Record<string, unknown>> {
     const localImageAttachments: StoredQueuedMessage['fileAttachments'] = []
     for (const imageUrl of turn.message.imageUrls) {
       const localImagePath = extractLocalImagePathFromUrl(imageUrl.trim())
@@ -7416,6 +7920,7 @@ export class BackendQueueProcessor {
     const params: Record<string, unknown> = {
       threadId: turn.threadId,
       input,
+      ...resolvePermissionPreset(turn.message.permissionPreset, cwd),
     }
     if (dedupedFileAttachments.length > 0) {
       params.attachments = dedupedFileAttachments.map((f) => ({ label: f.label, path: f.path, fsPath: f.fsPath }))
@@ -7438,10 +7943,338 @@ export class BackendQueueProcessor {
     return params
   }
 
-  private async startQueuedTurn(turn: BackendQueuedTurn): Promise<void> {
-    await this.appServer.rpc('thread/resume', { threadId: turn.threadId })
-    await this.appServer.rpc('turn/start', await this.buildQueuedTurnParams(turn))
+  async startMessageTurn(
+    threadId: string,
+    message: StoredQueuedMessage,
+    options: { cwd?: string; resume?: boolean } = {},
+  ): Promise<string> {
+    let cwd = options.cwd
+    if (options.resume !== false) {
+      const resumed = asRecord(await this.appServer.rpc('thread/resume', { threadId }))
+      cwd = readNonEmptyString(resumed?.cwd) || cwd
+    }
+    const result = asRecord(await this.appServer.rpc(
+      'turn/start',
+      await this.buildQueuedTurnParams({ threadId, message }, cwd),
+    ))
+    const turnId = readNonEmptyString(asRecord(result?.turn)?.id) || readNonEmptyString(result?.turnId)
+    if (!turnId) throw new Error('turn/start did not return a turn id')
+    return turnId
   }
+
+  private startQueuedTurn(turn: BackendQueuedTurn): Promise<string> {
+    return this.startMessageTurn(turn.threadId, turn.message)
+  }
+}
+
+type DevCodexDependencies = {
+  readPermissions: () => Promise<PermissionState>
+  appendQueuedMessage: (threadId: string, message: StoredQueuedMessage) => Promise<void>
+  readQueueState: () => Promise<ThreadQueueState>
+}
+
+const defaultDevCodexDependencies: DevCodexDependencies = {
+  readPermissions: readPermissionState,
+  appendQueuedMessage: appendThreadQueuedMessage,
+  readQueueState: readThreadQueueState,
+}
+
+export function isDevCodexThreadBusy(value: unknown): boolean {
+  const response = asRecord(value)
+  const thread = asRecord(response?.thread) ?? response
+  const statusType = readNonEmptyString(asRecord(thread?.status)?.type)
+  if (
+    statusType === 'active'
+    || statusType === 'inProgress'
+    || statusType === 'running'
+    || statusType === 'waitingForApproval'
+    || statusType === 'waiting_approval'
+  ) return true
+
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  return turns.some((turn) => {
+    const status = readNonEmptyString(asRecord(turn)?.status)
+    return status === 'inProgress' || status === 'running' || status === 'waitingForApproval' || status === 'waiting_approval'
+  })
+}
+
+export type DevCodexDispatchInput = {
+  message: string
+  target:
+    | { type: 'new'; cwd: string }
+    | { type: 'thread'; threadId: string }
+  mode: 'start' | 'queue' | 'steer'
+}
+
+export async function dispatchDevCodex(
+  appServer: RpcExecutor,
+  queueProcessor: DevCodexQueueProcessor,
+  input: DevCodexDispatchInput,
+  dependencies: DevCodexDependencies = defaultDevCodexDependencies,
+): Promise<DevCodexDispatchResult> {
+  const message = input.message.trim()
+  if (!message) throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'message is required')
+
+  if (input.target.type === 'new') {
+    if (input.mode !== 'start') {
+      throw new DevCodexBridgeOperationError('INVALID_MODE', 'target=new supports mode=start only')
+    }
+    const cwd = input.target.cwd.trim()
+    if (!cwd) throw new DevCodexBridgeOperationError('INVALID_TARGET', 'target=new requires cwd')
+    let started: unknown
+    try {
+      started = await appServer.rpc('thread/start', { cwd })
+    } catch (error) {
+      throw appServerUnavailable(error, 'Unable to create the native Codex thread.')
+    }
+    const startedRecord = asRecord(started)
+    const thread = asRecord(startedRecord?.thread) ?? startedRecord
+    const threadId = readNonEmptyString(thread?.id) || readNonEmptyString(startedRecord?.threadId)
+    if (!threadId) {
+      throw new DevCodexBridgeOperationError('APP_SERVER_UNAVAILABLE', 'thread/start did not return a thread id')
+    }
+    const queuedMessage = await buildDevCodexMessage(threadId, message, dependencies.readPermissions)
+    try {
+      const turnId = await queueProcessor.startMessageTurn(threadId, queuedMessage, { cwd, resume: false })
+      return { threadId, turnId, cwd: readNonEmptyString(thread?.cwd) || cwd, state: 'running' }
+    } catch (error) {
+      throw appServerUnavailable(error, 'Unable to start the first Codex turn.')
+    }
+  }
+
+  const threadId = input.target.threadId.trim()
+  if (!threadId) throw new DevCodexBridgeOperationError('INVALID_TARGET', 'target=thread requires threadId')
+  const threadReadResult = await readDevCodexThread(appServer, threadId)
+  const response = asRecord(threadReadResult)
+  const thread = asRecord(response?.thread) ?? response
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+
+  if (input.mode === 'steer') {
+    const activeTurnId = findActiveDevCodexTurnId(threadReadResult)
+    if (!activeTurnId) throw new DevCodexBridgeOperationError('NO_ACTIVE_TURN', `Thread ${threadId} has no active turn.`)
+    try {
+      const result = asRecord(await appServer.rpc('turn/steer', {
+        threadId,
+        expectedTurnId: activeTurnId,
+        input: [{ type: 'text', text: message }],
+      }))
+      return {
+        threadId,
+        turnId: readNonEmptyString(result?.turnId) || activeTurnId,
+        ...(cwd ? { cwd } : {}),
+        state: 'running',
+      }
+    } catch (error) {
+      if (isUnsupportedRpcError(error)) {
+        throw new DevCodexBridgeOperationError('STEER_NOT_SUPPORTED', 'The active Codex App Server does not support turn/steer.')
+      }
+      throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${activeTurnId} is no longer active.`)
+    }
+  }
+
+  const queuedMessage = await buildDevCodexMessage(threadId, message, dependencies.readPermissions)
+  if (input.mode === 'queue') {
+    await dependencies.appendQueuedMessage(threadId, queuedMessage)
+    const started = await queueProcessor.processThreadQueue(threadId, threadReadResult)
+    const queueState = await dependencies.readQueueState()
+    const stillQueued = (queueState[threadId] ?? []).some((entry) => entry.id === queuedMessage.id)
+    return {
+      threadId,
+      ...(started?.messageId === queuedMessage.id ? { turnId: started.turnId } : {}),
+      ...(cwd ? { cwd } : {}),
+      state: stillQueued ? 'queued' : 'running',
+    }
+  }
+
+  if (input.mode !== 'start') {
+    throw new DevCodexBridgeOperationError('INVALID_MODE', `Unsupported dispatch mode: ${String(input.mode)}`)
+  }
+  if (isDevCodexThreadBusy(threadReadResult)) {
+    throw new DevCodexBridgeOperationError('THREAD_BUSY', `Thread ${threadId} already has an active turn.`)
+  }
+  try {
+    const turnId = await queueProcessor.startMessageTurn(threadId, queuedMessage, { cwd })
+    return { threadId, turnId, ...(cwd ? { cwd } : {}), state: 'running' }
+  } catch (error) {
+    if (isBusyTurnError(error)) {
+      throw new DevCodexBridgeOperationError('THREAD_BUSY', `Thread ${threadId} became busy before turn/start.`)
+    }
+    throw appServerUnavailable(error, 'Unable to start the Codex turn.')
+  }
+}
+
+export async function readDevCodexTurnStatus(
+  appServer: RpcExecutor,
+  threadId: string,
+  turnId?: string,
+  dependencies: Pick<DevCodexDependencies, 'readQueueState'> = defaultDevCodexDependencies,
+): Promise<DevCodexDispatchResult & { error?: string; queuedCount?: number }> {
+  const normalizedThreadId = threadId.trim()
+  const normalizedTurnId = turnId?.trim() ?? ''
+  if (!normalizedThreadId) throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId is required')
+  const read = await readDevCodexThread(appServer, normalizedThreadId)
+  const response = asRecord(read)
+  const thread = asRecord(response?.thread) ?? response
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  const queueState = await dependencies.readQueueState()
+  const queuedCount = queueState[normalizedThreadId]?.length ?? 0
+
+  if (normalizedTurnId) {
+    const turn = turns.map(asRecord).find((entry) => readNonEmptyString(entry?.id) === normalizedTurnId)
+    if (!turn) throw new DevCodexBridgeOperationError('TURN_NOT_FOUND', `Turn ${normalizedTurnId} was not found in thread ${normalizedThreadId}.`)
+    return {
+      threadId: normalizedThreadId,
+      turnId: normalizedTurnId,
+      ...(cwd ? { cwd } : {}),
+      state: normalizeDevCodexTurnState(turn.status),
+      ...(readDevCodexTurnError(turn) ? { error: readDevCodexTurnError(turn) } : {}),
+      ...(queuedCount > 0 ? { queuedCount } : {}),
+    }
+  }
+
+  const activeTurnId = findActiveDevCodexTurnId(read)
+  if (activeTurnId) {
+    const active = turns.map(asRecord).find((entry) => readNonEmptyString(entry?.id) === activeTurnId)
+    const threadState = readNonEmptyString(asRecord(thread?.status)?.type)
+    return {
+      threadId: normalizedThreadId,
+      turnId: activeTurnId,
+      ...(cwd ? { cwd } : {}),
+      state: normalizeDevCodexTurnState(threadState || active?.status || 'inProgress'),
+      ...(queuedCount > 0 ? { queuedCount } : {}),
+    }
+  }
+  if (queuedCount > 0) {
+    return { threadId: normalizedThreadId, ...(cwd ? { cwd } : {}), state: 'queued', queuedCount }
+  }
+  const latest = asRecord(turns.at(-1))
+  return {
+    threadId: normalizedThreadId,
+    ...(readNonEmptyString(latest?.id) ? { turnId: readNonEmptyString(latest?.id) } : {}),
+    ...(cwd ? { cwd } : {}),
+    state: latest ? normalizeDevCodexTurnState(latest.status) : 'unknown',
+    ...(latest && readDevCodexTurnError(latest) ? { error: readDevCodexTurnError(latest) } : {}),
+  }
+}
+
+export async function interruptDevCodexTurn(
+  appServer: RpcExecutor,
+  threadId: string,
+  turnId: string,
+): Promise<DevCodexDispatchResult> {
+  const normalizedThreadId = threadId.trim()
+  const normalizedTurnId = turnId.trim()
+  if (!normalizedThreadId || !normalizedTurnId) {
+    throw new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId and turnId are required')
+  }
+  const read = await readDevCodexThread(appServer, normalizedThreadId)
+  const response = asRecord(read)
+  const thread = asRecord(response?.thread) ?? response
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  const exists = turns.some((turn) => readNonEmptyString(asRecord(turn)?.id) === normalizedTurnId)
+  if (!exists) throw new DevCodexBridgeOperationError('TURN_NOT_FOUND', `Turn ${normalizedTurnId} was not found in thread ${normalizedThreadId}.`)
+  if (findActiveDevCodexTurnId(read) !== normalizedTurnId) {
+    throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${normalizedTurnId} is not the active turn for thread ${normalizedThreadId}.`)
+  }
+  try {
+    await appServer.rpc('turn/interrupt', { threadId: normalizedThreadId, turnId: normalizedTurnId })
+  } catch (error) {
+    if (isUnsupportedRpcError(error)) {
+      throw new DevCodexBridgeOperationError('INTERRUPT_NOT_SUPPORTED', 'The active Codex App Server does not support turn/interrupt.')
+    }
+    throw new DevCodexBridgeOperationError('TURN_NOT_ACTIVE', `Turn ${normalizedTurnId} is no longer active.`)
+  }
+  const cwd = readNonEmptyString(thread?.cwd) || readNonEmptyString(response?.cwd)
+  return {
+    threadId: normalizedThreadId,
+    turnId: normalizedTurnId,
+    ...(cwd ? { cwd } : {}),
+    state: 'interrupt_requested',
+  }
+}
+
+async function buildDevCodexMessage(
+  threadId: string,
+  text: string,
+  readPermissions: () => Promise<PermissionState>,
+): Promise<StoredQueuedMessage> {
+  const permissionState = await readPermissions()
+  return {
+    id: `devcodex-${randomUUID()}`,
+    text,
+    imageUrls: [],
+    skills: [],
+    fileAttachments: [],
+    collaborationMode: 'default',
+    permissionPreset: permissionState.threadPresets[threadId] ?? permissionState.defaultPreset,
+  }
+}
+
+async function readDevCodexThread(appServer: RpcExecutor, threadId: string): Promise<unknown> {
+  try {
+    const result = await appServer.rpc('thread/read', { threadId, includeTurns: true })
+    const record = asRecord(result)
+    const thread = asRecord(record?.thread) ?? record
+    if (!readNonEmptyString(thread?.id) && !readNonEmptyString(record?.threadId)) {
+      throw new DevCodexBridgeOperationError('THREAD_NOT_FOUND', `Thread ${threadId} was not found.`)
+    }
+    return result
+  } catch (error) {
+    if (error instanceof DevCodexBridgeOperationError) throw error
+    if (isThreadNotFoundError(error)) {
+      throw new DevCodexBridgeOperationError('THREAD_NOT_FOUND', `Thread ${threadId} was not found.`)
+    }
+    throw appServerUnavailable(error, `Unable to read thread ${threadId}.`)
+  }
+}
+
+function findActiveDevCodexTurnId(value: unknown): string {
+  const response = asRecord(value)
+  const thread = asRecord(response?.thread) ?? response
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = asRecord(turns[index])
+    if (isActiveDevCodexTurnStatus(turn?.status)) return readNonEmptyString(turn?.id)
+  }
+  return ''
+}
+
+function normalizeDevCodexTurnState(value: unknown): DevCodexTurnState {
+  const status = readNonEmptyString(value)
+  if (status === 'inProgress' || status === 'in_progress' || status === 'running' || status === 'active') return 'running'
+  if (status === 'completed') return 'completed'
+  if (status === 'failed') return 'failed'
+  if (status === 'interrupted' || status === 'cancelled' || status === 'canceled') return 'interrupted'
+  if (status === 'waitingForApproval' || status === 'waiting_approval' || status === 'requiresApproval') return 'waiting_approval'
+  return 'unknown'
+}
+
+function isActiveDevCodexTurnStatus(value: unknown): boolean {
+  const state = normalizeDevCodexTurnState(value)
+  return state === 'running' || state === 'waiting_approval'
+}
+
+function readDevCodexTurnError(turn: Record<string, unknown>): string {
+  const error = asRecord(turn.error)
+  return readNonEmptyString(error?.message) || readNonEmptyString(error?.additionalDetails) || ''
+}
+
+function isUnsupportedRpcError(error: unknown): boolean {
+  return /unknown method|method not found|unsupported method|not supported/i.test(devCodexErrorMessage(error))
+}
+
+function isBusyTurnError(error: unknown): boolean {
+  return /active turn|turn.*in progress|thread.*busy|already.*running/i.test(devCodexErrorMessage(error))
+}
+
+function devCodexErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function appServerUnavailable(error: unknown, message: string): DevCodexBridgeOperationError {
+  const detail = devCodexErrorMessage(error).trim()
+  return new DevCodexBridgeOperationError('APP_SERVER_UNAVAILABLE', detail ? `${message} ${detail}` : message)
 }
 
 class MethodCatalog {
@@ -7569,6 +8402,7 @@ type SharedBridgeState = {
   methodCatalog: MethodCatalog
   telegramBridge: TelegramThreadBridge
   backendQueueProcessor: BackendQueueProcessor
+  stateNotificationListeners: Set<(notification: { method: string; params: unknown }) => void>
 }
 
 const SHARED_BRIDGE_KEY = '__codexRemoteSharedBridge__'
@@ -7598,6 +8432,7 @@ function getSharedBridgeState(): SharedBridgeState {
     terminalManager,
     methodCatalog: new MethodCatalog(),
     backendQueueProcessor,
+    stateNotificationListeners: new Set(),
     telegramBridge: new TelegramThreadBridge(appServer, {
       onChatSeen: (chatId) => {
         void rememberTelegramChatId(chatId).catch(() => {})
@@ -7606,6 +8441,16 @@ function getSharedBridgeState(): SharedBridgeState {
   }
   globalScope[SHARED_BRIDGE_KEY] = created
   return created
+}
+
+function emitBridgeStateNotification(
+  bridgeState: SharedBridgeState,
+  method: string,
+  params: unknown,
+): void {
+  for (const listener of bridgeState.stateNotificationListeners) {
+    listener({ method, params })
+  }
 }
 
 async function loadAllThreadsForSearch(appServer: AppServerProcess): Promise<ThreadSearchDocument[]> {
@@ -7645,50 +8490,54 @@ async function loadAllThreadsForSearch(appServer: AppServerProcess): Promise<Thr
     } satisfies ThreadSearchDocument
   })
 
-  const docsById = new Map<string, ThreadSearchDocument>(docs.map((doc) => [doc.id, doc]))
-  const fullTextThreads = threads.slice(0, THREAD_SEARCH_FULL_TEXT_THREAD_LIMIT)
-  const concurrency = 4
-  for (let offset = 0; offset < fullTextThreads.length; offset += concurrency) {
-    const batch = fullTextThreads.slice(offset, offset + concurrency)
-    const loaded = await Promise.all(batch.map(async (thread) => {
-      try {
-        const readResponse = await appServer.rpc('thread/read', {
-          threadId: thread.id,
-          includeTurns: true,
-        })
-        const messageText = extractThreadMessageText(readResponse)
-        const searchableText = [thread.title, thread.preview, messageText].filter(Boolean).join('\n')
-        return [thread.id, {
-          id: thread.id,
-          title: thread.title,
-          preview: thread.preview,
-          messageText,
-          searchableText,
-        } satisfies ThreadSearchDocument] as const
-      } catch {
-        return null
-      }
-    }))
-    for (const row of loaded) {
-      if (!row) continue
-      docsById.set(row[0], row[1])
-    }
-  }
-
-  return Array.from(docsById.values())
+  return docs
 }
 
 async function buildThreadSearchIndex(appServer: AppServerProcess): Promise<ThreadSearchIndex> {
   const docs = await loadAllThreadsForSearch(appServer)
   const docsById = new Map<string, ThreadSearchDocument>(docs.map((doc) => [doc.id, doc]))
-  return { docsById }
+  return { docsById, pendingThreadIds: new Set(docsById.keys()), isIndexing: docsById.size > 0 }
 }
 
 export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
-  const { appServer, terminalManager, methodCatalog, telegramBridge, backendQueueProcessor } = getSharedBridgeState()
+  const bridgeState = getSharedBridgeState()
+  const { appServer, terminalManager, methodCatalog, telegramBridge, backendQueueProcessor } = bridgeState
   const workspaceRootsCompatibilityMigration = migrateWorkspaceRootsStateCompatibility().catch(() => false)
   let threadSearchIndex: ThreadSearchIndex | null = null
   let threadSearchIndexPromise: Promise<ThreadSearchIndex> | null = null
+
+  function invalidateThreadSearchIndex(): void {
+    threadSearchIndex = null
+  }
+
+  function continueThreadSearchIndexing(index: ThreadSearchIndex): void {
+    const threadIds = [...index.pendingThreadIds]
+    const concurrency = 4
+    void (async () => {
+      for (let offset = 0; offset < threadIds.length; offset += concurrency) {
+        if (threadSearchIndex !== index) return
+        const batch = threadIds.slice(offset, offset + concurrency)
+        await Promise.all(batch.map(async (threadId) => {
+          const current = index.docsById.get(threadId)
+          if (!current) return
+          try {
+            const response = await appServer.rpc('thread/read', { threadId, includeTurns: true })
+            const messageText = extractThreadMessageText(response)
+            index.docsById.set(threadId, {
+              ...current,
+              messageText,
+              searchableText: [current.title, current.preview, messageText].filter(Boolean).join('\n'),
+            })
+          } catch {
+            // Leave metadata searchable when an individual historical thread cannot be read.
+          } finally {
+            index.pendingThreadIds.delete(threadId)
+          }
+        }))
+      }
+      if (threadSearchIndex === index) index.isIndexing = false
+    })()
+  }
 
   async function getThreadSearchIndex(): Promise<ThreadSearchIndex> {
     if (threadSearchIndex) return threadSearchIndex
@@ -7696,6 +8545,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       threadSearchIndexPromise = buildThreadSearchIndex(appServer)
         .then((index) => {
           threadSearchIndex = index
+          continueThreadSearchIndexing(index)
           return index
         })
         .finally(() => {
@@ -8043,6 +8893,24 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      if (req.method === 'POST' && url.pathname === '/codex-api/runtime/reload') {
+        try {
+          await appServer.reload()
+          const [config, models] = await Promise.all([
+            appServer.rpc('config/read', {}),
+            appServer.rpc('model/list', {}),
+          ])
+          setJson(res, 200, { ok: true, config, models, reloadedAt: new Date().toISOString() })
+        } catch (error) {
+          setJson(res, 503, { error: getErrorMessage(error, 'Failed to reload Codex app-server') })
+        }
+        return
+      }
+
+      if (await handleCcSwitchRoutes(req, res, url, { appServer, readJsonBody })) {
+        return
+      }
+
       if (await handleAccountRoutes(req, res, url, { appServer })) {
         return
       }
@@ -8166,6 +9034,121 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      const devCodexBridgePrefix = '/codex-api/integrations/devcodex/v2'
+      if (req.method === 'GET' && url.pathname === `${devCodexBridgePrefix}/health`) {
+        setJson(res, 200, {
+          ok: true,
+          bridgeVersion: 2,
+          appServer: appServer.getLifecycleStatus(),
+        })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === `${devCodexBridgePrefix}/threads`) {
+        const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '20', 10)
+        const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 20))
+        const cwd = url.searchParams.get('cwd')?.trim() ?? ''
+        try {
+          const result = await callRpcWithArchiveRecovery(appServer, 'thread/list', {
+            limit,
+            sortKey: 'updated_at',
+            sortDirection: 'desc',
+            ...(cwd ? { cwd } : {}),
+          })
+          setJson(res, 200, {
+            bridgeVersion: 2,
+            result: mergeImportedThreadsIntoThreadListResult(result),
+          })
+        } catch (error) {
+          setDevCodexBridgeError(res, appServerUnavailable(error, 'Unable to list Codex threads.'))
+        }
+        return
+      }
+
+      const devCodexThreadMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)$`).exec(url.pathname)
+      if (req.method === 'GET' && devCodexThreadMatch) {
+        const threadId = decodeURIComponent(devCodexThreadMatch[1] ?? '').trim()
+        if (!threadId) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'threadId is required'))
+          return
+        }
+        try {
+          const result = await readDevCodexThread(appServer, threadId)
+          const trimmedResult = trimThreadTurnsInRpcResult('thread/read', result)
+          const errorMergedResult = mergeStreamTurnErrorsIntoThreadResult(appServer, trimmedResult)
+          const sanitizedResult = await sanitizeThreadTurnsInlinePayloads('thread/read', errorMergedResult)
+          setJson(res, 200, {
+            bridgeVersion: 2,
+            result: await mergeSessionSkillInputsIntoThreadResult(sanitizedResult),
+          })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === `${devCodexBridgePrefix}/dispatch`) {
+        const payload = asRecord(await readJsonBody(req))
+        const target = asRecord(payload?.target)
+        const message = readNonEmptyString(payload?.message)
+        const mode = readNonEmptyString(payload?.mode)
+        const targetType = readNonEmptyString(target?.type)
+        if (!message || !mode || (targetType !== 'new' && targetType !== 'thread')) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_ARGUMENT', 'message, mode, and a valid target are required'))
+          return
+        }
+        const dispatchTarget = targetType === 'new'
+          ? { type: 'new' as const, cwd: readNonEmptyString(target?.cwd) }
+          : { type: 'thread' as const, threadId: readNonEmptyString(target?.threadId) }
+        if ((dispatchTarget.type === 'new' && !dispatchTarget.cwd) || (dispatchTarget.type === 'thread' && !dispatchTarget.threadId)) {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_TARGET', 'The dispatch target is incomplete'))
+          return
+        }
+        if (mode !== 'start' && mode !== 'queue' && mode !== 'steer') {
+          setDevCodexBridgeError(res, new DevCodexBridgeOperationError('INVALID_MODE', `Unsupported dispatch mode: ${mode}`))
+          return
+        }
+        try {
+          if (dispatchTarget.type === 'new') await ensureWorkspaceRootForThread(dispatchTarget.cwd)
+          const dispatched = await dispatchDevCodex(appServer, backendQueueProcessor, {
+            message,
+            target: dispatchTarget,
+            mode,
+          })
+          emitBridgeStateNotification(bridgeState, 'bridge/threadQueueStateChanged', { threadId: dispatched.threadId })
+          setJson(res, 202, { bridgeVersion: 2, data: dispatched })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      const devCodexStatusMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)/turn-status$`).exec(url.pathname)
+      if (req.method === 'GET' && devCodexStatusMatch) {
+        const threadId = decodeURIComponent(devCodexStatusMatch[1] ?? '').trim()
+        const turnId = url.searchParams.get('turnId')?.trim() || undefined
+        try {
+          const status = await readDevCodexTurnStatus(appServer, threadId, turnId)
+          setJson(res, 200, { bridgeVersion: 2, data: status })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
+      const devCodexInterruptMatch = new RegExp(`^${devCodexBridgePrefix}/threads/([^/]+)/turns/([^/]+)/interrupt$`).exec(url.pathname)
+      if (req.method === 'POST' && devCodexInterruptMatch) {
+        const threadId = decodeURIComponent(devCodexInterruptMatch[1] ?? '').trim()
+        const turnId = decodeURIComponent(devCodexInterruptMatch[2] ?? '').trim()
+        try {
+          const status = await interruptDevCodexTurn(appServer, threadId, turnId)
+          setJson(res, 202, { bridgeVersion: 2, data: status })
+        } catch (error) {
+          setDevCodexBridgeError(res, error)
+        }
+        return
+      }
+
       if (req.method === 'POST' && url.pathname === '/codex-api/rpc') {
         const payload = await readJsonBody(req)
         const body = asRecord(payload) as RpcProxyRequest | null
@@ -8188,6 +9171,12 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 	          setJson(res, 200, { result: null })
 	          return
 	        }
+
+        if (body.method === 'thread/start') {
+          const params = asRecord(body.params)
+          const cwd = readNonEmptyString(params?.cwd)
+          if (cwd && !isProjectlessChatPath(cwd)) await ensureWorkspaceRootForThread(cwd)
+        }
 
         let rpcResult: unknown
         try {
@@ -8222,8 +9211,15 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
               return
             }
           }
-		          throw error
-		        }
+	          throw error
+	        }
+        if (body.method === 'thread/list') {
+          const listResult = asRecord(rpcResult)
+          const rows = Array.isArray(listResult?.data) ? listResult.data : []
+          if (await recoverWorkspaceRootsForRunningThreads(rows)) {
+            rpcResult = { ...listResult, workspaceRootsRecovered: true }
+          }
+        }
         const trimmedResult = trimThreadTurnsInRpcResult(body.method, rpcResult)
         const errorMergedResult = THREAD_METHODS_WITH_TURNS.has(body.method)
           ? mergeStreamTurnErrorsIntoThreadResult(appServer, trimmedResult)
@@ -8726,6 +9722,41 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       if (req.method === 'GET' && url.pathname === '/codex-api/thread-queue-state') {
         const state = await readThreadQueueState()
         setJson(res, 200, { data: state })
+        return
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/codex-api/workspace-roots-order') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.projectOrder)) {
+          setJson(res, 400, { error: 'Invalid body: expected { projectOrder: string[] }' })
+          return
+        }
+        setJson(res, 200, { data: await reorderWorkspaceRoots(normalizeStringArray(record.projectOrder)) })
+        return
+      }
+
+      if (req.method === 'PATCH' && url.pathname === '/codex-api/workspace-roots-label') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.rootPaths) || typeof record.label !== 'string') {
+          setJson(res, 400, { error: 'Invalid body: expected { rootPaths: string[], label: string }' })
+          return
+        }
+        setJson(res, 200, { data: await renameWorkspaceRoots(normalizeStringArray(record.rootPaths), record.label) })
+        return
+      }
+
+      if (req.method === 'DELETE' && url.pathname === '/codex-api/workspace-roots') {
+        const record = asRecord(await readJsonBody(req))
+        if (!record || !Array.isArray(record.rootPaths)) {
+          setJson(res, 400, { error: 'Invalid body: expected { rootPaths: string[] }' })
+          return
+        }
+        setJson(res, 200, { data: await removeWorkspaceRoots(normalizeStringArray(record.rootPaths)) })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/permission-state') {
+        setJson(res, 200, { data: await readPermissionState() })
         return
       }
 
@@ -9309,15 +10340,27 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 400, { error: 'Invalid body: expected object' })
           return
         }
-        await updateWorkspaceRootsState((existingState) => ({
-          order: normalizeStringArray(record.order),
-          labels: normalizeStringRecord(record.labels),
-          active: normalizeStringArray(record.active),
-          projectOrder: Array.isArray(record.projectOrder)
+        await updateWorkspaceRootsState((existingState) => {
+          const incomingOrder = normalizeStringArray(record.order)
+          const knownOrder = [...incomingOrder, ...existingState.order.filter((rootPath) => !incomingOrder.some(
+            (item) => workspaceRootComparisonKey(item) === workspaceRootComparisonKey(rootPath),
+          ))]
+          const incomingProjectOrder = Array.isArray(record.projectOrder)
             ? normalizeStringArray(record.projectOrder)
-            : existingState.projectOrder,
-          remoteProjects: existingState.remoteProjects,
-        }))
+            : []
+          const projectOrder = [...incomingProjectOrder, ...existingState.projectOrder.filter((item) => !incomingProjectOrder.some(
+            (candidate) => workspaceRootComparisonKey(candidate) === workspaceRootComparisonKey(item),
+          ))]
+          return {
+            order: knownOrder,
+            labels: { ...existingState.labels, ...normalizeStringRecord(record.labels) },
+            active: normalizeStringArray(record.active).filter((rootPath) => knownOrder.some(
+              (item) => workspaceRootComparisonKey(item) === workspaceRootComparisonKey(rootPath),
+            )),
+            projectOrder,
+            remoteProjects: existingState.remoteProjects,
+          }
+        })
         setJson(res, 200, { ok: true })
         return
       }
@@ -9331,6 +10374,17 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         }
         await writeThreadQueueState(normalizeThreadQueueState(record))
         void backendQueueProcessor.scheduleAllQueuedThreads()
+        setJson(res, 200, { ok: true })
+        return
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/codex-api/permission-state') {
+        const payload = asRecord(await readJsonBody(req))
+        if (!payload) {
+          setJson(res, 400, { error: 'Invalid body: expected object' })
+          return
+        }
+        await writePermissionState(normalizePermissionState(payload, resolveDefaultPermissionPreset()))
         setJson(res, 200, { ok: true })
         return
       }
@@ -9464,6 +10518,18 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      if (req.method === 'POST' && url.pathname === '/codex-api/projectless-thread-cwd') {
+        const payload = asRecord(await readJsonBody(req))
+        const prompt = typeof payload?.prompt === 'string' ? payload.prompt : null
+        try {
+          const directory = await createProjectlessThreadDirectory(prompt)
+          setJson(res, 200, { data: directory })
+        } catch (error) {
+          setJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to create new chat folder' })
+        }
+        return
+      }
+
       if (req.method === 'POST' && url.pathname === '/codex-api/github-clone') {
         const payload = asRecord(await readJsonBody(req))
         const repoUrl = typeof payload?.url === 'string' ? payload.url.trim() : ''
@@ -9473,18 +10539,6 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: { path: clonedPath } })
         } catch (error) {
           setJson(res, 400, { error: error instanceof Error ? error.message : 'Failed to clone GitHub repository' })
-        }
-        return
-      }
-
-      if (req.method === 'POST' && url.pathname === '/codex-api/projectless-thread-cwd') {
-        const payload = asRecord(await readJsonBody(req))
-        const prompt = typeof payload?.prompt === 'string' ? payload.prompt : null
-        try {
-          const directory = await createProjectlessThreadDirectory(prompt)
-          setJson(res, 200, { data: directory })
-        } catch (error) {
-          setJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to create new chat folder' })
         }
         return
       }
@@ -9562,6 +10616,90 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
+      if (req.method === 'GET' && url.pathname === '/codex-api/global-instructions') {
+        try {
+          setJson(res, 200, { data: await readGlobalInstructions() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load global instructions') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/activity-summary') {
+        try {
+          setJson(res, 200, { data: readCodexActivitySummary() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load activity summary') })
+        }
+        return
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/codex-api/global-instructions') {
+        const payload = asRecord(await readJsonBody(req))
+        if (typeof payload?.content !== 'string') {
+          setJson(res, 400, { error: 'content must be a string' })
+          return
+        }
+        try {
+          setJson(res, 200, { data: await writeGlobalInstructions(payload.content) })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to save global instructions') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/chatgpt-conversations') {
+        try {
+          const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') ?? '0', 10) || 0)
+          const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50))
+          const payload = asRecord(await fetchChatgptBackend(`/conversations?limit=${limit}&offset=${offset}&order=updated&is_archived=false&hide_snorlax=true`))
+          const rows = Array.isArray(payload?.items) ? payload.items : []
+          const data = rows.flatMap((value) => {
+            const row = asRecord(value)
+            if (!row) return []
+            const conversationId = readNonEmptyString(row.conversation_id ?? row.conversationId ?? row.id)
+            if (!conversationId) return []
+            return [{
+              conversationId,
+              title: readNonEmptyString(row.title) ?? 'Untitled conversation',
+              updatedAt: readNonEmptyString(row.update_time ?? row.updatedAt ?? row.updated_at),
+            }]
+          })
+          const total = typeof payload?.total === 'number' ? payload.total : null
+          const nextOffset = total !== null
+            ? offset + data.length < total ? offset + data.length : null
+            : data.length === limit ? offset + data.length : null
+          setJson(res, 200, { data, nextOffset })
+        } catch (error) {
+          setJson(res, 502, { error: getErrorMessage(error, 'Failed to load ChatGPT conversations') })
+        }
+        return
+      }
+
+      const chatgptConversationMatch = /^\/codex-api\/chatgpt-conversations\/([^/]+)$/.exec(url.pathname)
+      if (req.method === 'GET' && chatgptConversationMatch) {
+        const conversationId = decodeURIComponent(chatgptConversationMatch[1] ?? '').trim()
+        if (!conversationId) {
+          setJson(res, 400, { error: 'Missing conversation id' })
+          return
+        }
+        try {
+          const payload = asRecord(await fetchChatgptBackend(`/conversation/${encodeURIComponent(conversationId)}`))
+          const actualId = readNonEmptyString(payload?.conversation_id ?? payload?.conversationId ?? payload?.id) ?? conversationId
+          setJson(res, 200, {
+            data: {
+              conversationId: actualId,
+              title: readNonEmptyString(payload?.title) ?? 'Untitled conversation',
+              updatedAt: readNonEmptyString(payload?.update_time ?? payload?.updatedAt ?? payload?.updated_at),
+              preview: extractChatgptPreview(payload),
+            },
+          })
+        } catch (error) {
+          setJson(res, 502, { error: getErrorMessage(error, 'Failed to load ChatGPT conversation') })
+        }
+        return
+      }
+
       if (req.method === 'GET' && url.pathname === '/codex-api/prompts') {
         setJson(res, 200, { data: await listComposerPrompts() })
         return
@@ -9607,6 +10745,24 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 
       if (req.method === 'GET' && url.pathname === '/codex-api/thread-pins') {
         const threadIds = await readPinnedThreadIds()
+        setJson(res, 200, { data: { threadIds } })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/thread-unread-state') {
+        setJson(res, 200, { data: { threadIds: await readThreadUnreadState() } })
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/thread-unread-state') {
+        const payload = asRecord(await readJsonBody(req))
+        const threadId = typeof payload?.threadId === 'string' ? payload.threadId.trim() : ''
+        if (!threadId || typeof payload?.unread !== 'boolean') {
+          setJson(res, 400, { error: 'threadId and unread are required' })
+          return
+        }
+        const threadIds = await setThreadUnreadState(threadId, payload.unread)
+        emitBridgeStateNotification(bridgeState, 'bridge/threadUnreadStateChanged', { threadIds })
         setJson(res, 200, { data: { threadIds } })
         return
       }
@@ -9663,7 +10819,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         const limitRaw = typeof payload?.limit === 'number' ? payload.limit : 200
         const limit = Math.max(1, Math.min(1000, Math.floor(limitRaw)))
         if (!query) {
-          setJson(res, 200, { data: { threadIds: [], indexedThreadCount: 0 } })
+          setJson(res, 200, { data: { threadIds: [], indexedThreadCount: 0, totalThreadCount: 0, isIndexing: false } })
           return
         }
 
@@ -9673,7 +10829,14 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           .slice(0, limit)
           .map(([id]) => id)
 
-        setJson(res, 200, { data: { threadIds: matchedIds, indexedThreadCount: index.docsById.size } })
+        setJson(res, 200, {
+          data: {
+            threadIds: matchedIds,
+            indexedThreadCount: index.docsById.size - index.pendingThreadIds.size,
+            totalThreadCount: index.docsById.size,
+            isIndexing: index.isIndexing,
+          },
+        })
         return
       }
 
@@ -9759,7 +10922,9 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 404, { error: 'Automation not found for thread' })
           return
         }
-        await appendThreadQueuedMessage(threadId, buildHeartbeatQueuedMessage(automation))
+        const permissionState = await readPermissionState()
+        const permissionPreset = permissionState.threadPresets[threadId] ?? permissionState.defaultPreset
+        await appendThreadQueuedMessage(threadId, buildHeartbeatQueuedMessage(automation, permissionPreset))
         backendQueueProcessor.scheduleThreadQueueDrain(threadId, 0)
         setJson(res, 200, { data: { queued: true } })
         return
@@ -9883,6 +11048,15 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
     listener: (value: { method: string; params: unknown; atIso: string }) => void,
   ) => {
     const unsubscribeAppServer = appServer.onNotification((notification: { method: string; params: unknown }) => {
+      if (
+        notification.method === 'turn/completed' ||
+        notification.method === 'thread/created' ||
+        notification.method === 'thread/archived' ||
+        notification.method === 'thread/unarchived' ||
+        notification.method === 'thread/name/updated'
+      ) {
+        invalidateThreadSearchIndex()
+      }
       listener({
         ...notification,
         atIso: new Date().toISOString(),
@@ -9894,9 +11068,14 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         atIso: new Date().toISOString(),
       })
     })
+    const unsubscribeBridgeState = (notification: { method: string; params: unknown }) => {
+      listener({ ...notification, atIso: new Date().toISOString() })
+    }
+    bridgeState.stateNotificationListeners.add(unsubscribeBridgeState)
     return () => {
       unsubscribeAppServer()
       unsubscribeTerminal()
+      bridgeState.stateNotificationListeners.delete(unsubscribeBridgeState)
     }
   }
 

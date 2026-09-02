@@ -58,6 +58,14 @@ import type {
   UiThreadAutomationStatus,
 } from '../types/codex'
 import { normalizePathForUi } from '../pathUtils.js'
+import {
+  inferPermissionPresetFromSettings,
+  normalizePermissionPreset,
+  normalizePermissionState,
+  type PermissionConfig,
+  type PermissionPreset,
+  type PermissionState,
+} from '../permissions'
 
 type CurrentModelConfig = {
   model: string
@@ -299,6 +307,40 @@ export type StoredQueuedMessage = {
   skills: Array<{ name: string; path: string }>
   fileAttachments: Array<{ label: string; path: string; fsPath: string }>
   collaborationMode: CollaborationModeKind
+  permissionPreset: PermissionPreset
+}
+
+export type ChatGptConversationSummary = {
+  conversationId: string
+  title: string
+  updatedAt: string | null
+}
+
+export type ChatGptPriorConversation = {
+  conversation: Array<{
+    role: 'user' | 'assistant'
+    content: Array<{ content_type: 'text'; text: string }>
+  }>
+  diff: null
+}
+
+export type ChatGptConversationPreview = ChatGptConversationSummary & {
+  preview: ChatGptPriorConversation | null
+}
+
+export type ChatGptConversationPage = {
+  conversations: ChatGptConversationSummary[]
+  nextOffset: number | null
+}
+
+export type GlobalInstructionsState = {
+  content: string
+  path: string
+  targetPath: string | null
+  isSymlink: boolean
+  overridePath: string
+  overrideActive: boolean
+  effectiveSource: 'AGENTS.override.md' | 'AGENTS.md' | 'none'
 }
 
 export type ThreadQueueState = Record<string, StoredQueuedMessage[]>
@@ -362,6 +404,8 @@ export type GitRepositoryStatus = {
 export type ThreadSearchResult = {
   threadIds: string[]
   indexedThreadCount: number
+  totalThreadCount: number
+  isIndexing: boolean
 }
 
 export type TelegramStatus = {
@@ -556,9 +600,9 @@ export function pickCodexRateLimitSnapshot(payload: unknown): UiRateLimitSnapsho
   return normalizeRateLimitSnapshot(record.rateLimits ?? record.rate_limits)
 }
 
-async function callRpc<T>(method: string, params?: unknown): Promise<T> {
+async function callRpc<T>(method: string, params?: unknown, options?: { timeoutMs?: number }): Promise<T> {
   try {
-    return await rpcCall<T>(method, params)
+    return await rpcCall<T>(method, params, options)
   } catch (error) {
     throw normalizeCodexApiError(error, `RPC ${method} failed`, method)
   }
@@ -724,6 +768,7 @@ const BACKGROUND_THREAD_LIST_LIMIT = 100
 export type ThreadGroupsPage = {
   groups: UiProjectGroup[]
   nextCursor: string | null
+  workspaceRootsRecovered: boolean
 }
 
 export type ThreadTurnPage = {
@@ -735,19 +780,22 @@ export type ThreadTurnPage = {
   turnIndexByTurnId: ThreadTurnIndexById
 }
 
-async function getThreadGroupsPageV2(cursor: string | null, limit: number): Promise<ThreadGroupsPage> {
+async function getThreadGroupsPageV2(cursor: string | null, limit: number, archived = false): Promise<ThreadGroupsPage> {
   const payload = await callRpc<ThreadListResponse>('thread/list', {
-    archived: false,
+    archived,
     limit,
     sortKey: 'updated_at',
     modelProviders: [],
     cursor,
   })
+  const workspaceRootsRecovered = (payload as Record<string, unknown>).workspaceRootsRecovered === true
+  if (workspaceRootsRecovered) invalidateWorkspaceRootsStateCache()
   return {
     groups: normalizeThreadGroupsV2(payload),
     nextCursor: typeof payload.nextCursor === 'string' && payload.nextCursor.length > 0
       ? payload.nextCursor
       : null,
+    workspaceRootsRecovered,
   }
 }
 
@@ -779,7 +827,7 @@ async function getThreadDetailV2(threadId: string): Promise<{
   const payload = await callRpc<ThreadReadResponse>('thread/read', {
     threadId,
     includeTurns: true,
-  })
+  }, { timeoutMs: 15_000 })
   const startTurnIndex = readThreadTurnStartIndex(payload)
   const normalized = normalizeThreadMessagesV2(payload, startTurnIndex)
   return {
@@ -1439,6 +1487,71 @@ export async function refreshAccountsFromAuth(): Promise<AccountsListResult> {
   return normalizeAccountsListResult(envelope?.data)
 }
 
+export async function getArchivedThreadGroupsPage(
+  cursor: string | null = null,
+  limit = INITIAL_THREAD_LIST_LIMIT,
+): Promise<ThreadGroupsPage> {
+  try {
+    return await getThreadGroupsPageV2(cursor, limit, true)
+  } catch (error) {
+    throw normalizeCodexApiError(error, 'Failed to load archived thread groups', 'thread/list')
+  }
+}
+
+export async function reloadCodexAppServer(): Promise<void> {
+  const response = await fetch('/codex-api/runtime/reload', { method: 'POST' })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to reload Codex app-server'))
+  }
+}
+
+export type CcSwitchProvider = {
+  id: string
+  name: string
+  category: 'official' | 'third-party'
+  current: boolean
+  compatible: boolean
+  incompatibilityReason: string
+  model: string
+  endpointHost: string
+}
+
+export type CcSwitchStatus = {
+  available: boolean
+  switchable: boolean
+  reason: string
+  schemaVersion: number | null
+  currentProviderId: string
+  preserveOfficialAuth: boolean
+  unifyHistory: boolean
+  proxyTakeoverActive: boolean
+  switchingProviderId: string
+  providers: CcSwitchProvider[]
+}
+
+export async function getCcSwitchStatus(): Promise<CcSwitchStatus> {
+  const response = await fetch('/codex-api/cc-switch/status', { cache: 'no-store' })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to load CC Switch providers'))
+  }
+  return payload as CcSwitchStatus
+}
+
+export async function switchCcSwitchProvider(providerId: string): Promise<CcSwitchStatus> {
+  const response = await fetch('/codex-api/cc-switch/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ providerId }),
+  })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to switch CC Switch provider'))
+  }
+  return payload as CcSwitchStatus
+}
+
 export async function startCodexLogin(): Promise<string> {
   const response = await fetch('/codex-api/accounts/login/start', {
     method: 'POST',
@@ -1506,6 +1619,8 @@ export async function removeAccount(storageId: string): Promise<AccountsListResu
 export type ResumedThread = {
   model: string
   modelProvider: string
+  reasoningEffort: ReasoningEffort | null
+  permissionPreset: PermissionPreset | null
   messages: UiMessage[]
   inProgress: boolean
   activeTurnId: string
@@ -1521,12 +1636,14 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
   if (existing) return existing
 
   const promise = (async () => {
-    const payload = await callRpc<ThreadResumeResponse>('thread/resume', { threadId })
+    const payload = await callRpc<ThreadResumeResponse>('thread/resume', { threadId }, { timeoutMs: 15_000 })
     const startTurnIndex = readThreadTurnStartIndex(payload)
     const messages = normalizeThreadMessagesV2(payload, startTurnIndex)
     return {
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      reasoningEffort: normalizeThreadReasoningEffortFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
       messages,
       inProgress: readThreadInProgressFromResponse(payload),
       activeTurnId: readActiveTurnIdFromResponse(payload),
@@ -1554,6 +1671,10 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
 
 export async function archiveThread(threadId: string): Promise<void> {
   await callRpc('thread/archive', { threadId })
+}
+
+export async function unarchiveThread(threadId: string): Promise<void> {
+  await callRpc('thread/unarchive', { threadId })
 }
 
 export async function renameThread(threadId: string, threadName: string): Promise<void> {
@@ -1661,10 +1782,35 @@ function normalizeThreadModelProviderFromPayload(payload: unknown): string {
   return readString(thread?.modelProvider)?.trim() ?? ''
 }
 
+function normalizeThreadReasoningEffortFromPayload(payload: unknown): ReasoningEffort | null {
+  const record = asRecord(payload)
+  if (!record) return null
+  const value = record.reasoningEffort ?? record.reasoning_effort
+  return isReasoningEffort(value) ? value : null
+}
+
+function readPermissionPresetFromThreadPayload(payload: unknown): PermissionPreset | null {
+  const record = asRecord(payload)
+  return inferPermissionPresetFromSettings(
+    record?.approvalPolicy,
+    record?.sandbox ?? record?.sandboxPolicy,
+    record?.approvalsReviewer,
+  )
+}
+
 export type StartedThread = {
   threadId: string
+  cwd: string
   model: string
   modelProvider: string
+  permissionPreset: PermissionPreset | null
+}
+
+export type StartThreadOptions = {
+  cwd?: string
+  outputDirectory?: string
+  workspaceRoot?: string
+  model?: string
 }
 
 export type ForkedThread = {
@@ -1674,14 +1820,20 @@ export type ForkedThread = {
   messages: UiMessage[]
 }
 
-export async function startThread(cwd?: string, model?: string): Promise<StartedThread> {
+export async function startThread(options: StartThreadOptions = {}): Promise<StartedThread> {
   try {
     const params: Record<string, unknown> = {}
-    if (typeof cwd === 'string' && cwd.trim().length > 0) {
-      params.cwd = cwd.trim()
+    if (typeof options.cwd === 'string' && options.cwd.trim().length > 0) {
+      params.cwd = options.cwd.trim()
     }
-    if (typeof model === 'string' && model.trim().length > 0) {
-      params.model = model.trim()
+    if (typeof options.outputDirectory === 'string' && options.outputDirectory.trim().length > 0) {
+      params.outputDirectory = options.outputDirectory.trim()
+    }
+    if (typeof options.workspaceRoot === 'string' && options.workspaceRoot.trim().length > 0) {
+      params.workspaceRoot = options.workspaceRoot.trim()
+    }
+    if (typeof options.model === 'string' && options.model.trim().length > 0) {
+      params.model = options.model.trim()
     }
     const payload = await callRpc<ThreadStartResponse>('thread/start', params)
     const threadId = normalizeThreadIdFromPayload(payload)
@@ -1690,8 +1842,10 @@ export async function startThread(cwd?: string, model?: string): Promise<Started
     }
     return {
       threadId,
+      cwd: normalizeThreadCwdFromPayload(payload),
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
     }
   } catch (error) {
     throw normalizeCodexApiError(error, 'Failed to start a new thread', 'thread/start')
@@ -1747,8 +1901,10 @@ export async function forkThread(
     }
     return {
       threadId: nextThreadId,
+      cwd: normalizeThreadCwdFromPayload(payload),
       model: normalizeThreadModelFromPayload(payload),
       modelProvider: normalizeThreadModelProviderFromPayload(payload),
+      permissionPreset: readPermissionPresetFromThreadPayload(payload),
     }
   } catch (error) {
     throw normalizeCodexApiError(error, `Failed to fork thread ${threadId}`, 'thread/fork')
@@ -1785,6 +1941,42 @@ function fileNameFromPath(pathValue: string): string {
   const normalized = pathValue.replace(/\\/g, '/')
   const segments = normalized.split('/').filter(Boolean)
   return segments.at(-1) ?? normalized
+}
+
+function buildTurnInput(
+  text: string,
+  imageUrls: string[] = [],
+  skills: Array<{ name: string; path: string }> | undefined,
+  fileAttachments: FileAttachmentParam[] = [],
+): { input: Array<Record<string, unknown>>; attachments: FileAttachmentParam[] } {
+  const localImageAttachments: FileAttachmentParam[] = []
+  for (const imageUrl of imageUrls) {
+    const localImagePath = extractLocalImagePathFromUrl(imageUrl.trim())
+    if (!localImagePath) continue
+    localImageAttachments.push({
+      label: fileNameFromPath(localImagePath),
+      path: localImagePath,
+      fsPath: localImagePath,
+    })
+  }
+  const allFileAttachments = [...fileAttachments, ...localImageAttachments]
+  const attachments = allFileAttachments.filter((entry, index) =>
+    allFileAttachments.findIndex((candidate) => candidate.fsPath === entry.fsPath) === index)
+  const input: Array<Record<string, unknown>> = [{ type: 'text', text: buildTextWithAttachments(text, attachments) }]
+  for (const imageUrl of imageUrls) {
+    const normalizedUrl = imageUrl.trim()
+    if (!normalizedUrl) continue
+    const localImagePath = extractLocalImagePathFromUrl(normalizedUrl)
+    if (localImagePath) {
+      input.push({ type: 'localImage', path: localImagePath })
+      continue
+    }
+    input.push({ type: 'image', url: normalizedUrl, image_url: normalizedUrl })
+  }
+  for (const skill of skills ?? []) {
+    input.push({ type: 'skill', name: skill.name, path: skill.path })
+  }
+  return { input, attachments }
 }
 
 async function resolveCollaborationModeSettings(
@@ -1848,50 +2040,22 @@ export async function startThreadTurn(
   skills?: Array<{ name: string; path: string }>,
   fileAttachments: FileAttachmentParam[] = [],
   collaborationMode?: CollaborationModeKind,
+  permissionConfig?: PermissionConfig,
 ): Promise<string> {
   try {
     const normalizedModel = model?.trim() ?? ''
-    const localImageAttachments: FileAttachmentParam[] = []
-    for (const imageUrl of imageUrls) {
-      const localImagePath = extractLocalImagePathFromUrl(imageUrl.trim())
-      if (!localImagePath) continue
-      localImageAttachments.push({
-        label: fileNameFromPath(localImagePath),
-        path: localImagePath,
-        fsPath: localImagePath,
-      })
-    }
-    const allFileAttachments = [...fileAttachments, ...localImageAttachments]
-    const dedupedFileAttachments = allFileAttachments.filter((entry, index) =>
-      allFileAttachments.findIndex((candidate) => candidate.fsPath === entry.fsPath) === index)
-    const finalText = buildTextWithAttachments(text, dedupedFileAttachments)
-    const input: Array<Record<string, unknown>> = [{ type: 'text', text: finalText }]
-    for (const imageUrl of imageUrls) {
-      const normalizedUrl = imageUrl.trim()
-      if (!normalizedUrl) continue
-      const localImagePath = extractLocalImagePathFromUrl(normalizedUrl)
-      if (localImagePath) {
-        input.push({
-          type: 'localImage',
-          path: localImagePath,
-        })
-        continue
-      }
-      input.push({
-        type: 'image',
-        url: normalizedUrl,
-        image_url: normalizedUrl,
-      })
-    }
-    if (skills) {
-      for (const skill of skills) {
-        input.push({ type: 'skill', name: skill.name, path: skill.path })
-      }
-    }
-    const attachments = dedupedFileAttachments.map((f) => ({ label: f.label, path: f.path, fsPath: f.fsPath }))
+    const { input, attachments: resolvedAttachments } = buildTurnInput(text, imageUrls, skills, fileAttachments)
+    const attachments = resolvedAttachments.map((f) => ({ label: f.label, path: f.path, fsPath: f.fsPath }))
     const params: Record<string, unknown> = {
       threadId,
       input,
+    }
+    if (permissionConfig) {
+      params.approvalPolicy = permissionConfig.approvalPolicy
+      params.sandboxPolicy = permissionConfig.sandboxPolicy
+      if (permissionConfig.approvalsReviewer) {
+        params.approvalsReviewer = permissionConfig.approvalsReviewer
+      }
     }
     if (attachments.length > 0) params.attachments = attachments
     if (normalizedModel) {
@@ -2601,6 +2765,206 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
     skills,
     fileAttachments,
     collaborationMode: record.collaborationMode === 'plan' ? 'plan' : 'default',
+    permissionPreset: normalizePermissionPreset(record.permissionPreset),
+  }
+}
+
+export type CodexSettingsScope = 'user' | 'project'
+
+export interface CodexNativeSettings {
+  scope: CodexSettingsScope
+  filePath: string | null
+  version: string | null
+  model: string
+  reasoningEffort: string
+  approvalPolicy: string
+  sandboxMode: string
+  networkAccess: boolean
+  webSearch: string
+  verbosity: string
+  reasoningSummary: string
+}
+
+export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: string): Promise<CodexNativeSettings> {
+  const payload = await callRpc<ConfigReadResponse>('config/read', { includeLayers: true, cwd: cwd?.trim() || null })
+  const layer = payload.layers?.find((candidate) => candidate.name.type === scope)
+  const layerConfig = (layer?.config && typeof layer.config === 'object' ? layer.config : {}) as Record<string, unknown>
+  const source = layer?.name
+  const filePath = source?.type === 'user'
+    ? String(source.file)
+    : source?.type === 'project'
+      ? `${String(source.dotCodexFolder).replace(/[\\/]$/, '')}/config.toml`
+      : null
+  const workspace = layerConfig.sandbox_workspace_write as Record<string, unknown> | undefined
+  return {
+    scope,
+    filePath,
+    version: layer?.version ?? null,
+    model: typeof layerConfig.model === 'string' ? layerConfig.model : '',
+    reasoningEffort: typeof layerConfig.model_reasoning_effort === 'string' ? layerConfig.model_reasoning_effort : '',
+    approvalPolicy: typeof layerConfig.approval_policy === 'string' ? layerConfig.approval_policy : '',
+    sandboxMode: typeof layerConfig.sandbox_mode === 'string' ? layerConfig.sandbox_mode : '',
+    networkAccess: workspace?.network_access === true,
+    webSearch: typeof layerConfig.web_search === 'string' ? layerConfig.web_search : '',
+    verbosity: typeof layerConfig.model_verbosity === 'string' ? layerConfig.model_verbosity : '',
+    reasoningSummary: typeof layerConfig.model_reasoning_summary === 'string' ? layerConfig.model_reasoning_summary : '',
+  }
+}
+
+export async function saveCodexNativeSettings(settings: CodexNativeSettings): Promise<void> {
+  if (settings.scope === 'project' && !settings.filePath) {
+    throw new Error('Codex did not expose a Project config path for this workspace.')
+  }
+  const edits = [
+    ['model', settings.model],
+    ['model_reasoning_effort', settings.reasoningEffort],
+    ['approval_policy', settings.approvalPolicy],
+    ['sandbox_mode', settings.sandboxMode],
+    ['sandbox_workspace_write.network_access', settings.networkAccess],
+    ['web_search', settings.webSearch],
+    ['model_verbosity', settings.verbosity],
+    ['model_reasoning_summary', settings.reasoningSummary],
+  ].map(([keyPath, value]) => ({ keyPath, value: value === '' ? null : value, mergeStrategy: value === '' ? 'replace' : 'upsert' }))
+  await callRpc('config/batchWrite', { edits, filePath: settings.filePath, expectedVersion: settings.version })
+}
+
+export interface CodexActivitySummary {
+  totalChats: number
+  archivedChats: number
+  activeDays: number
+  totalTokens: number
+  firstChatAt: number | null
+  latestChatAt: number | null
+  topModel: string | null
+  topReasoningEffort: string | null
+}
+
+export async function getCodexActivitySummary(): Promise<CodexActivitySummary> {
+  const response = await fetch('/codex-api/activity-summary')
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+  if (!contentType.includes('application/json')) throw new Error('The Codex Mobile web host is out of date. Restart Codex Mobile to load Activity data.')
+  const payload = await response.json() as { data?: CodexActivitySummary; error?: string }
+  if (!response.ok || !payload.data) throw new Error(payload.error?.trim() || 'Failed to load activity summary')
+  return payload.data
+}
+
+export async function listChatGptConversations(offset = 0, limit = 50): Promise<ChatGptConversationPage> {
+  const query = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(Math.min(50, Math.max(1, limit))) })
+  const response = await fetch(`/codex-api/chatgpt-conversations?${query.toString()}`)
+  const payload = await response.json().catch(() => null) as { data?: unknown } | null
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, `Failed to load ChatGPT conversations (${response.status})`))
+  }
+  const conversations = Array.isArray(payload?.data)
+    ? payload.data.map(normalizeChatGptConversationSummary).filter((item): item is ChatGptConversationSummary => item !== null)
+    : []
+  const nextOffset = typeof (payload as { nextOffset?: unknown } | null)?.nextOffset === 'number'
+    ? (payload as { nextOffset: number }).nextOffset
+    : null
+  return { conversations, nextOffset }
+}
+
+export async function getGlobalInstructions(): Promise<GlobalInstructionsState> {
+  const response = await fetch('/codex-api/global-instructions')
+  const payload = await response.json().catch(() => null) as { data?: GlobalInstructionsState } | null
+  if (!response.ok || !payload?.data) {
+    throw new Error(extractErrorMessage(payload, `Failed to load global instructions (${response.status})`))
+  }
+  return payload.data
+}
+
+export async function saveGlobalInstructions(content: string): Promise<GlobalInstructionsState> {
+  const response = await fetch('/codex-api/global-instructions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+  const payload = await response.json().catch(() => null) as { data?: GlobalInstructionsState } | null
+  if (!response.ok || !payload?.data) {
+    throw new Error(extractErrorMessage(payload, `Failed to save global instructions (${response.status})`))
+  }
+  return payload.data
+}
+
+export async function getChatGptConversationPreview(conversationId: string): Promise<ChatGptConversationPreview> {
+  const response = await fetch(`/codex-api/chatgpt-conversations/${encodeURIComponent(conversationId)}`)
+  const payload = await response.json().catch(() => null) as { data?: unknown } | null
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, `Failed to load ChatGPT conversation (${response.status})`))
+  }
+  const preview = normalizeChatGptConversationPreview(payload?.data)
+  if (!preview) throw new Error('ChatGPT conversation preview was empty')
+  return preview
+}
+
+function normalizeChatGptConversationSummary(value: unknown): ChatGptConversationSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const conversationId = typeof (record.conversationId ?? record.conversation_id ?? record.id) === 'string'
+    ? String(record.conversationId ?? record.conversation_id ?? record.id).trim()
+    : ''
+  if (!conversationId) return null
+  const title = typeof record.title === 'string' ? record.title.trim() : ''
+  const updatedAt = typeof record.updatedAt === 'string'
+    ? record.updatedAt
+    : typeof record.update_time === 'number' ? new Date(record.update_time * 1000).toISOString() : null
+  return { conversationId, title: title || 'New chat', updatedAt }
+}
+
+function normalizeChatGptConversationPreview(value: unknown): ChatGptConversationPreview | null {
+  const summary = normalizeChatGptConversationSummary(value)
+  if (!summary || !value || typeof value !== 'object' || Array.isArray(value)) return null
+  const previewValue = (value as Record<string, unknown>).preview
+  const previewRecord = previewValue && typeof previewValue === 'object' && !Array.isArray(previewValue)
+    ? previewValue as Record<string, unknown>
+    : null
+  const conversation = Array.isArray(previewRecord?.conversation)
+    ? previewRecord.conversation.flatMap((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const row = item as Record<string, unknown>
+      const role = row.role === 'user' ? 'user' as const : row.role === 'assistant' ? 'assistant' as const : null
+      if (!role) return []
+      const content = Array.isArray(row.content)
+        ? row.content.flatMap((part) => {
+          if (!part || typeof part !== 'object' || Array.isArray(part)) return []
+          const contentRow = part as Record<string, unknown>
+          return contentRow.content_type === 'text' && typeof contentRow.text === 'string'
+            ? [{ content_type: 'text' as const, text: contentRow.text }]
+            : []
+        })
+        : []
+      return content.length > 0 ? [{ role, content }] : []
+    })
+    : []
+  const preview: ChatGptPriorConversation | null = conversation.length > 0
+    ? { conversation, diff: null }
+    : null
+  return { ...summary, preview }
+}
+
+export async function steerThreadTurn(
+  threadId: string,
+  expectedTurnId: string,
+  text: string,
+  imageUrls: string[] = [],
+  skills?: Array<{ name: string; path: string }>,
+  fileAttachments: FileAttachmentParam[] = [],
+): Promise<string> {
+  try {
+    const normalizedThreadId = threadId.trim()
+    const normalizedTurnId = expectedTurnId.trim()
+    if (!normalizedThreadId || !normalizedTurnId) {
+      throw new Error('turn/steer requires threadId and expectedTurnId')
+    }
+    const { input } = buildTurnInput(text, imageUrls, skills, fileAttachments)
+    const payload = await callRpc<{ turnId?: string }>('turn/steer', {
+      threadId: normalizedThreadId,
+      input,
+      expectedTurnId: normalizedTurnId,
+    })
+    return typeof payload?.turnId === 'string' ? payload.turnId.trim() : ''
+  } catch (error) {
+    throw normalizeCodexApiError(error, `Failed to steer turn for thread ${threadId}`, 'turn/steer')
   }
 }
 
@@ -2691,6 +3055,27 @@ export async function setThreadQueueState(nextState: ThreadQueueState): Promise<
   })
   if (!response.ok) {
     throw new Error('Failed to save thread queue state')
+  }
+}
+
+export async function getPermissionState(): Promise<PermissionState> {
+  const response = await fetch('/codex-api/permission-state', { cache: 'no-store' })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, 'Failed to load permission state'))
+  }
+  return normalizePermissionState(asRecord(payload)?.data)
+}
+
+export async function setPermissionState(nextState: PermissionState): Promise<void> {
+  const response = await fetch('/codex-api/permission-state', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizePermissionState(nextState)),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(extractErrorMessage(payload, 'Failed to save permission state'))
   }
 }
 
@@ -3100,6 +3485,41 @@ export async function setWorkspaceRootsState(nextState: WorkspaceRootsState): Pr
   cachedWorkspaceRootsStateAt = Date.now()
 }
 
+async function mutateWorkspaceRootsState(
+  path: string,
+  method: 'PUT' | 'PATCH' | 'DELETE',
+  body: Record<string, unknown>,
+): Promise<WorkspaceRootsState> {
+  const response = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to update workspace projects'))
+  }
+  const envelope = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const state = normalizeWorkspaceRootsState(envelope.data)
+  cachedWorkspaceRootsState = cloneWorkspaceRootsState(state)
+  cachedWorkspaceRootsStateAt = Date.now()
+  return cloneWorkspaceRootsState(state)
+}
+
+export async function setWorkspaceProjectOrder(projectOrder: string[]): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots-order', 'PUT', { projectOrder })
+}
+
+export async function renameWorkspaceRootPaths(rootPaths: string[], label: string): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots-label', 'PATCH', { rootPaths, label })
+}
+
+export async function removeWorkspaceRootPaths(rootPaths: string[]): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState('/codex-api/workspace-roots', 'DELETE', { rootPaths })
+}
+
 export async function openProjectRoot(path: string, options?: { createIfMissing?: boolean; label?: string }): Promise<string> {
   const response = await fetch('/codex-api/project-root', {
     method: 'POST',
@@ -3223,6 +3643,34 @@ export async function importProjectZip(file: Blob, parent: string): Promise<{ pa
   }
 }
 
+export async function createProjectlessThreadDirectory(prompt?: string): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
+  const response = await fetch('/codex-api/projectless-thread-cwd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt ?? null }),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) {
+    const message = getErrorMessageFromPayload(payload, 'Failed to create new chat folder')
+    throw new Error(message)
+  }
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {}
+  const data =
+    record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : {}
+  const cwd = typeof data.cwd === 'string' ? normalizePathForUi(data.cwd) : ''
+  if (!cwd) throw new Error('Failed to create new chat folder')
+  return {
+    cwd,
+    outputDirectory: typeof data.outputDirectory === 'string' ? normalizePathForUi(data.outputDirectory) : cwd,
+    workspaceRoot: typeof data.workspaceRoot === 'string' ? normalizePathForUi(data.workspaceRoot) : '',
+  }
+}
+
 export async function createLocalDirectory(path: string): Promise<string> {
   const response = await fetch('/codex-api/local-directory', {
     method: 'POST',
@@ -3269,36 +3717,6 @@ export async function cloneGithubRepository(url: string, basePath: string): Prom
       ? (record.data as Record<string, unknown>)
       : {}
   return typeof data.path === 'string' ? normalizePathForUi(data.path) : ''
-}
-
-export async function createProjectlessThreadDirectory(prompt?: string): Promise<{ cwd: string; outputDirectory: string; workspaceRoot: string }> {
-  const response = await fetch('/codex-api/projectless-thread-cwd', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: prompt ?? null }),
-  })
-  const payload = await readJsonResponse(response)
-  if (!response.ok) {
-    const message = getErrorMessageFromPayload(payload, 'Failed to create new chat folder')
-    throw new Error(message)
-  }
-  const record =
-    payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
-      : {}
-  const data =
-    record.data && typeof record.data === 'object' && !Array.isArray(record.data)
-      ? (record.data as Record<string, unknown>)
-      : {}
-  const cwd = typeof data.cwd === 'string' ? normalizePathForUi(data.cwd) : ''
-  if (!cwd) {
-    throw new Error('Failed to create new chat folder')
-  }
-  return {
-    cwd,
-    outputDirectory: typeof data.outputDirectory === 'string' ? normalizePathForUi(data.outputDirectory) : cwd,
-    workspaceRoot: typeof data.workspaceRoot === 'string' ? normalizePathForUi(data.workspaceRoot) : '',
-  }
 }
 
 export async function getProjectRootSuggestion(basePath: string): Promise<{ name: string; path: string }> {
@@ -3370,7 +3788,7 @@ export async function searchThreads(
   if (!response.ok) {
     throw new Error(payload.error || 'Failed to search threads')
   }
-  return payload.data ?? { threadIds: [], indexedThreadCount: 0 }
+  return payload.data ?? { threadIds: [], indexedThreadCount: 0, totalThreadCount: 0, isIndexing: false }
 }
 
 export async function configureTelegramBot(
@@ -3464,6 +3882,7 @@ function getErrorMessageFromPayload(payload: unknown, fallback: string): string 
 
 export type ThreadTitleCache = { titles: Record<string, string>; order: string[] }
 export type ThreadPinnedState = { threadIds: string[] }
+export type ThreadUnreadState = { threadIds: string[] }
 export type FirstLaunchPluginsCardPreference = { dismissed: boolean }
 
 export async function getThreadTitleCache(): Promise<ThreadTitleCache> {
@@ -3510,6 +3929,27 @@ export async function persistPinnedThreadIds(threadIds: string[]): Promise<void>
   } catch {
     // Best-effort persist
   }
+}
+
+export async function getThreadUnreadState(): Promise<ThreadUnreadState> {
+  try {
+    const response = await fetch('/codex-api/thread-unread-state', { cache: 'no-store' })
+    if (!response.ok) return { threadIds: [] }
+    const envelope = (await response.json()) as { data?: ThreadUnreadState }
+    return { threadIds: Array.isArray(envelope.data?.threadIds) ? envelope.data.threadIds.filter((id): id is string => typeof id === 'string') : [] }
+  } catch {
+    return { threadIds: [] }
+  }
+}
+
+export async function setThreadUnreadState(threadId: string, unread: boolean): Promise<void> {
+  const normalizedThreadId = threadId.trim()
+  if (!normalizedThreadId) return
+  await fetch('/codex-api/thread-unread-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId: normalizedThreadId, unread }),
+  })
 }
 
 export async function getFirstLaunchPluginsCardPreference(): Promise<FirstLaunchPluginsCardPreference> {

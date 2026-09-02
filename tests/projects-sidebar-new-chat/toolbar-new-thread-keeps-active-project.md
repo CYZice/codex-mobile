@@ -15,12 +15,14 @@ The global Start new thread action opens the new-thread composer with the active
 5. Send a first message and confirm the new thread appears under the same project in the sidebar.
 6. While already on the home/new-thread route with a folder selected, click Start new thread again and confirm the selected folder is not cleared.
 7. Repeat the selection and Start new thread flow in dark theme.
+8. Open the folder dropdown, choose `Chat without project` / `普通聊天`, send a unique first message, and confirm the resulting thread appears under Chats instead of the active project.
 
 ## Expected Results
 - The toolbar Start new thread action preserves the active thread's project context.
 - The new-thread folder dropdown shows the project folder immediately after navigation.
 - Existing home-route folder selection is preserved when no active thread project resolves.
 - New threads created from that composer are grouped under the same project.
+- The dropdown always offers an explicit ordinary-chat option that clears the inherited project without changing the global default behavior.
 - Light and dark theme controls remain readable.
 
 ## Rollback/Cleanup

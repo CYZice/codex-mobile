@@ -28,6 +28,11 @@ const router = createRouter({
       component: EmptyRouteView,
     },
     {
+      path: '/settings/:section?',
+      name: 'settings',
+      component: EmptyRouteView,
+    },
+    {
       path: '/new-thread',
       redirect: { name: 'home' },
     },

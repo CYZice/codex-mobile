@@ -1,28 +1,18 @@
 <template>
-  <div v-if="visible" ref="rootRef" class="skill-picker" :style="positionStyle">
-    <div class="skill-picker-header">
-      <input
-        ref="searchInputRef"
-        v-model="query"
-        class="skill-picker-search"
-        type="text"
-        :placeholder="t('Search skills...')"
-        @keydown.escape.prevent="$emit('close')"
-        @keydown.enter.prevent="selectHighlighted"
-        @keydown.arrow-down.prevent="moveHighlight(1)"
-        @keydown.arrow-up.prevent="moveHighlight(-1)"
-      />
-    </div>
-    <ul v-if="filtered.length > 0" class="skill-picker-list" role="listbox">
-      <li v-for="(skill, idx) in filtered" :key="skill.path">
+  <div v-if="visible" class="skill-picker composer-menu-surface composer-menu-scroll" role="listbox" aria-label="Skills">
+    <div class="skill-picker-label">{{ t('Skills') }}</div>
+    <ul v-if="skills.length > 0" class="skill-picker-list">
+      <li v-for="(skill, index) in skills" :key="skill.path">
         <button
           class="skill-picker-item"
-          :class="{ 'is-highlighted': idx === highlightIndex }"
+          :class="{ 'is-highlighted': index === highlightedIndex }"
           type="button"
-          @click="$emit('select', skill)"
-          @pointerenter="highlightIndex = idx"
+          role="option"
+          :aria-selected="index === highlightedIndex"
+          @mousedown.prevent="$emit('select', skill)"
+          @pointerenter="$emit('highlight', index)"
         >
-          <span class="skill-picker-name">{{ skill.displayName || skill.name }}</span>
+          <span class="skill-picker-name">${{ skill.displayName || skill.name }}</span>
           <span v-if="skill.description" class="skill-picker-desc">{{ skill.description }}</span>
         </button>
       </li>
@@ -32,7 +22,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 
 export type SkillOption = {
@@ -42,87 +31,37 @@ export type SkillOption = {
   path: string
 }
 
-const props = defineProps<{
+defineProps<{
   skills: SkillOption[]
   visible: boolean
-  anchorBottom?: number
-  anchorLeft?: number
+  highlightedIndex: number
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   select: [skill: SkillOption]
-  close: []
+  highlight: [index: number]
 }>()
 
-const rootRef = ref<HTMLElement | null>(null)
-const searchInputRef = ref<HTMLInputElement | null>(null)
-const query = ref('')
-const highlightIndex = ref(0)
 const { t } = useUiLanguage()
-
-const filtered = computed(() => {
-  const q = query.value.toLowerCase().trim()
-  if (!q) return props.skills
-  return props.skills.filter(
-    (s) =>
-      s.name.toLowerCase().includes(q)
-      || (s.displayName ?? '').toLowerCase().includes(q)
-      || s.description.toLowerCase().includes(q),
-  )
-})
-
-const positionStyle = computed(() => {
-  const styles: Record<string, string> = {}
-  if (props.anchorBottom != null) styles.bottom = `${props.anchorBottom}px`
-  if (props.anchorLeft != null) styles.left = `${props.anchorLeft}px`
-  return styles
-})
-
-function moveHighlight(delta: number): void {
-  if (filtered.value.length === 0) return
-  highlightIndex.value = (highlightIndex.value + delta + filtered.value.length) % filtered.value.length
-}
-
-function selectHighlighted(): void {
-  const skill = filtered.value[highlightIndex.value]
-  if (!skill) return
-  emit('select', skill)
-}
-
-watch(() => props.visible, (v) => {
-  if (v) {
-    query.value = ''
-    highlightIndex.value = 0
-    nextTick(() => searchInputRef.value?.focus())
-  }
-})
-
-watch(query, () => {
-  highlightIndex.value = 0
-})
 </script>
 
 <style scoped>
 @reference "tailwindcss";
 
 .skill-picker {
-  @apply absolute z-40 w-72 max-sm:!left-4 max-sm:!right-4 max-sm:!w-auto max-h-64 rounded-xl border border-zinc-200 bg-white shadow-lg flex flex-col overflow-hidden;
+  @apply absolute bottom-[calc(100%+8px)] left-0 z-40 w-full max-w-none;
 }
 
-.skill-picker-header {
-  @apply p-2 border-b border-zinc-100;
-}
-
-.skill-picker-search {
-  @apply w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-800 outline-none placeholder-zinc-400 transition focus:border-zinc-300 focus:bg-white;
+.skill-picker-label {
+  @apply px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500;
 }
 
 .skill-picker-list {
-  @apply m-0 list-none p-1 overflow-y-auto flex-1;
+  @apply m-0 list-none overflow-y-auto p-0;
 }
 
 .skill-picker-item {
-  @apply flex w-full flex-col items-start gap-0.5 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-left transition hover:bg-zinc-50;
+  @apply flex w-full flex-col items-start gap-0.5 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left transition hover:bg-zinc-100;
 }
 
 .skill-picker-item.is-highlighted {
@@ -134,10 +73,29 @@ watch(query, () => {
 }
 
 .skill-picker-desc {
-  @apply text-xs text-zinc-500 line-clamp-1;
+  @apply line-clamp-1 text-xs text-zinc-500;
 }
 
 .skill-picker-empty {
-  @apply p-3 text-center text-sm text-zinc-400;
+  @apply px-2.5 py-2 text-sm text-zinc-500;
+}
+
+:global(:root.dark) .skill-picker {
+  @apply border-zinc-700 bg-zinc-900 shadow-black/30;
+}
+
+:global(:root.dark) .skill-picker-label,
+:global(:root.dark) .skill-picker-empty,
+:global(:root.dark) .skill-picker-desc {
+  @apply text-zinc-400;
+}
+
+:global(:root.dark) .skill-picker-name {
+  @apply text-zinc-100;
+}
+
+:global(:root.dark) .skill-picker-item:hover,
+:global(:root.dark) .skill-picker-item.is-highlighted {
+  @apply bg-zinc-800;
 }
 </style>

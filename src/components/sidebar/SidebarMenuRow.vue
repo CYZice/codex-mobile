@@ -57,7 +57,7 @@ const hasRight = computed(() => hasRightDefault.value || hasRightHover.value)
 @reference "tailwindcss";
 
 .sidebar-menu-row {
-  @apply w-full min-w-0 rounded-lg px-3 py-1 text-left transition flex items-center gap-2;
+  @apply w-full min-w-0 min-h-8 rounded-lg px-2.5 py-1.5 text-left transition flex items-center gap-2;
 }
 
 .sidebar-menu-row-left {

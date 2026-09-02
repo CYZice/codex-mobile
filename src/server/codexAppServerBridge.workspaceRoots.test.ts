@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   migrateWorkspaceRootsStateCompatibility,
+  ensureWorkspaceRootForThread,
+  readPermissionState,
   readWorkspaceRootsState,
+  recoverWorkspaceRootsForRunningThreads,
+  reorderWorkspaceRoots,
+  writePermissionState,
   writeWorkspaceRootsState,
 } from './codexAppServerBridge'
 
@@ -19,6 +24,59 @@ afterEach(() => {
 })
 
 describe('workspace roots Desktop state compatibility', () => {
+  it('stores permission presets separately from shared project state', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-permissions-'))
+    const globalStatePath = join(codexHome, '.codex-global-state.json')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await writeFile(globalStatePath, JSON.stringify({ sentinel: 'preserved' }), 'utf8')
+
+      await writePermissionState({
+        defaultPreset: 'workspace',
+        threadPresets: { 'thread-a': 'fullAccess' },
+      })
+
+      expect(await readPermissionState()).toEqual({
+        defaultPreset: 'workspace',
+        threadPresets: { 'thread-a': 'fullAccess' },
+      })
+      expect(JSON.parse(await readFile(globalStatePath, 'utf8'))).toEqual({ sentinel: 'preserved' })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('migrates legacy permission state to the auto-review default once', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-permissions-migration-'))
+    const permissionStatePath = join(codexHome, 'codexapp-permissions.json')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await writeFile(permissionStatePath, JSON.stringify({
+        defaultPreset: 'fullAccess',
+        threadPresets: {
+          'thread-workspace': 'workspace',
+          'thread-full': 'fullAccess',
+        },
+      }), 'utf8')
+
+      expect(await readPermissionState()).toEqual({
+        defaultPreset: 'autoReview',
+        threadPresets: {
+          'thread-workspace': 'workspace',
+          'thread-full': 'fullAccess',
+        },
+      })
+      expect(JSON.parse(await readFile(permissionStatePath, 'utf8'))).toMatchObject({
+        version: 2,
+        defaultPreset: 'autoReview',
+      })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   it('discovers Desktop local-project roots missing from saved workspace roots', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-local-project-read-'))
     const savedRoot = join(codexHome, 'saved-project')
@@ -201,6 +259,74 @@ describe('workspace roots Desktop state compatibility', () => {
         'kept-id': { id: 'kept-id', name: 'Kept', rootPaths: [keptRoot] },
       })
       expect(rawState['project-order']).toEqual(['kept-id'])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a concurrently added Desktop project when an older browser only reorders known projects', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-local-project-reorder-'))
+    const firstRoot = join(codexHome, 'first-project')
+    const secondRoot = join(codexHome, 'second-project')
+    const addedLaterRoot = join(codexHome, 'added-later-project')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await Promise.all([mkdir(firstRoot), mkdir(secondRoot), mkdir(addedLaterRoot)])
+      await writeWorkspaceRootsState({
+        order: [firstRoot, secondRoot],
+        labels: {},
+        active: [firstRoot],
+        projectOrder: [firstRoot, secondRoot],
+        remoteProjects: [],
+      })
+      await writeWorkspaceRootsState({
+        order: [addedLaterRoot, firstRoot, secondRoot],
+        labels: {},
+        active: [addedLaterRoot],
+        projectOrder: [addedLaterRoot, firstRoot, secondRoot],
+        remoteProjects: [],
+      })
+
+      const state = await reorderWorkspaceRoots([secondRoot, firstRoot])
+      expect(state.order).toEqual([secondRoot, firstRoot, addedLaterRoot])
+      expect(state.projectOrder).toEqual([secondRoot, firstRoot, addedLaterRoot])
+      expect((await readWorkspaceRootsState()).order).toEqual([secondRoot, firstRoot, addedLaterRoot])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('registers an existing thread cwd in the Desktop project model before a thread starts', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-thread-project-'))
+    const threadRoot = join(codexHome, 'thread-project')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await mkdir(threadRoot)
+      expect(await ensureWorkspaceRootForThread(threadRoot)).toBe(true)
+      const state = await readWorkspaceRootsState()
+      expect(state.order).toEqual([threadRoot])
+      expect(state.projectOrder).toEqual([threadRoot])
+      expect(state.labels[threadRoot]).toBe('thread-project')
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('recovers an unregistered running thread cwd without importing completed historical threads', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-running-thread-project-'))
+    const runningRoot = join(codexHome, 'running-project')
+    const completedRoot = join(codexHome, 'completed-project')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await Promise.all([mkdir(runningRoot), mkdir(completedRoot)])
+      expect(await recoverWorkspaceRootsForRunningThreads([
+        { cwd: runningRoot, status: { type: 'inProgress' } },
+        { cwd: completedRoot, status: { type: 'completed' } },
+      ])).toBe(true)
+      expect((await readWorkspaceRootsState()).order).toEqual([runningRoot])
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }

@@ -638,6 +638,13 @@ After each feature implementation session that uses this skill:
 
 ## Findings: Parity Extraction Sanity Check (2026-03-27)
 
+## Findings: Model List First On Mobile (2026-07-27)
+
+- On the Lenovo Codex remote instance, the authenticated `model/list` RPC returned six visible models: GPT-5.6 Sol, Terra, Luna, GPT-5.5, GPT-5.4, and GPT-5.4 Mini.
+- The mobile model trigger should open the real model list directly. Keep GPT-5.6 and GPT-5.5 on the first panel, place older returned models behind an Other models row, and retain thinking-level selection as a secondary row in the same menu.
+- The official OpenAI configuration on this host reports `model_provider: "custom"`. Treat that identifier like the built-in Codex provider when loading models; requiring `/codex-api/provider-models` for it returns an empty provider list and incorrectly leaves only the configured model visible.
+- No reusable Codex Desktop CDP endpoint was available on ports 3434, 3435, 9222, or 9223 on this Windows host. The user-provided native mobile screenshot was retained as the visual reference, while the live 5900 Web UI supplied before/after evidence.
+
 - In this environment, `/Applications/Codex.app` may be absent while `/tmp/codex-app-extracted` still exists as an empty directory from a prior session.
 - Before relying on extracted bundle searches, verify both the app bundle path and that the extraction target actually contains files.
 - When both checks fail for a UI change, treat parity inspection as blocked, use existing repository behavior as the fallback baseline, and report that gap explicitly in the final response.
@@ -786,3 +793,49 @@ After each feature implementation session that uses this skill:
   - workspace-root/project filtering must preserve projectless thread groups from `thread/list`, otherwise they disappear after the optimistic row is replaced by server state
   - the rendered Projects section must still hide those projectless groups, while the Chats section lists them
 - A projectless thread cwd under `~/Documents/Codex/YYYY-MM-DD/<slug>` should remain in the sidebar Chats section after title generation and thread-list refreshes.
+
+## Findings: Mobile Permission Composer Layout (2026-07-27)
+
+- The native Codex mobile composer presents model and permission presets as compact pill controls above the message input row.
+- The permission picker is a wide floating surface with a title, secondary description, and a check icon for the active option.
+- The input row keeps the add button separate from the rounded message field so configuration controls do not reduce typing width.
+- On Windows, an already-running packaged Codex instance may not expose CDP on the common parity ports. When the user provides an exact native mobile screenshot, preserve it as the reference artifact and document the CDP gap instead of restarting their active Codex session.
+
+## Findings: Combined Model And Thinking Control (2026-07-27)
+
+- Native Codex mobile keeps the active model and thinking level in one compact composer pill instead of giving the level a separate row.
+- Its menu exposes the thinking levels directly, then provides a secondary Model row that enters model selection; this keeps the two settings logically grouped while preserving independent values.
+- A horizontally scrollable control row is preferable to wrapping a standalone thinking chip below the model on narrow browsers.
+
+## Findings: Inline User Message Editing (2026-07-31)
+
+- Codex Desktop edits a persisted user message in place by replacing the original message bubble with an inline text editor and Cancel/Send actions.
+- Entering or cancelling edit mode is local UI state and should not roll back the thread or hydrate the bottom composer.
+- Confirming an edit rolls the thread back to the selected user turn and resends the edited text with the original attachments and skill selections.
+- Retry remains a direct rollback-and-resend action; it does not need to expose the original text in the bottom composer.
+- On Windows, when no reusable Codex CDP endpoint is available, a user-provided native screenshot can serve as the preserved reference artifact without restarting their active Desktop session.
+
+## Findings: Inline ChatGPT Conversation References (2026-08-30)
+
+- Installed Windows package `OpenAI.Codex_26.825.6671.0_x64__2p2nqsd0c76g0` uses a ProseMirror inline atom named `chatGptConversationMention` in `webview/assets/app-initial-DJ_IF-Jc.js`.
+- ChatGPT references remain inside the editable paragraph and serialize as Markdown links with the `chatgpt-conversation://` prefix; plugin references use `plugin://`. A whitespace-delimited `@query` can be triggered repeatedly after existing prose.
+- Submission parsing deduplicates conversation ids and appends a separate `## Referenced ChatGPT conversation:` block containing `conversationId`, `title`, and `priorConversation`. The block explicitly marks the preview untrusted.
+- `priorConversation` follows the chosen conversation's `current_node` parent chain, includes user and completed assistant text, starts at the third-latest user turn, and limits each text item to 2,000 characters.
+- When the preview is null, attachments or more context are needed, Desktop instructs the agent to call `read_thread` with `threadId` equal to the conversation id and `turnLimit` equal to 10, following the cursor for older turns.
+- If packaged Codex exposes no reusable CDP endpoint on 3434, 3435, 9222, or 9223, inspect the installed renderer bundle read-only and do not restart the user's active session.
+
+## Findings: Windows ChatGPT Backend Proxy Parity (2026-08-30)
+
+- Packaged Codex Desktop routes renderer/backend HTTP through Electron networking and therefore follows the active Windows/WinINET proxy, while Node's built-in `fetch` used by this web bridge does not automatically inherit that proxy.
+- On Windows web parity, resolve proxy settings in this order: `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`, then the current user's WinINET `ProxyEnable` and `ProxyServer`; honor `NO_PROXY`.
+- Reuse cached Undici `ProxyAgent` dispatchers and cache registry discovery briefly, rather than spawning `reg.exe` or rebuilding a dispatcher per ChatGPT conversation request.
+- Apply the proxy-aware path to ChatGPT conversation list/detail and connector-logo requests only; do not alter app-server protocols.
+- A projectless chat must create `~/Documents/Codex/YYYY-MM-DD/<slug>` before `thread/start`, pass it as `cwd` and `outputDirectory`, set `workspaceRoot` to `~/Documents/Codex`, and avoid registering that path as a normal project root.
+- Keep toolbar new-thread project inheritance unchanged; expose explicit `Chat without project` and sidebar Chats new-chat paths for ordinary chat creation.
+
+## Findings: Global Instructions And Priority Sidebar (2026-08-30)
+
+- Codex-style Personalization maps to the real `CODEX_HOME/AGENTS.md`, but this repository may expose that file as a symbolic link to the synchronized skills directory. Web saves must write through the link target and must not replace the link itself.
+- A non-empty `AGENTS.override.md` is the effective global source. The settings page should surface that precedence without preventing edits to `AGENTS.md`.
+- Codex Desktop Priority is status-driven rather than a fixed top-N list: unread, active, approval-pending, and response-pending threads belong in Priority; remaining threads are grouped chronologically.
+- Preserve the existing project/pin sidebar as the default and use the top bell as an explicit, persisted alternate view.

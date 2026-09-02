@@ -18,10 +18,12 @@
 10. Open the forked thread and confirm the composer model matches thread `B`, not the currently selected thread.
 11. Restart the app-server or otherwise force a model-list refresh that does not include one thread’s persisted model, then switch back to that thread.
 12. Delete one of the test threads you changed, refresh the thread list, and continue switching between the remaining thread and the new-thread screen.
+13. Select model `B` in an existing thread, then open the new-thread screen.
 
 #### Expected Results
 - Each thread restores its own last selected model when you switch threads.
-- The new-thread screen keeps its own draft model selection instead of inheriting the last opened thread.
+- The new-thread screen defaults to the most recently selected model for the active provider.
+- Existing threads still restore their own model independently; merely opening a thread does not replace the recent-model default until a model is selected.
 - After browser refresh, reopening a thread restores the model persisted for that thread.
 - Forked or newly created threads keep the resolved model returned by Codex, including fallback to the supported default model when needed.
 - Forking a nonselected thread from the sidebar uses that source thread’s persisted model.

@@ -8,6 +8,7 @@ Return to the [manual test index](../../tests.md).
 
 | Section |
 | --- |
+| [Feature: DevCodex bridge exposes native thread and turn control](devcodex-message-bridge.md) |
 | [Feature: Telegram bot token stored in dedicated global file](telegram-bot-token-stored-in-dedicated-global-file.md) |
 | [Feature: Telegram chatIds persisted for bot DM sending](telegram-chatids-persisted-for-bot-dm-sending.md) |
 | [Feature: Telegram bridge rejects unauthorized senders](telegram-bridge-rejects-unauthorized-senders.md) |
@@ -28,10 +29,11 @@ Return to the [manual test index](../../tests.md).
 | [Feature: Remote changes win when no local uncommitted skill edits exist](remote-changes-win-when-no-local-uncommitted-skill-edits-exist.md) |
 | [Feature: Startup sync does not delete remote AGENTS.md](startup-sync-does-not-delete-remote-agents-md.md) |
 | [Feature: Bidirectional AGENTS.md sync via Startup Sync](bidirectional-agents-md-sync-via-startup-sync.md) |
+| [Global AGENTS.md personalization settings](global-agents-personalization-settings.md) |
 | [Feature: Mixed local+remote AGENTS edits do not stall Startup Sync](mixed-local-remote-agents-edits-do-not-stall-startup-sync.md) |
 | [Feature: Startup sync uses deterministic pull reconcile (`fetch + reset --hard`) before local replay](startup-sync-uses-deterministic-pull-reconcile-fetch-reset-hard-before-local-replay.md) |
 | [Codex.app-style Plugins Directory](codex-app-style-plugins-directory.md) |
 | [Skills tab npx skills search](skills-tab-npx-skills-search.md) |
 | [Feature: Nested skill bundles are grouped in discovery](nested-skill-bundles-are-grouped-in-discovery.md) |
-| [First-launch home card for Plugins and Apps](first-launch-home-card-for-plugins-and-apps.md) |
+| [Home without promotional card](home-without-promotional-card.md) |
 | [Composer prompts inside Skills dropdown](composer-prompts-inside-skills-dropdown.md) |

@@ -3,7 +3,7 @@
     <p v-if="isLoading" class="conversation-loading">Loading messages...</p>
 
     <p
-      v-else-if="messages.length === 0 && pendingRequests.length === 0 && !liveOverlay"
+      v-else-if="messages.length === 0 && pendingRequests.length === 0 && !liveOverlay && !interruptedTurnId"
       class="conversation-empty"
     >
       No messages in this thread yet.
@@ -21,13 +21,22 @@
         </button>
       </li>
       <template v-for="message in visibleMessages" :key="message.id">
-      <li
-        v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id)"
-        class="conversation-item"
-        :data-role="message.role"
-        :data-message-type="message.messageType || ''"
-      >
-        <div v-if="isCommandMessage(message)" class="message-row" data-role="system">
+        <li
+          v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id)"
+          class="conversation-item"
+          :data-role="message.role"
+          :data-message-type="message.messageType || ''"
+        >
+          <div v-if="isContextCompactionMessage(message)" class="message-row" data-role="system">
+            <div class="message-stack" data-role="system">
+              <div class="context-compaction-row" aria-live="polite">
+                <span class="context-compaction-icon" aria-hidden="true">↻</span>
+                <span>Context automatically compacted</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="isCommandMessage(message)" class="message-row" data-role="system">
           <div class="message-stack" data-role="system">
             <button
               v-if="getGroupedCommandsForLatest(message).length > 0"
@@ -64,7 +73,7 @@
                     @click="toggleCommandExpand(cmd)"
                   >
                     <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(cmd) }">▶</span>
-                    <code class="cmd-label">{{ cmd.commandExecution?.command || '(command)' }}</code>
+                    <code class="cmd-label">{{ commandDisplayText(cmd) }}</code>
                     <span class="cmd-status">{{ commandStatusLabel(cmd) }}</span>
                   </button>
                   <div
@@ -96,7 +105,7 @@
                 @click="toggleCommandExpand(message)"
               >
                 <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(message) }">▶</span>
-                <code class="cmd-label">{{ message.commandExecution?.command || '(command)' }}</code>
+                <code class="cmd-label">{{ commandDisplayText(message) }}</code>
                 <span class="cmd-status">{{ commandStatusLabel(message) }}</span>
               </button>
               <div
@@ -153,9 +162,6 @@
                         :key="`file-change:${message.id}:${change.path}:${change.movedToPath || ''}`"
                         class="file-change-item"
                       >
-                        <span class="file-change-badge" :data-operation="fileChangeOperationTone(change)">
-                          {{ fileChangeOperationLabel(change) }}
-                        </span>
                         <button
                           type="button"
                           class="file-change-path-button"
@@ -186,7 +192,10 @@
                         </span>
                       </li>
                     </ul>
-                    <div v-if="isFileChangeActionable(readStandaloneFileChangeSummary(message))" class="file-change-actions">
+                    <div
+                      v-if="message.fileChangeStatus === 'completed' && isFileChangeActionable(readStandaloneFileChangeSummary(message))"
+                      class="file-change-actions"
+                    >
                       <p v-if="fileChangeActionErrorText(readStandaloneFileChangeSummary(message))" class="file-change-action-error">
                         {{ fileChangeActionErrorText(readStandaloneFileChangeSummary(message)) }}
                       </p>
@@ -214,7 +223,11 @@
 
         <div v-else class="message-row" :data-role="message.role" :data-message-type="message.messageType || ''">
           <div class="message-stack" :data-role="message.role">
-            <article class="message-body" :data-role="message.role">
+            <article
+              class="message-body"
+              :class="{ 'message-body--editing': isInlineEditingMessage(message) }"
+              :data-role="message.role"
+            >
               <ul
                 v-if="message.images && message.images.length > 0"
                 class="message-image-list"
@@ -263,7 +276,39 @@
               </div>
 
               <article v-if="message.text.length > 0" class="message-card" :data-role="message.role">
-                <div v-if="message.isAutomationRun" class="automation-message-label">
+                <div v-if="isInlineEditingMessage(message)" class="message-inline-editor">
+                  <textarea
+                    v-model="inlineEditDraft"
+                    class="message-inline-editor-input"
+                    :aria-label="t('Edit message')"
+                    :disabled="isInlineEditSubmitting"
+                    @keydown.ctrl.enter.prevent="submitInlineEdit(message)"
+                    @keydown.meta.enter.prevent="submitInlineEdit(message)"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                  />
+                  <div class="message-inline-editor-actions">
+                    <button
+                      type="button"
+                      class="message-inline-editor-cancel"
+                      :disabled="isInlineEditSubmitting"
+                      @click="cancelInlineEdit"
+                    >
+                      {{ t('Cancel') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="message-inline-editor-send"
+                      :disabled="isInlineEditSubmitting || inlineEditDraft.trim().length === 0"
+                      @click="submitInlineEdit(message)"
+                    >
+                      <span v-if="isInlineEditSubmitting" class="message-inline-editor-spinner" aria-hidden="true" />
+                      {{ t('Send') }}
+                    </button>
+                  </div>
+                  <p v-if="inlineEditError" class="message-inline-editor-error" role="alert">{{ inlineEditError }}</p>
+                </div>
+                <template v-else>
+                  <div v-if="message.isAutomationRun" class="automation-message-label">
                   <span>Sent via automation</span>
                   <code v-if="message.automationDisplayName">{{ message.automationDisplayName }}</code>
                 </div>
@@ -293,7 +338,7 @@
                         @click="toggleCommandExpand(cmd)"
                       >
                         <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(cmd) }">▶</span>
-                        <code class="cmd-label">{{ cmd.commandExecution?.command || '(command)' }}</code>
+                        <code class="cmd-label">{{ commandDisplayText(cmd) }}</code>
                         <span class="cmd-status">{{ commandStatusLabel(cmd) }}</span>
                       </button>
                       <div
@@ -333,14 +378,28 @@
                     </li>
                   </ol>
                   <div v-else class="plan-card-markdown" v-html="renderMarkdownBlocksAsHtml(message.text)" />
-                  <div v-if="showImplementPlanButton(message)" class="plan-card-actions">
-                    <button
-                      type="button"
-                      class="plan-card-implement-button"
-                      @click="implementPlan(message)"
-                    >
-                      Implement plan
+                  <div v-if="showPlanActions(message)" class="plan-card-actions">
+                    <button type="button" class="plan-card-implement-button" @click="implementPlan(message)">
+                      执行计划
                     </button>
+                    <form class="plan-revision-form" @submit.prevent="revisePlan(message)">
+                      <input
+                        v-model="planRevisionDraft"
+                        class="plan-revision-input"
+                        type="text"
+                        placeholder="输入修改意见"
+                        aria-label="输入计划修改意见"
+                      />
+                      <button
+                        class="plan-revision-submit"
+                        type="submit"
+                        :disabled="planRevisionDraft.trim().length === 0"
+                        aria-label="提交计划修改意见"
+                        title="提交计划修改意见"
+                      >
+                        <IconTablerArrowUp class="icon-svg" />
+                      </button>
+                    </form>
                   </div>
                 </div>
                 <div
@@ -599,6 +658,7 @@
                 >
                   Send feedback
                 </a>
+                </template>
               </article>
 
               <section v-if="readAnchoredFileChangeSummary(message)" class="file-change-summary-block file-change-summary-block-inline">
@@ -688,12 +748,12 @@
               </section>
 
               <div
-                v-if="showCopyResponseButton(message) || showEditMessageButton(message)"
+                v-if="!isInlineEditingMessage(message) && (showCopyResponseButton(message) || showEditMessageButton(message) || showForkResponseButton(message))"
                 class="message-toolbar"
                 :data-role="message.role"
               >
                 <button
-                  v-if="showEditMessageButton(message)"
+                v-if="showEditMessageButton(message)"
                   type="button"
                   class="message-edit-button"
                   aria-label="Edit this message"
@@ -707,25 +767,33 @@
                   v-if="showForkResponseButton(message)"
                   type="button"
                   class="message-fork-button"
+                  :disabled="isForkingMessage(message)"
                   aria-label="Fork thread from this response"
                   title="Fork thread from this response"
                   @click="forkResponse(message.id)"
                 >
-                  <IconTablerGitFork class="icon-svg message-fork-icon" />
-                  <span class="message-fork-label">Fork</span>
+                  <span v-if="isForkingMessage(message)" class="message-action-spinner" aria-hidden="true" />
+                  <IconTablerGitFork v-else class="icon-svg message-fork-icon" />
                 </button>
                 <button
                   v-if="showCopyResponseButton(message)"
                   type="button"
                   class="message-copy-button"
                   :data-copied="copiedResponseAnchorId === message.id"
-                  :aria-label="copiedResponseAnchorId === message.id ? 'Response copied' : 'Copy response'"
-                  :title="copiedResponseAnchorId === message.id ? 'Response copied' : 'Copy response'"
+                  :disabled="copyingResponseAnchorId === message.id"
+                  :aria-label="copyResponseLabel(message)"
+                  :title="copyResponseLabel(message)"
                   @click="copyResponse(message.id)"
                 >
-                  <IconTablerCopy class="icon-svg message-copy-icon" />
-                  <span class="message-copy-label">{{ copiedResponseAnchorId === message.id ? 'Copied' : 'Copy' }}</span>
+                  <span v-if="copyingResponseAnchorId === message.id" class="message-action-spinner" aria-hidden="true" />
+                  <IconTablerCopy v-else class="icon-svg message-copy-icon" />
                 </button>
+              </div>
+              <div v-if="forkErrorMessageId === message.id" class="message-action-status message-action-status-error" role="alert">
+                Fork failed. Try again.
+              </div>
+              <div v-if="copyErrorAnchorId === message.id" class="message-action-status message-action-status-error" role="alert">
+                Copy failed. Try again.
               </div>
             </article>
           </div>
@@ -747,6 +815,23 @@
                 <span>{{ liveOverlay.errorText }}</span>
                 <a class="live-overlay-feedback" :href="feedbackMailto" @click="prepareLiveErrorFeedback($event, liveOverlay.errorText)">Send feedback</a>
               </div>
+            </article>
+          </div>
+        </div>
+      </li>
+      <li v-if="interruptedTurnId" class="conversation-item conversation-item-interrupted">
+        <div class="message-row">
+          <div class="message-stack">
+            <article class="interrupted-turn-notice" role="status">
+              <p>任务在等待输入时中断，已保留当前输出。</p>
+              <button
+                type="button"
+                class="interrupted-turn-continue"
+                :disabled="isContinuingInterruptedTurn"
+                @click="emit('continueInterruptedTurn')"
+              >
+                {{ isContinuingInterruptedTurn ? '继续中…' : '继续' }}
+              </button>
             </article>
           </div>
         </div>
@@ -922,6 +1007,7 @@ import type { UiFileChange, UiLiveOverlay, UiMessage, UiPlanStep, UiServerReques
 import { updateThreadFileChanges } from '../../api/codexGateway'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
 import { useMobile } from '../../composables/useMobile'
+import { useUiLanguage } from '../../composables/useUiLanguage'
 import { copyTextToClipboard, copyTextWithSelectionFallback } from '../../utils/clipboard'
 
 import IconTablerArrowBackUp from '../icons/IconTablerArrowBackUp.vue'
@@ -934,6 +1020,7 @@ import IconTablerX from '../icons/IconTablerX.vue'
 type HighlightJsModule = (typeof import('highlight.js/lib/common'))['default']
 
 const expandedCommandIds = ref<Set<string>>(new Set())
+const planRevisionDraft = ref('')
 const collapsedAutoCommandIds = ref<Set<string>>(new Set())
 const expandedCommandGroupIds = ref<Set<string>>(new Set())
 const expandedWorkedIds = ref<Set<string>>(new Set())
@@ -948,6 +1035,7 @@ const fileLinkContextMenuY = ref(0)
 const fileLinkContextBrowseUrl = ref('')
 const fileLinkContextEditUrl = ref('')
 const { isMobile } = useMobile()
+const { t } = useUiLanguage()
 const { buildFeedbackMailto, feedbackMailtoBase, recordVisibleFailure } = useFeedbackDiagnostics()
 const feedbackMailto = feedbackMailtoBase()
 
@@ -1018,6 +1106,10 @@ function isCommandMessage(message: UiMessage): boolean {
   return message.messageType === 'commandExecution' && !!message.commandExecution
 }
 
+function isContextCompactionMessage(message: UiMessage): boolean {
+  return message.messageType === 'contextCompaction'
+}
+
 function isPlanMessage(message: UiMessage): boolean {
   return message.messageType === 'plan' || message.messageType === 'plan.live'
 }
@@ -1038,22 +1130,47 @@ function buildPlanMessageText(explanation: string, steps: UiPlanStep[]): string 
   return lines.join('\n').trim()
 }
 
-function showImplementPlanButton(message: UiMessage): boolean {
-  return isPlanMessage(message)
-    && message.messageType !== 'plan.live'
-    && message.role === 'assistant'
-    && Boolean(message.turnId)
+function showPlanActions(message: UiMessage): boolean {
+  if (
+    !isPlanMessage(message)
+    || message.messageType === 'plan.live'
+    || message.role !== 'assistant'
+    || !message.turnId
+    || props.liveOverlay
+  ) {
+    return false
+  }
+
+  const messageIndex = props.messages.findIndex((candidate) => candidate.id === message.id)
+  if (messageIndex < 0) return false
+  return !props.messages.slice(messageIndex + 1).some((candidate) => (
+    candidate.role === 'user'
+    || (
+      candidate.role === 'assistant'
+      && candidate.messageType !== 'commandExecution'
+      && candidate.messageType !== 'fileChange'
+      && candidate.messageType !== 'worked'
+    )
+  ))
 }
 
 function implementPlan(message: UiMessage): void {
   const turnId = message.turnId?.trim() ?? ''
   if (!turnId) return
+  planRevisionDraft.value = ''
   emit('implementPlan', { turnId })
+}
+
+function revisePlan(message: UiMessage): void {
+  const turnId = message.turnId?.trim() ?? ''
+  const text = planRevisionDraft.value.trim()
+  if (!turnId || !text) return
+  planRevisionDraft.value = ''
+  emit('revisePlan', { turnId, text })
 }
 
 function isFileChangeMessage(message: UiMessage): boolean {
   return message.messageType === 'fileChange'
-    && message.fileChangeStatus === 'completed'
     && Array.isArray(message.fileChanges)
     && message.fileChanges.length > 0
 }
@@ -1203,9 +1320,24 @@ function isCommandGroupExpanded(message: UiMessage): boolean {
 function commandGroupSummaryLabel(message: UiMessage): string {
   const commands = getCommandBlockForLatest(message)
   const count = commands.length
-  const latestCommand = message.commandExecution?.command?.trim() || '(command)'
-  const countLabel = count === 1 ? '1 command' : `${count} commands`
-  return `${countLabel} · latest: ${latestCommand}`
+  const hasSkillRead = commands.some(isSkillReadCommand)
+  const hasCommand = commands.some((command) => !isSkillReadCommand(command))
+  if (hasSkillRead && hasCommand) return 'Loaded tools and ran commands'
+  if (hasSkillRead) return count === 1 ? 'Read skill' : `Read ${count} skills`
+  return count === 1 ? 'Ran command' : `Ran ${count} commands`
+}
+
+function isSkillReadCommand(message: UiMessage): boolean {
+  return /SKILL\.md/iu.test(message.commandExecution?.command ?? '')
+}
+
+function commandDisplayText(message: UiMessage): string {
+  if (isSkillReadCommand(message)) {
+    const command = message.commandExecution?.command?.trim() ?? ''
+    const match = command.match(/skills[\\/]+([^\\/\s]+)[\\/]+SKILL\.md/iu)
+    return match?.[1] ? `Read ${match[1]} skill` : 'Read skill'
+  }
+  return message.commandExecution?.command?.trim() || '(command)'
 }
 
 function commandGroupSummaryStatus(message: UiMessage): string {
@@ -1310,6 +1442,10 @@ const props = defineProps<{
   messages: UiMessage[]
   pendingRequests: UiServerRequest[]
   liveOverlay: UiLiveOverlay | null
+  isTurnInProgress?: boolean
+  isStopPending?: boolean
+  interruptedTurnId?: string
+  isContinuingInterruptedTurn?: boolean
   isLoading: boolean
   activeThreadId: string
   cwd: string
@@ -1319,16 +1455,32 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  forkThread: [payload: { threadId: string; turnIndex: number }]
-  rollback: [payload: { turnId: string }]
+  forkThread: [payload: { threadId: string; turnIndex: number; onComplete: (success: boolean) => void }]
+  editMessage: [payload: {
+    threadId: string
+    turnId: string
+    message: UiMessage
+    text: string
+    onComplete: (success: boolean, errorMessage?: string) => void
+  }]
   implementPlan: [payload: { turnId: string }]
+  revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
+  continueInterruptedTurn: []
 }>()
 
 const conversationListRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const modalImageUrl = ref('')
 const copiedResponseAnchorId = ref('')
+const copyingResponseAnchorId = ref('')
+const copyErrorAnchorId = ref('')
+const inlineEditingMessageId = ref('')
+const inlineEditDraft = ref('')
+const isInlineEditSubmitting = ref(false)
+const inlineEditError = ref('')
+const forkingMessageId = ref('')
+const forkErrorMessageId = ref('')
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
 const fileChangeActionError = ref<Record<string, string>>({})
 const fileChangeRedoPatchIds = ref<Record<string, string[]>>({})
@@ -1336,6 +1488,7 @@ const toolQuestionAnswers = ref<Record<string, string>>({})
 const toolQuestionOtherAnswers = ref<Record<string, string>>({})
 const mcpElicitationAnswers = ref<Record<string, string | number | boolean | string[]>>({})
 const autoFollowOutput = ref(true)
+const isThreadActionLocked = computed(() => props.isTurnInProgress === true || props.isStopPending === true)
 const BOTTOM_THRESHOLD_PX = 16
 const CODE_LANGUAGE_ALIASES: Record<string, string> = {
   js: 'javascript',
@@ -1868,11 +2021,11 @@ const forkableTurnIndexByAnchorId = computed<Record<string, number>>(() => {
 })
 
 function showCopyResponseButton(message: UiMessage): boolean {
-  return typeof copyableResponseContentByAnchorId.value[message.id] === 'string'
+  return !isLiveTurnRuntime.value && typeof copyableResponseContentByAnchorId.value[message.id] === 'string'
 }
 
 function showForkResponseButton(message: UiMessage): boolean {
-  return typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
+  return !isThreadActionLocked.value && typeof forkableTurnIndexByAnchorId.value[message.id] === 'number'
 }
 
 function mergeFileChangeDiff(first: string, second: string): string {
@@ -2345,6 +2498,7 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
   const content = copyableResponseContentByAnchorId.value[anchorMessageId] ?? ''
   if (!content) return
 
+  copyingResponseAnchorId.value = anchorMessageId
   let copied = false
   try {
     await copyTextToClipboard(content)
@@ -2357,7 +2511,15 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
     copied = copyTextWithSelectionFallback(content)
   }
 
-  if (!copied) return
+  copyingResponseAnchorId.value = ''
+  if (!copied) {
+    copyErrorAnchorId.value = anchorMessageId
+    window.setTimeout(() => {
+      if (copyErrorAnchorId.value === anchorMessageId) copyErrorAnchorId.value = ''
+    }, 2600)
+    return
+  }
+  copyErrorAnchorId.value = ''
 
   copiedResponseAnchorId.value = anchorMessageId
   if (copiedMessageResetTimer) {
@@ -2371,14 +2533,35 @@ async function copyResponse(anchorMessageId: string): Promise<void> {
   }, 1800)
 }
 
+function copyResponseLabel(message: UiMessage): string {
+  if (copyingResponseAnchorId.value === message.id) return 'Copying response…'
+  return copiedResponseAnchorId.value === message.id ? 'Response copied' : 'Copy response'
+}
+
 function forkResponse(anchorMessageId: string): void {
   const turnIndex = forkableTurnIndexByAnchorId.value[anchorMessageId]
   if (typeof turnIndex !== 'number') return
   if (!props.activeThreadId) return
+  if (forkingMessageId.value) return
+  forkingMessageId.value = anchorMessageId
+  forkErrorMessageId.value = ''
   emit('forkThread', {
     threadId: props.activeThreadId,
     turnIndex,
+    onComplete: (success) => {
+      forkingMessageId.value = ''
+      if (!success) {
+        forkErrorMessageId.value = anchorMessageId
+        window.setTimeout(() => {
+          if (forkErrorMessageId.value === anchorMessageId) forkErrorMessageId.value = ''
+        }, 2600)
+      }
+    },
   })
+}
+
+function isForkingMessage(message: UiMessage): boolean {
+  return forkingMessageId.value === message.id
 }
 
 const editableTurnIdByMessageId = computed<Record<string, string>>(() => {
@@ -2393,13 +2576,61 @@ const editableTurnIdByMessageId = computed<Record<string, string>>(() => {
 })
 
 function showEditMessageButton(message: UiMessage): boolean {
-  return typeof editableTurnIdByMessageId.value[message.id] === 'string'
+  return !isThreadActionLocked.value && typeof editableTurnIdByMessageId.value[message.id] === 'string'
 }
 
 function editMessage(messageId: string): void {
+  if (isThreadActionLocked.value) return
   const turnId = editableTurnIdByMessageId.value[messageId]
-  if (!turnId) return
-  emit('rollback', { turnId })
+  const message = props.messages.find((item) => item.id === messageId)
+  if (!turnId || !message) return
+  inlineEditingMessageId.value = message.id
+  inlineEditDraft.value = message.text
+  inlineEditError.value = ''
+  void nextTick(() => {
+    window.requestAnimationFrame(() => {
+      const input = conversationListRef.value?.querySelector<HTMLTextAreaElement>('.message-inline-editor-input')
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+  })
+}
+
+function isInlineEditingMessage(message: UiMessage): boolean {
+  return inlineEditingMessageId.value === message.id
+}
+
+function cancelInlineEdit(): void {
+  if (isInlineEditSubmitting.value) return
+  inlineEditingMessageId.value = ''
+  inlineEditDraft.value = ''
+  inlineEditError.value = ''
+}
+
+function submitInlineEdit(message: UiMessage): void {
+  if (isThreadActionLocked.value) return
+  const turnId = editableTurnIdByMessageId.value[message.id]
+  const text = inlineEditDraft.value.trim()
+  if (!turnId || !text || isInlineEditSubmitting.value) return
+  isInlineEditSubmitting.value = true
+  inlineEditError.value = ''
+  emit('editMessage', {
+    threadId: props.activeThreadId,
+    turnId,
+    message,
+    text,
+    onComplete: (success, errorMessage) => {
+      isInlineEditSubmitting.value = false
+      if (!success) {
+        inlineEditError.value = errorMessage || 'Edit failed. Try again.'
+        return
+      }
+      inlineEditingMessageId.value = ''
+      inlineEditDraft.value = ''
+      inlineEditError.value = ''
+    },
+  })
 }
 
 function splitPlainTextByLinks(
@@ -4485,6 +4716,14 @@ onBeforeUnmount(() => {
 <style scoped>
 @reference "tailwindcss";
 
+.context-compaction-row {
+  @apply flex items-center gap-2 py-2 text-sm text-zinc-500 dark:text-zinc-400;
+}
+
+.context-compaction-icon {
+  @apply inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-zinc-200 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400;
+}
+
 .conversation-root {
   @apply relative h-full min-h-0 min-w-0 p-0 flex flex-col overflow-y-hidden overflow-x-hidden bg-transparent border-none rounded-none;
 }
@@ -4523,6 +4762,22 @@ onBeforeUnmount(() => {
 
 .conversation-item-overlay {
   @apply justify-center;
+}
+
+.conversation-item-interrupted {
+  @apply justify-center;
+}
+
+.interrupted-turn-notice {
+  @apply flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950;
+}
+
+:global(.dark) .interrupted-turn-notice {
+  @apply border-amber-800 bg-amber-950/40 text-amber-100;
+}
+
+.interrupted-turn-continue {
+  @apply shrink-0 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 .message-row {
@@ -4668,6 +4923,11 @@ onBeforeUnmount(() => {
   align-self: flex-end;
 }
 
+.message-body[data-role='user'].message-body--editing {
+  width: 100%;
+  align-self: stretch;
+}
+
 .message-toolbar {
   @apply mt-1 self-start flex items-center gap-1 opacity-[0.01] transition-opacity duration-200;
 }
@@ -4676,17 +4936,55 @@ onBeforeUnmount(() => {
   @apply opacity-100;
 }
 
+.message-toolbar:focus-within {
+  @apply opacity-100;
+}
+
+@media (hover: none) {
+  .message-toolbar {
+    @apply opacity-100;
+  }
+}
+
 .message-copy-button {
-  @apply inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white/90 px-1.25 py-0.5 text-[9px] font-medium leading-none text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-900;
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent p-0 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
 }
 
 .message-fork-button {
-  @apply inline-flex items-center gap-0.5 px-0.5 py-0 text-[9px] font-medium leading-none text-slate-500 transition hover:text-slate-900;
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent p-0 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
 }
 
 
 .message-copy-button[data-copied='true'] {
-  @apply border-emerald-200 bg-emerald-50 text-emerald-700;
+  @apply bg-emerald-50 text-emerald-700;
+}
+
+.message-copy-button:disabled,
+.message-fork-button:disabled,
+.message-edit-button:disabled {
+  @apply cursor-wait opacity-70;
+}
+
+.message-action-spinner,
+.message-inline-editor-spinner {
+  @apply inline-block h-3 w-3 rounded-full border-2 border-current border-r-transparent;
+  animation: message-action-spin 0.8s linear infinite;
+}
+
+.message-action-status {
+  @apply mt-1 flex items-center gap-1 text-[10px] text-sky-600;
+}
+
+.message-action-status-error {
+  @apply text-rose-600;
+}
+
+.message-inline-editor-error {
+  @apply mt-1 text-[11px] text-red-600;
+}
+
+@keyframes message-action-spin {
+  to { transform: rotate(360deg); }
 }
 
 .message-edit-button {
@@ -4699,8 +4997,6 @@ onBeforeUnmount(() => {
   @apply text-[10px];
 }
 
-.message-fork-label,
-.message-copy-label,
 .message-edit-label {
   @apply leading-none;
 }
@@ -4774,7 +5070,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card {
-  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-slate-900;
+  @apply flex max-w-[min(var(--chat-card-max,76ch),100%)] flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-zinc-900;
 }
 
 .plan-card-header {
@@ -4782,15 +5078,15 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-title {
-  @apply m-0 text-sm font-semibold leading-5 text-sky-900;
+  @apply m-0 text-sm font-semibold leading-5 text-zinc-800;
 }
 
 .plan-card-badge {
-  @apply inline-flex items-center rounded-full bg-sky-200 px-2 py-0.5 text-[11px] font-medium leading-4 text-sky-900;
+  @apply inline-flex items-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-600;
 }
 
 .plan-card-explanation {
-  @apply text-slate-700;
+  @apply text-zinc-700;
 }
 
 .plan-card-markdown {
@@ -4808,7 +5104,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-markdown :deep(.message-text) {
-  @apply text-sm leading-relaxed whitespace-pre-wrap text-slate-800;
+  @apply text-sm leading-relaxed whitespace-pre-wrap text-zinc-700;
 }
 
 .plan-card-markdown :deep(.message-heading) {
@@ -4904,31 +5200,31 @@ onBeforeUnmount(() => {
 }
 
 .plan-step-list {
-  @apply m-0 flex list-none flex-col gap-2 p-0;
+  @apply m-0 flex list-none flex-col gap-1 p-0;
 }
 
 .plan-step-item {
-  @apply flex items-start gap-2 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-sm leading-relaxed text-slate-800;
+  @apply flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm leading-relaxed text-zinc-700;
 }
 
 .plan-step-item[data-status='completed'] {
-  @apply border-emerald-200 bg-emerald-50/80;
+  @apply text-zinc-400;
 }
 
 .plan-step-item[data-status='inProgress'] {
-  @apply border-amber-200 bg-amber-50/80;
+  @apply bg-zinc-200/70;
 }
 
 .plan-step-status {
-  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700;
+  @apply mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-500;
 }
 
 .plan-step-status[data-status='completed'] {
-  @apply bg-emerald-200 text-emerald-900;
+  @apply bg-zinc-200 text-zinc-400;
 }
 
 .plan-step-status[data-status='inProgress'] {
-  @apply bg-amber-200 text-amber-900;
+  @apply bg-zinc-300 text-zinc-800;
 }
 
 .plan-step-text {
@@ -4936,11 +5232,23 @@ onBeforeUnmount(() => {
 }
 
 .plan-card-actions {
-  @apply mt-3 flex justify-end;
+  @apply mt-2 flex flex-col gap-2 border-t border-zinc-200 pt-3;
 }
 
 .plan-card-implement-button {
-  @apply inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-50;
+  @apply inline-flex w-fit items-center rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-100;
+}
+
+.plan-revision-form {
+  @apply flex min-w-0 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-2 py-1.5 transition focus-within:border-zinc-500;
+}
+
+.plan-revision-input {
+  @apply min-w-0 flex-1 border-0 bg-transparent px-1 text-sm text-zinc-800 outline-none placeholder:text-zinc-400;
+}
+
+.plan-revision-submit {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-white transition hover:bg-zinc-700 disabled:cursor-default disabled:bg-zinc-200 disabled:text-zinc-400;
 }
 
 .message-text {
@@ -5118,6 +5426,47 @@ onBeforeUnmount(() => {
   align-self: flex-end;
 }
 
+.message-card[data-role='user']:has(.message-inline-editor) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.message-inline-editor {
+  @apply flex min-w-0 flex-col gap-3;
+}
+
+.message-inline-editor-input {
+  @apply min-h-28 w-full resize-y border-0 bg-transparent p-0 text-base leading-relaxed text-zinc-950 outline-none;
+}
+
+.message-inline-editor-actions {
+  @apply flex items-center justify-end gap-2;
+}
+
+.message-inline-editor-cancel,
+.message-inline-editor-send {
+  @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.message-inline-editor-cancel {
+  @apply border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50;
+}
+
+.message-inline-editor-send {
+  @apply border border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800;
+}
+
+.message-inline-editor-spinner {
+  @apply h-4 w-4 rounded-full border-2 border-white/40 border-t-white;
+  animation: message-inline-editor-spin 0.8s linear infinite;
+}
+
+@keyframes message-inline-editor-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .automation-message-label {
   @apply mb-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500;
 }
@@ -5202,17 +5551,17 @@ onBeforeUnmount(() => {
 }
 
 .cmd-row {
-  @apply w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-200 bg-zinc-50 cursor-pointer transition text-left hover:bg-zinc-100;
+  @apply w-full flex items-center gap-2 px-0 py-1 bg-transparent border-0 cursor-pointer transition text-left hover:text-zinc-950;
 }
 
 .cmd-row.cmd-row-group {
-  @apply border-dashed border-zinc-300 bg-zinc-100/90 text-zinc-600;
+  @apply bg-transparent text-zinc-500;
 }
 
 .cmd-row.cmd-compact {
   gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: 0.625rem;
+  padding: 0.25rem 0;
+  border-radius: 0.375rem;
 }
 
 .cmd-row.cmd-compact .cmd-chevron {
@@ -5265,17 +5614,14 @@ onBeforeUnmount(() => {
 }
 
 .cmd-output-wrap {
-  @apply rounded-b-lg bg-zinc-900;
+  @apply ml-4 border-l border-zinc-200 bg-transparent pl-3;
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 300ms ease-out, border-color 300ms ease-out;
-  border: 1px solid transparent;
-  border-top: none;
 }
 
 .cmd-output-wrap.cmd-output-visible {
   grid-template-rows: 1fr;
-  border-color: #e4e4e7;
 }
 
 .cmd-group-wrap {
@@ -5298,7 +5644,7 @@ onBeforeUnmount(() => {
 }
 
 .cmd-output {
-  @apply m-0 px-3 py-2 text-xs font-mono text-zinc-200 whitespace-pre-wrap break-words max-h-60 overflow-y-auto;
+  @apply m-0 py-2 pr-3 text-xs font-mono text-zinc-600 whitespace-pre-wrap break-words max-h-60 overflow-y-auto;
 }
 
 .cmd-output.cmd-output-condensed {
@@ -5314,27 +5660,27 @@ onBeforeUnmount(() => {
 }
 
 .file-change-summary-row {
-  @apply border-dashed;
+  @apply rounded-md border-0 bg-transparent px-0 py-1 hover:text-zinc-950;
 }
 
 .file-change-summary-label {
-  @apply flex-1 min-w-0 truncate text-xs font-medium text-zinc-700;
+  @apply flex-1 min-w-0 truncate text-xs font-medium text-zinc-600;
 }
 
 .file-change-summary-status {
-  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-[11px] font-semibold text-zinc-500 flex-shrink-0;
+  @apply inline-flex max-w-28 items-center justify-end gap-1.5 text-right text-xs font-medium text-zinc-500 flex-shrink-0;
 }
 
 .file-change-panel-inner {
-  @apply mb-1 min-h-0 overflow-hidden pl-2;
+  @apply min-h-0 overflow-hidden;
 }
 
 .file-change-list {
-  @apply m-0 flex list-none flex-col gap-0.5 rounded-xl border border-zinc-200 bg-white/80 p-1.5;
+  @apply m-0 ml-4 flex list-none flex-col gap-0 border-l border-zinc-200 bg-transparent py-1 pl-3;
 }
 
 .file-change-item {
-  @apply flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-zinc-700;
+  @apply flex flex-wrap items-center gap-1.5 px-0 py-1 text-sm text-zinc-600;
 }
 
 .file-change-badge {
@@ -5362,7 +5708,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-path-button {
-  @apply min-w-0 border-0 bg-transparent p-0 text-left font-mono text-[13px] text-[#0969da] hover:text-[#1f6feb] hover:underline underline-offset-2;
+  @apply min-w-0 border-0 bg-transparent p-0 text-left font-mono text-[13px] text-zinc-100 hover:text-white hover:underline underline-offset-2;
 }
 
 .file-change-arrow {
@@ -5370,7 +5716,7 @@ onBeforeUnmount(() => {
 }
 
 .file-change-delta {
-  @apply ml-auto inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-600;
+  @apply ml-auto inline-flex items-center gap-1.5 px-0 py-0 text-sm font-semibold text-zinc-300;
 }
 
 .file-change-actions {

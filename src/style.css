@@ -1,6 +1,57 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+:root {
+  --codex-surface: #f9f9f7;
+  --codex-ink: #2d2d2b;
+  --codex-accent: #cc7d5e;
+  --codex-diff-added: #00c853;
+  --codex-diff-removed: #ff5f38;
+  --codex-skill: #cc7d5e;
+}
+
+:root[data-codex-theme="absolutely"] .desktop-layout,
+:root[data-codex-theme="absolutely"] .desktop-main,
+:root[data-codex-theme="absolutely"] .content-root,
+:root[data-codex-theme="absolutely"] .settings-center,
+:root[data-codex-theme="absolutely"] .settings-center-main,
+:root[data-codex-theme="absolutely"] .settings-center-section,
+:root[data-codex-theme="absolutely"] .activity-page,
+:root[data-codex-theme="absolutely"] .native-config,
+:root[data-codex-theme="absolutely"] .settings-data-page {
+  background-color: var(--codex-surface);
+  color: var(--codex-ink);
+}
+
+:root[data-codex-theme="absolutely"] .content-header-accent-icon,
+:root[data-codex-theme="absolutely"] .skills-route-header-icon {
+  background-color: var(--codex-accent);
+}
+
+:root[data-codex-theme="absolutely"] .hljs-keyword,
+:root[data-codex-theme="absolutely"] .hljs-selector-tag,
+:root[data-codex-theme="absolutely"] .hljs-title.function_ {
+  color: var(--codex-accent);
+}
+
+:root[data-codex-theme="absolutely"] .hljs-addition { color: var(--codex-diff-added); }
+:root[data-codex-theme="absolutely"] .hljs-deletion { color: var(--codex-diff-removed); }
+
+.composer-menu-surface {
+  @apply rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+}
+
+.composer-menu-scroll {
+  max-height: min(28rem, calc(100dvh - 12rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+:root.dark .composer-menu-surface {
+  @apply border-zinc-700 bg-zinc-800 shadow-2xl;
+}
+
 :root.dark {
   color-scheme: dark;
 }
@@ -37,8 +88,38 @@
   @apply bg-zinc-950;
 }
 
+:root.dark[data-codex-theme="absolutely"] body,
+:root.dark[data-codex-theme="absolutely"] .desktop-layout,
+:root.dark[data-codex-theme="absolutely"] .desktop-main,
+:root.dark[data-codex-theme="absolutely"] .content-root,
+:root.dark[data-codex-theme="absolutely"] .settings-center,
+:root.dark[data-codex-theme="absolutely"] .settings-center-main,
+:root.dark[data-codex-theme="absolutely"] .settings-center-section,
+:root.dark[data-codex-theme="absolutely"] .activity-page,
+:root.dark[data-codex-theme="absolutely"] .native-config,
+:root.dark[data-codex-theme="absolutely"] .settings-data-page {
+  background-color: var(--codex-surface);
+  color: var(--codex-ink);
+}
+
+:root.dark .thread-message-refresh {
+  @apply border-zinc-700 bg-zinc-900/90 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
 :root.dark .sidebar-scrollable {
   @apply bg-zinc-900;
+}
+
+:root.dark .sidebar-thread-controls-brand {
+  @apply text-zinc-100;
+}
+
+:root.dark .sidebar-thread-controls-button {
+  @apply text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
+:root.dark .sidebar-thread-controls-new-thread {
+  @apply text-zinc-200 hover:bg-zinc-800;
 }
 
 :root.dark .sidebar-settings-area {
@@ -59,6 +140,19 @@
 
 :root.dark .sidebar-settings-row + .sidebar-settings-row {
   @apply border-zinc-700;
+}
+
+:root.dark .sidebar-settings-panel .composer-dropdown-trigger,
+:root.dark .sidebar-settings-provider-dropdown .composer-dropdown-trigger {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
+}
+
+:root.dark .sidebar-settings-provider-meta {
+  @apply text-zinc-400;
+}
+
+:root.dark .cc-switch-provider-error {
+  @apply bg-red-950/50 text-red-300;
 }
 
 :root.dark .sidebar-settings-context-value {
@@ -119,6 +213,10 @@
   @apply border-zinc-700 bg-zinc-900/70;
 }
 
+:root.dark .sidebar-settings-account-collapse {
+  @apply bg-zinc-700 text-zinc-200 hover:bg-zinc-600;
+}
+
 :root.dark .sidebar-settings-account-item.is-active {
   @apply border-emerald-500/35 bg-emerald-500/10;
 }
@@ -175,12 +273,74 @@
   @apply bg-zinc-900;
 }
 
+:root.dark .settings-center {
+  @apply bg-zinc-950 text-zinc-100;
+}
+
+:root.dark .settings-center-nav {
+  @apply border-zinc-800;
+}
+
+:root.dark .settings-center-nav-title {
+  @apply text-zinc-500;
+}
+
+:root.dark .settings-center-nav-item {
+  @apply text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
+:root.dark .settings-center-nav-item.is-active {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .settings-center-section {
+  @apply border-zinc-800 bg-zinc-900;
+}
+
+:root.dark .settings-center-personalization-section {
+  @apply border-0 bg-transparent;
+}
+
+:root.dark .settings-center-panel .composer-dropdown-trigger {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
+}
+
+:root.dark .settings-center-search,
+:root.dark .native-config,
+:root.dark .activity {
+  @apply border-zinc-800 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .sidebar-quick-settings {
+  @apply border-zinc-700 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .sidebar-quick-settings-heading,
+:root.dark .theme-preview,
+:root.dark .settings-data-archive-row {
+  @apply border-zinc-700;
+}
+
+:root.dark .sidebar-quick-settings-row {
+  @apply hover:bg-zinc-800;
+}
+
+:root.dark .native-config input,
+:root.dark .native-config button,
+:root.dark .activity button {
+  @apply border-zinc-700 bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .activity .stats article {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
 :root.dark .sidebar-skills-link {
-  @apply border-emerald-900/70 bg-[linear-gradient(135deg,_rgba(6,78,59,0.42),_rgba(24,24,27,0.96))] text-zinc-100 hover:border-emerald-700 hover:bg-emerald-950;
+  @apply border-transparent bg-transparent text-zinc-200 hover:border-transparent hover:bg-zinc-800 hover:text-zinc-50;
 }
 
 :root.dark .sidebar-skills-link.is-active {
-  @apply border-emerald-700 bg-emerald-950/80 text-zinc-50;
+  @apply border-transparent bg-zinc-800 text-zinc-50;
 }
 
 :root.dark .sidebar-search-toggle {
@@ -189,6 +349,18 @@
 
 :root.dark .sidebar-search-toggle[aria-pressed='true'] {
   @apply border-zinc-600 bg-zinc-800 text-zinc-300;
+}
+
+:root.dark .sidebar-activity-toggle {
+  @apply text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800;
+}
+
+:root.dark .sidebar-activity-toggle[aria-pressed='true'] {
+  @apply border-orange-800 bg-orange-950/50 text-orange-300;
+}
+
+:root.dark .sidebar-activity-attention-dot {
+  @apply border-zinc-900;
 }
 
 :root.dark .sidebar-search-bar {
@@ -235,6 +407,15 @@
   @apply text-zinc-500;
 }
 
+:root.dark .activity-thread-header,
+:root.dark .activity-thread-subtitle {
+  @apply text-zinc-500;
+}
+
+:root.dark .activity-thread-count {
+  @apply bg-orange-950/60 text-orange-300;
+}
+
 :root.dark .project-header-row {
   @apply hover:bg-zinc-800;
 }
@@ -247,7 +428,7 @@
   @apply border-zinc-700 bg-zinc-800;
 }
 
-:root.dark .thread-composer:has(.thread-composer-input-wrap--expanded) {
+:root.dark .thread-composer--expanded {
   @apply bg-zinc-950/95;
 }
 
@@ -255,12 +436,32 @@
   @apply border-zinc-400 shadow-zinc-950/60;
 }
 
-:root.dark .thread-composer-input {
-  @apply text-zinc-100;
-}
+@media (max-width: 639px) {
+  :root.dark .thread-composer-shell {
+    @apply border-transparent bg-transparent;
+  }
 
-:root.dark .thread-composer-input:disabled {
-  @apply bg-zinc-700 text-zinc-500;
+  :root.dark .thread-composer-input-wrap {
+    @apply border-zinc-700 bg-zinc-800;
+  }
+
+  :root.dark .thread-composer-config-controls .composer-dropdown-trigger,
+  :root.dark .thread-composer-config-controls .model-settings-trigger,
+  :root.dark .thread-composer-config-controls .search-dropdown-trigger,
+  :root.dark .thread-composer-config-controls .permissions-dropdown-trigger,
+  :root.dark .thread-composer-mobile-leading-controls .permissions-dropdown-trigger,
+  :root.dark .thread-composer-model-context .model-settings-trigger,
+  :root.dark .thread-composer-attach-trigger {
+    @apply border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white;
+  }
+
+  :root.dark .thread-composer--expanded .thread-composer-shell {
+    @apply border-zinc-700 bg-zinc-900;
+  }
+
+  :root.dark .thread-composer--expanded .thread-composer-input-wrap {
+    @apply bg-transparent;
+  }
 }
 
 :root.dark .thread-composer-expand {
@@ -332,8 +533,87 @@
   @apply border-zinc-600 bg-zinc-800;
 }
 
+:root.dark .model-settings-trigger {
+  @apply text-zinc-400 hover:text-zinc-200;
+}
+
+:root.dark .model-settings-menu {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .model-settings-section-label,
+:root.dark .model-settings-navigation-value {
+  @apply text-zinc-400;
+}
+
+:root.dark .model-settings-option,
+:root.dark .model-settings-navigation-label,
+:root.dark .model-settings-model-header {
+  @apply text-zinc-100;
+}
+
+:root.dark .model-settings-option:hover,
+:root.dark .model-settings-option.is-selected,
+:root.dark .model-settings-navigation-row:hover,
+:root.dark .model-settings-back:hover {
+  @apply bg-zinc-800;
+}
+
+:root.dark .model-settings-selected-mark,
+:root.dark .model-settings-navigation-chevron,
+:root.dark .model-settings-back {
+  @apply text-zinc-300;
+}
+
+:root.dark .model-settings-divider {
+  @apply bg-zinc-800;
+}
+
 :root.dark .composer-dropdown-option {
   @apply text-zinc-300 hover:bg-zinc-700;
+}
+
+:root.dark .permissions-dropdown-trigger {
+  @apply text-zinc-400 hover:text-zinc-200;
+}
+
+:root.dark .permissions-dropdown-menu {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .permissions-dropdown-option:hover,
+:root.dark .permissions-dropdown-option.is-selected {
+  @apply bg-zinc-800;
+}
+
+:root.dark .permissions-dropdown-option-title {
+  @apply text-zinc-100;
+}
+
+:root.dark .permissions-dropdown-option-description,
+:root.dark .permissions-dropdown-selected-mark,
+:root.dark .permissions-dropdown-next-turn {
+  @apply text-zinc-400;
+}
+
+:root.dark .permissions-dropdown-next-turn {
+  @apply border-zinc-800;
+}
+
+:root.dark .full-access-confirmation {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .full-access-confirmation h2 {
+  @apply text-zinc-100;
+}
+
+:root.dark .full-access-confirmation p {
+  @apply text-zinc-300;
+}
+
+:root.dark .full-access-confirmation-cancel {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-100 hover:bg-zinc-700;
 }
 
 :root.dark .composer-dropdown-option.is-selected {
@@ -385,40 +665,148 @@
   @apply border-zinc-600 bg-zinc-800;
 }
 
-:root.dark .thread-composer-attach-item {
-  @apply text-zinc-300 hover:bg-zinc-700;
+:root.dark .composer-menu-surface .thread-composer-attach-item,
+:root.dark .composer-menu-surface .thread-composer-attach-setting {
+  @apply text-zinc-200 hover:bg-zinc-700;
 }
 
-:root.dark .thread-composer-attach-separator {
-  @apply bg-zinc-700;
+:root.dark .composer-menu-surface .thread-composer-attach-item:disabled,
+:root.dark .composer-menu-surface .thread-composer-attach-setting:disabled {
+  @apply text-zinc-400 opacity-100;
 }
 
-:root.dark .thread-composer-attach-setting {
-  @apply text-zinc-300 hover:bg-zinc-700;
-}
-
-:root.dark .thread-composer-attach-setting-label {
-  @apply text-zinc-100;
-}
-
-:root.dark .thread-composer-attach-setting-description {
-  @apply text-zinc-400;
-}
-
-:root.dark .thread-composer-attach-mode-label {
-  @apply text-zinc-100;
-}
-
-:root.dark .thread-composer-attach-mode-buttons {
-  @apply border-zinc-600 bg-zinc-900;
-}
-
-:root.dark .thread-composer-attach-mode-button {
+:root.dark .thread-composer-attach-plan-icon,
+:root.dark .thread-composer-plan-toggle {
   @apply text-zinc-300 hover:text-zinc-100;
 }
 
-:root.dark .thread-composer-attach-mode-button.is-active {
-  @apply bg-zinc-200 text-zinc-900 hover:text-zinc-900;
+:root.dark .composer-menu-surface .thread-composer-attach-plan-copy small {
+  @apply text-zinc-400;
+}
+
+:root.dark .thread-composer-plan-toggle {
+  @apply border-zinc-700;
+}
+
+:root.dark .thread-composer-context-ring-track {
+  background: conic-gradient(var(--context-usage-accent) calc(var(--context-usage-percent) * 1%), rgb(82 82 91) 0);
+}
+
+:root.dark .thread-composer-context-ring-track::after {
+  @apply bg-zinc-800;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-separator {
+  @apply bg-zinc-700;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-section-label,
+:root.dark .composer-menu-surface .thread-composer-attach-loading,
+:root.dark .composer-menu-surface .thread-composer-attach-plugin-description {
+  @apply text-zinc-400;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-error {
+  @apply text-red-300;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-error button {
+  @apply border-red-900/80 text-red-300 hover:bg-red-950/40;
+}
+
+:root.dark .thread-composer-attach-plugin {
+  @apply hover:bg-zinc-700;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-plugin-name {
+  @apply text-zinc-200;
+}
+
+:root.dark .thread-composer-attach-plugin-icon.is-fallback {
+  @apply bg-zinc-700 text-zinc-200;
+}
+
+:root.dark .thread-composer-attach-plugin-icon.is-chatgpt {
+  @apply border-zinc-500 text-zinc-300;
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-setting-label {
+  @apply text-zinc-100;
+}
+
+:root.dark .personalization-settings-rail {
+  @apply border-zinc-800;
+}
+
+:root.dark .personalization-settings-rail-item {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .personalization-settings-heading h1,
+:root.dark .personalization-settings-editor h2 {
+  @apply text-zinc-100;
+}
+
+:root.dark .personalization-settings-editor {
+  @apply border-zinc-800;
+}
+
+:root.dark .personalization-settings-save {
+  @apply bg-zinc-100 text-zinc-900 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500;
+}
+
+:root.dark .personalization-settings-loading,
+:root.dark .personalization-settings-textarea {
+  @apply border-zinc-700 bg-zinc-900 text-zinc-200;
+}
+
+:root.dark .personalization-settings-textarea {
+  @apply focus:border-zinc-500 focus:ring-zinc-800;
+}
+
+:root.dark .personalization-settings-note {
+  @apply bg-zinc-800 text-zinc-300;
+}
+
+:root.dark .personalization-settings-warning {
+  @apply bg-amber-950/40 text-amber-200;
+}
+
+:root.dark .personalization-settings-status[data-kind='success'] {
+  @apply bg-emerald-950/40 text-emerald-200;
+}
+
+:root.dark .personalization-settings-status[data-kind='error'] {
+  @apply bg-red-950/40 text-red-200;
+}
+
+@media (max-width: 1023px) {
+  :root.dark .personalization-settings-rail {
+    @apply border-zinc-800;
+  }
+
+  :root.dark .personalization-settings-rail-item {
+    @apply bg-transparent;
+  }
+}
+
+:root.dark .composer-menu-surface .thread-composer-attach-setting-description {
+  @apply text-zinc-400;
+}
+
+:root.dark .composer-menu-surface .skill-picker-label,
+:root.dark .composer-menu-surface .skill-picker-empty,
+:root.dark .composer-menu-surface .skill-picker-desc {
+  @apply text-zinc-400;
+}
+
+:root.dark .composer-menu-surface .skill-picker-name {
+  @apply text-zinc-100;
+}
+
+:root.dark .composer-menu-surface .skill-picker-item:hover,
+:root.dark .composer-menu-surface .skill-picker-item.is-highlighted {
+  @apply bg-zinc-700;
 }
 
 :root.dark .thread-composer-attach-switch {
@@ -435,6 +823,26 @@
 
 :root.dark .thread-composer-file-mentions {
   @apply border-zinc-600 bg-zinc-800;
+}
+
+:root.dark .thread-composer-slash-commands {
+  @apply border-zinc-600 bg-zinc-800;
+}
+
+:root.dark .thread-composer-slash-command-row {
+  @apply hover:bg-zinc-700;
+}
+
+:root.dark .thread-composer-slash-command-row.is-active {
+  @apply bg-zinc-700;
+}
+
+:root.dark .thread-composer-slash-command-name {
+  @apply text-zinc-100;
+}
+
+:root.dark .thread-composer-slash-command-description {
+  @apply text-zinc-400;
 }
 
 :root.dark .thread-composer-file-mention-row {
@@ -657,6 +1065,22 @@
   @apply bg-zinc-700;
 }
 
+:root.dark .message-inline-editor-input {
+  @apply text-zinc-100;
+}
+
+:root.dark .message-inline-editor-cancel {
+  @apply border-zinc-500 bg-zinc-700 text-zinc-100 hover:bg-zinc-600;
+}
+
+:root.dark .message-inline-editor-send {
+  @apply border-zinc-100 bg-zinc-100 text-zinc-950 hover:bg-white;
+}
+
+:root.dark .message-inline-editor-spinner {
+  @apply border-zinc-500 border-t-zinc-950;
+}
+
 :root.dark .automation-message-label {
   @apply text-zinc-400;
 }
@@ -666,11 +1090,15 @@
 }
 
 :root.dark .message-copy-button {
-  @apply border-zinc-700 bg-zinc-800/90 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
 }
 
 :root.dark .message-copy-button[data-copied='true'] {
-  @apply border-emerald-500/40 bg-emerald-500/10 text-emerald-200;
+  @apply border-0 bg-emerald-500/10 text-emerald-200;
+}
+
+:root.dark .message-fork-button {
+  @apply bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
 }
 
 :root.dark .message-rollback-button {
@@ -724,11 +1152,11 @@
 }
 
 :root.dark .cmd-row {
-  @apply border-zinc-700 bg-zinc-800 hover:bg-zinc-700;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-transparent hover:text-zinc-100;
 }
 
 :root.dark .cmd-row.cmd-row-group {
-  @apply border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700;
+  @apply border-0 bg-transparent text-zinc-400 hover:bg-transparent hover:text-zinc-100;
 }
 
 :root.dark .cmd-chevron {
@@ -763,6 +1191,10 @@
   @apply border-zinc-700;
 }
 
+:root.dark .cmd-output {
+  @apply text-zinc-400;
+}
+
 :root.dark .file-change-summary-label {
   @apply text-zinc-200;
 }
@@ -776,7 +1208,7 @@
 }
 
 :root.dark .file-change-list {
-  @apply border-zinc-700 bg-zinc-900/70;
+  @apply border-zinc-700 bg-transparent;
 }
 
 :root.dark .file-change-item {
@@ -1302,15 +1734,15 @@
 }
 
 :root.dark .plan-card {
-  @apply border-sky-700/70 bg-slate-900/78;
+  @apply border-zinc-700 bg-zinc-900 text-zinc-100;
 }
 
 :root.dark .plan-card-title {
-  @apply text-sky-200;
+  @apply text-zinc-100;
 }
 
 :root.dark .plan-card-badge {
-  @apply bg-sky-800 text-sky-100;
+  @apply bg-zinc-800 text-zinc-300;
 }
 
 :root.dark .plan-card-explanation {
@@ -1345,15 +1777,15 @@
 }
 
 :root.dark .plan-step-item {
-  @apply border-zinc-700 bg-zinc-800/72 text-zinc-100;
+  @apply bg-transparent text-zinc-200;
 }
 
 :root.dark .plan-step-item[data-status='completed'] {
-  @apply border-emerald-900 bg-emerald-950/40;
+  @apply bg-transparent text-zinc-500;
 }
 
 :root.dark .plan-step-item[data-status='inProgress'] {
-  @apply border-amber-900 bg-amber-950/40;
+  @apply bg-zinc-800/70 text-zinc-100;
 }
 
 :root.dark .plan-step-status {
@@ -1361,15 +1793,31 @@
 }
 
 :root.dark .plan-step-status[data-status='completed'] {
-  @apply bg-emerald-900 text-emerald-200;
+  @apply bg-zinc-800 text-zinc-500;
 }
 
 :root.dark .plan-step-status[data-status='inProgress'] {
-  @apply bg-amber-900 text-amber-200;
+  @apply bg-zinc-700 text-zinc-100;
 }
 
 :root.dark .plan-card-implement-button {
   @apply border-zinc-600 bg-zinc-800 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-700;
+}
+
+:root.dark .plan-card-actions {
+  @apply border-zinc-700;
+}
+
+:root.dark .plan-revision-form {
+  @apply border-zinc-600 bg-zinc-800 focus-within:border-zinc-400;
+}
+
+:root.dark .plan-revision-input {
+  @apply text-zinc-100 placeholder-zinc-500;
+}
+
+:root.dark .plan-revision-submit {
+  @apply bg-zinc-100 text-zinc-900 hover:bg-white disabled:bg-zinc-700 disabled:text-zinc-500;
 }
 
 :root.dark .message-image-button {
@@ -1450,10 +1898,6 @@
 
 :root.dark .thread-composer-skill-chip {
   @apply border-emerald-800 bg-emerald-900/40 text-emerald-300;
-}
-
-:root.dark .thread-composer-input::placeholder {
-  @apply text-zinc-500;
 }
 
 :root.dark .new-thread-folder-dropdown {
@@ -1877,7 +2321,6 @@
 }
 
 @media (max-width: 768px) {
-  .thread-composer-input,
   .composer-dropdown-search-input,
   .search-dropdown-search,
   .sidebar-search-input,
