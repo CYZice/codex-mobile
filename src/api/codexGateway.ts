@@ -2812,6 +2812,9 @@ export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: st
 }
 
 export async function saveCodexNativeSettings(settings: CodexNativeSettings): Promise<void> {
+  if (settings.scope === 'project' && !settings.filePath) {
+    throw new Error('Codex did not expose a Project config path for this workspace.')
+  }
   const edits = [
     ['model', settings.model],
     ['model_reasoning_effort', settings.reasoningEffort],

@@ -65,6 +65,12 @@ describe('native Codex settings', () => {
     await saveCodexNativeSettings(settings)
     expect(requests[1]).toMatchObject({ method: 'config/batchWrite', params: { filePath: 'D:\\repo\\.codex/config.toml', expectedVersion: 'v1' } })
   })
+
+  it('never falls back from a missing project path to the user config', async () => {
+    await expect(saveCodexNativeSettings({
+      scope: 'project', filePath: null, version: null, model: '', reasoningEffort: '', approvalPolicy: '', sandboxMode: '', networkAccess: false, webSearch: '', verbosity: '', reasoningSummary: '',
+    })).rejects.toThrow('did not expose a Project config path')
+  })
 })
 
 describe('ChatGPT conversation loading', () => {
