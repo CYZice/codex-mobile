@@ -27,3 +27,4 @@ Return to the [manual test index](../../tests.md).
 | [Desktop local projects and web project persistence](desktop-local-projects-and-web-project-persistence.md) |
 | [Codex Desktop style sidebar](codex-desktop-style-sidebar.md) |
 | [Sidebar priority activity view](sidebar-activity-priority-view.md) |
+| [Project and chat sidebar flow on mobile](project-chat-flow-on-mobile.md) |

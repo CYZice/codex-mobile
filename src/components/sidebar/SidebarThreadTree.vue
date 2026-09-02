@@ -1618,7 +1618,9 @@ const layoutTopByProject = computed<Record<string, number>>(() => {
   return topByProject
 })
 
-const groupsContainerStyle = computed<Record<string, string>>(() => {
+const groupsContainerStyle = computed<Record<string, string> | undefined>(() => {
+  if (!activeProjectDrag.value) return undefined
+
   let totalHeight = 0
   for (const projectName of layoutProjectOrder.value) {
     totalHeight += getProjectOuterHeight(projectName)
@@ -2988,7 +2990,13 @@ function projectGroupStyle(projectName: string): Record<string, string> | undefi
   const shouldElevateForMenu =
     openProjectMenuId.value === projectName || openThreadMenuProjectName === projectName
 
-  if (!drag || drag.projectName !== projectName) {
+  if (!drag) {
+    return shouldElevateForMenu
+      ? { position: 'relative', zIndex: '40' }
+      : undefined
+  }
+
+  if (drag.projectName !== projectName) {
     return {
       position: 'absolute',
       top: '0',
@@ -3257,6 +3265,10 @@ onBeforeUnmount(() => {
 
 .project-group {
   @apply m-0 transition-shadow;
+}
+
+.project-group[data-expanded='true'] {
+  margin-bottom: 6px;
 }
 
 .project-group[data-dragging='true'] {
