@@ -22,7 +22,7 @@
       </li>
       <template v-for="message in visibleMessages" :key="message.id">
         <li
-          v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id)"
+          v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id) && !hiddenTurnActivityMessageIds.has(message.id)"
           class="conversation-item"
           :data-role="message.role"
           :data-message-type="message.messageType || ''"
@@ -313,48 +313,17 @@
                   <code v-if="message.automationDisplayName">{{ message.automationDisplayName }}</code>
                 </div>
                 <div v-if="message.messageType === 'worked'" class="worked-separator-wrap" aria-live="polite">
-                  <button type="button" class="worked-separator" @click="toggleWorkedExpand(message)">
+                  <button
+                    type="button"
+                    class="worked-separator"
+                    :aria-expanded="isWorkedExpanded(message)"
+                    @click="toggleWorkedExpand(message)"
+                  >
                     <span class="worked-separator-line" aria-hidden="true" />
                     <span class="worked-chevron" :class="{ 'worked-chevron-open': isWorkedExpanded(message) }">▶</span>
                     <p class="worked-separator-text">{{ message.text }}</p>
                     <span class="worked-separator-line" aria-hidden="true" />
                   </button>
-                  <div v-if="isWorkedExpanded(message)" class="worked-details">
-                    <div
-                      v-for="cmd in getCommandsForWorked(messages, messages.indexOf(message))"
-                      :key="`worked-cmd-${cmd.id}`"
-                      class="worked-cmd-item"
-                    >
-                      <button
-                        type="button"
-                        class="cmd-row"
-                        :class="[
-                          commandStatusClass(cmd),
-                          {
-                            'cmd-expanded': isCommandExpanded(cmd),
-                            'cmd-compact': isCommandCompact(cmd),
-                          },
-                        ]"
-                        @click="toggleCommandExpand(cmd)"
-                      >
-                        <span class="cmd-chevron" :class="{ 'cmd-chevron-open': isCommandExpanded(cmd) }">▶</span>
-                        <code class="cmd-label">{{ commandDisplayText(cmd) }}</code>
-                        <span class="cmd-status">{{ commandStatusLabel(cmd) }}</span>
-                      </button>
-                      <div
-                        class="cmd-output-wrap"
-                        :class="{ 'cmd-output-visible': isCommandExpanded(cmd) }"
-                      >
-                        <div class="cmd-output-inner">
-                          <pre
-                            class="cmd-output"
-                            :class="{ 'cmd-output-condensed': isCommandOutputCondensed(cmd) }"
-                            v-text="cmd.commandExecution?.aggregatedOutput || '(no output)'"
-                          ></pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
                 <div v-else-if="isPlanMessage(message)" class="plan-card" :data-streaming="message.messageType === 'plan.live'">
                   <div class="plan-card-header">
@@ -1009,6 +978,7 @@ import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics
 import { useMobile } from '../../composables/useMobile'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import { copyTextToClipboard, copyTextWithSelectionFallback } from '../../utils/clipboard'
+import { groupWorkedTurnActivity } from './turnActivityCollapse'
 
 import IconTablerArrowBackUp from '../icons/IconTablerArrowBackUp.vue'
 import IconTablerArrowUp from '../icons/IconTablerArrowUp.vue'
@@ -1019,11 +989,13 @@ import IconTablerX from '../icons/IconTablerX.vue'
 
 type HighlightJsModule = (typeof import('highlight.js/lib/common'))['default']
 
+const WORKED_TURN_EXPANDED_STORAGE_KEY = 'codex-web-local.expanded-worked-turns.v1'
+
 const expandedCommandIds = ref<Set<string>>(new Set())
 const planRevisionDraft = ref('')
 const collapsedAutoCommandIds = ref<Set<string>>(new Set())
 const expandedCommandGroupIds = ref<Set<string>>(new Set())
-const expandedWorkedIds = ref<Set<string>>(new Set())
+const expandedWorkedIds = ref<Set<string>>(loadExpandedWorkedIds())
 const expandedFileChangeSummaryIds = ref<Set<string>>(new Set())
 const activeDiffViewerSummary = ref<TurnFileChangeSummary | null>(null)
 const activeDiffViewerChangeKey = ref('')
@@ -1345,14 +1317,20 @@ function commandGroupSummaryStatus(message: UiMessage): string {
 }
 
 function toggleWorkedExpand(message: UiMessage): void {
+  const group = workedTurnActivityGroups.value[message.id]
+  if (!group?.hasFinalAssistantMessage || group.activityMessageIds.length === 0) return
+
+  const storageKey = workedTurnStorageKey(message)
   const next = new Set(expandedWorkedIds.value)
-  if (next.has(message.id)) next.delete(message.id)
-  else next.add(message.id)
+  if (next.has(storageKey)) next.delete(storageKey)
+  else next.add(storageKey)
   expandedWorkedIds.value = next
+  saveExpandedWorkedIds(next)
 }
 
 function isWorkedExpanded(message: UiMessage): boolean {
-  return expandedWorkedIds.value.has(message.id)
+  const group = workedTurnActivityGroups.value[message.id]
+  return Boolean(group?.hasFinalAssistantMessage && expandedWorkedIds.value.has(workedTurnStorageKey(message)))
 }
 
 function toggleFileChangeSummary(message: UiMessage): void {
@@ -1428,16 +1406,6 @@ function pruneCommandIdSet(source: Set<string>, validIds: Set<string>): Set<stri
   return next.size === source.size ? source : next
 }
 
-function getCommandsForWorked(messages: UiMessage[], workedIndex: number): UiMessage[] {
-  const result: UiMessage[] = []
-  for (let i = workedIndex - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m.messageType === 'commandExecution') result.unshift(m)
-    else if (m.role === 'user' || m.messageType === 'worked') break
-  }
-  return result
-}
-
 const props = defineProps<{
   messages: UiMessage[]
   pendingRequests: UiServerRequest[]
@@ -1453,6 +1421,40 @@ const props = defineProps<{
   isLoadingPersistedAbove?: boolean
   loadEarlierMessages?: (threadId: string) => Promise<void>
 }>()
+
+function loadExpandedWorkedIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WORKED_TURN_EXPANDED_STORAGE_KEY) ?? '[]') as unknown
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((value): value is string => typeof value === 'string'))
+      : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function saveExpandedWorkedIds(ids: Set<string>): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(WORKED_TURN_EXPANDED_STORAGE_KEY, JSON.stringify([...ids]))
+}
+
+function workedTurnStorageKey(message: UiMessage): string {
+  return `${props.activeThreadId}\u0000${message.turnId || message.id}`
+}
+
+const workedTurnActivityGroups = computed(() => groupWorkedTurnActivity(props.messages))
+
+const hiddenTurnActivityMessageIds = computed(() => {
+  const hidden = new Set<string>()
+  for (const workedMessage of props.messages) {
+    if (workedMessage.messageType !== 'worked' || isWorkedExpanded(workedMessage)) continue
+    const group = workedTurnActivityGroups.value[workedMessage.id]
+    if (!group?.hasFinalAssistantMessage) continue
+    for (const messageId of group.activityMessageIds) hidden.add(messageId)
+  }
+  return hidden
+})
 
 const emit = defineEmits<{
   forkThread: [payload: { threadId: string; turnIndex: number; onComplete: (success: boolean) => void }]
@@ -5520,10 +5522,6 @@ onBeforeUnmount(() => {
 
 .worked-separator-text {
   @apply m-0 text-sm leading-relaxed font-normal text-slate-800;
-}
-
-.worked-details {
-  @apply flex flex-col gap-1.5 pt-2;
 }
 
 .worked-cmd-item {
