@@ -223,6 +223,38 @@
   @apply bg-zinc-900;
 }
 
+:root.dark .settings-center {
+  @apply bg-zinc-950 text-zinc-100;
+}
+
+:root.dark .settings-center-nav {
+  @apply border-zinc-800;
+}
+
+:root.dark .settings-center-nav-title {
+  @apply text-zinc-500;
+}
+
+:root.dark .settings-center-nav-item {
+  @apply text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100;
+}
+
+:root.dark .settings-center-nav-item.is-active {
+  @apply bg-zinc-800 text-zinc-100;
+}
+
+:root.dark .settings-center-section {
+  @apply border-zinc-800 bg-zinc-900;
+}
+
+:root.dark .settings-center-personalization-section {
+  @apply border-0 bg-transparent;
+}
+
+:root.dark .settings-center-panel .composer-dropdown-trigger {
+  @apply border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700;
+}
+
 :root.dark .sidebar-skills-link {
   @apply border-transparent bg-transparent text-zinc-200 hover:border-transparent hover:bg-zinc-800 hover:text-zinc-50;
 }

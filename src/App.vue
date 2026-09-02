@@ -112,19 +112,17 @@
         </div>
 
         <div
-          v-if="!isSidebarCollapsed"
+          v-if="!isSidebarCollapsed || isSettingsRoute"
           ref="settingsAreaRef"
           class="sidebar-settings-area"
           @click="onSettingsAreaClick"
         >
-          <Transition name="settings-panel">
-            <div
-              v-if="isSettingsOpen"
-              ref="settingsPanelRef"
-              class="sidebar-settings-panel"
-              @click.stop
-            >
-              <div class="sidebar-settings-account-section">
+          <Teleport v-if="isSettingsRoute" defer to="#settings-center-content">
+            <div class="settings-center-panel">
+              <section id="settings-personalization" class="settings-center-section settings-center-personalization-section">
+                <PersonalizationSettings />
+              </section>
+              <div id="settings-account" class="sidebar-settings-account-section">
                 <div class="sidebar-settings-account-header">
                   <div class="sidebar-settings-account-header-main">
                     <button
@@ -228,11 +226,12 @@
                   </div>
                 </template>
               </div>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.sendWithEnter" @click="toggleSendWithEnter">
+              <button id="settings-input" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.sendWithEnter" @click="toggleSendWithEnter">
                 <span class="sidebar-settings-label">{{ t('Require ⌘ + enter to send') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': !sendWithEnter }" />
               </button>
               <button
+                id="settings-configuration"
                 class="sidebar-settings-row"
                 type="button"
                 :disabled="isReloadingCodexConfiguration"
@@ -246,17 +245,13 @@
                 <span>{{ codexConfigurationReloadError }}</span>
                 <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, codexConfigurationReloadError)">{{ t('Send feedback') }}</a>
               </div>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
+              <button id="settings-general" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
                 <span class="sidebar-settings-label">{{ t('When busy, send as') }}</span>
                 <span class="sidebar-settings-value">{{ inProgressSendMode === 'steer' ? t('Steer') : t('Queue') }}</span>
               </button>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.appearance" @click="cycleDarkMode">
+              <button id="settings-appearance" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.appearance" @click="cycleDarkMode">
                 <span class="sidebar-settings-label">{{ t('Appearance') }}</span>
                 <span class="sidebar-settings-value">{{ darkMode === 'system' ? t('System') : darkMode === 'dark' ? t('Dark') : t('Light') }}</span>
-              </button>
-              <button class="sidebar-settings-row" type="button" @click="openPersonalizationSettings">
-                <span class="sidebar-settings-label">{{ t('Personalization') }}</span>
-                <span class="sidebar-settings-value">AGENTS.md</span>
               </button>
               <div class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the interface language for the app.')">
                 <span class="sidebar-settings-label">{{ t('UI language') }}</span>
@@ -273,7 +268,7 @@
                 <span class="sidebar-settings-label">{{ t('Chat width') }}</span>
                 <span class="sidebar-settings-value">{{ chatWidthLabel }}</span>
               </button>
-              <button class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationClickToToggle" @click="toggleDictationClickToToggle">
+              <button id="settings-voice" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.dictationClickToToggle" @click="toggleDictationClickToToggle">
                 <span class="sidebar-settings-label">{{ t('Click to toggle dictation') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': dictationClickToToggle }" />
               </button>
@@ -464,7 +459,7 @@
                   @update:model-value="onDictationLanguageChange"
                 />
               </div>
-              <button class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
+              <button id="settings-archived" class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
                 <span class="sidebar-settings-label">{{ t('Archived chats') }}</span>
                 <span class="sidebar-settings-value">{{ isArchivedChatsOpen ? t('Hide') : t('Manage') }}</span>
               </button>
@@ -489,62 +484,6 @@
                   {{ isLoadingArchivedThreads ? t('Loading…') : t('Load more') }}
                 </button>
               </div>
-              <button class="sidebar-settings-row" type="button" aria-live="polite" @click="isTelegramConfigOpen = !isTelegramConfigOpen">
-                <span class="sidebar-settings-label">{{ t('Telegram') }}</span>
-                <span class="sidebar-settings-value">{{ telegramStatusText }}</span>
-              </button>
-              <div v-if="isTelegramConfigOpen" class="sidebar-settings-telegram-panel">
-                <label class="sidebar-settings-field">
-                  <span class="sidebar-settings-field-label">{{ t('Bot token') }}</span>
-                  <input
-                    v-model="telegramBotTokenDraft"
-                    class="sidebar-settings-input"
-                    type="password"
-                    placeholder="123456:ABCDEF"
-                    autocomplete="off"
-                    spellcheck="false"
-                  >
-                </label>
-                <label class="sidebar-settings-field">
-                  <span class="sidebar-settings-field-label">{{ t('Allowed Telegram user IDs') }}</span>
-                  <textarea
-                    v-model="telegramAllowedUserIdsDraft"
-                    class="sidebar-settings-textarea"
-                    rows="3"
-                    placeholder="123456789&#10;987654321"
-                    spellcheck="false"
-                  />
-                </label>
-                <div class="sidebar-settings-field-help">
-                  {{ t('Put one Telegram user ID per line or separate them with commas. Use `*` to allow all Telegram users. Unauthorized users will see their own ID in the rejection message so they can copy it here.') }}
-                </div>
-                <div v-if="telegramConfigError" class="sidebar-settings-telegram-error">
-                  <span>{{ telegramConfigError }}</span>
-                  <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, telegramConfigError)">{{ t('Send feedback') }}</a>
-                </div>
-                <div class="sidebar-settings-telegram-actions">
-                  <button
-                    class="sidebar-settings-telegram-save"
-                    type="button"
-                    :disabled="isTelegramSaving"
-                    @click="saveTelegramConfig"
-                  >
-                    {{ isTelegramSaving ? t('Saving…') : t('Save Telegram config') }}
-                  </button>
-                </div>
-              </div>
-              <div
-                v-if="showThreadContextBadge"
-                class="sidebar-settings-row sidebar-settings-context-row"
-                :data-state="threadContextBadgeState"
-                :title="threadContextTooltip"
-              >
-                <span class="sidebar-settings-label">{{ t('Context') }}</span>
-                <span class="sidebar-settings-context-value" :data-state="threadContextBadgeState">
-                  {{ threadContextPrimaryText }}
-                  <span class="sidebar-settings-context-meta">{{ threadContextSecondaryText }}</span>
-                </span>
-              </div>
               <div class="sidebar-settings-rate-limits">
                 <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
               </div>
@@ -552,12 +491,11 @@
                 WT {{ worktreeName }} · v{{ appVersion }}
               </div>
             </div>
-          </Transition>
+          </Teleport>
           <button
-            ref="settingsButtonRef"
             class="sidebar-settings-button"
             type="button"
-            @click.stop="isSettingsOpen = !isSettingsOpen"
+            @click="openSettings('general')"
           >
             <IconTablerSettings class="sidebar-settings-icon" />
             <span>{{ t('Settings') }}</span>
@@ -672,7 +610,7 @@
             />
           </template>
           <template v-else-if="isSettingsRoute">
-            <PersonalizationSettings />
+            <SettingsCenter :active-section="settingsSection" @select-section="openSettings" />
           </template>
           <template v-else-if="isHomeRoute">
             <div class="content-grid content-grid-home">
@@ -1038,6 +976,8 @@
                     :pending-requests="selectedThreadServerRequests"
                     :is-turn-in-progress="isSelectedThreadInProgress"
                     :is-stop-pending="isSelectedThreadInterruptPending"
+                    :interrupted-turn-id="selectedInterruptedTurnId"
+                    :is-continuing-interrupted-turn="isContinuingInterruptedTurn"
                     :has-more-persisted-above="hasMoreOlderMessages"
                     :is-loading-persisted-above="isLoadingOlderMessages"
                     :load-earlier-messages="loadOlderMessages"
@@ -1045,6 +985,7 @@
                     @edit-message="onEditMessage"
                     @implement-plan="onImplementPlan"
                     @revise-plan="onRevisePlan"
+                    @continue-interrupted-turn="onContinueInterruptedTurn"
                     @respond-server-request="onRespondServerRequest" />
                 </div>
 
@@ -1241,6 +1182,7 @@ import RateLimitStatus from './components/content/RateLimitStatus.vue'
 import ComposerDropdown from './components/content/ComposerDropdown.vue'
 import HeaderGitBranchDropdown from './components/content/HeaderGitBranchDropdown.vue'
 import ComposerRuntimeDropdown from './components/content/ComposerRuntimeDropdown.vue'
+import SettingsCenter from './components/content/SettingsCenter.vue'
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
 import IconTablerBolt from './components/icons/IconTablerBolt.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
@@ -1508,6 +1450,7 @@ const {
   isSendingMessage,
   isInterruptingTurn,
   isSelectedThreadInterruptPending,
+  selectedInterruptedTurnId,
   isUpdatingSpeedMode,
   error: desktopError,
   refreshAll,
@@ -1623,6 +1566,7 @@ const projectZipExportStatus = ref<{ phase: 'idle' | 'exporting' | 'ready'; load
 })
 const contentActionFeedback = ref<{ text: string; kind: 'success' | 'error' } | null>(null)
 const isRefreshingThreadMessages = ref(false)
+const isContinuingInterruptedTurn = ref(false)
 let contentActionFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: string; message: string }>({
   phase: 'idle',
@@ -1868,7 +1812,16 @@ const routeThreadId = computed(() => {
 const isHomeRoute = computed(() => route.name === 'home')
 const isSkillsRoute = computed(() => route.name === 'skills')
 const isAutomationsRoute = computed(() => route.name === 'automations')
-const isSettingsRoute = computed(() => route.name === 'personalization-settings')
+const isSettingsRoute = computed(() => route.name === 'settings')
+const settingsSection = computed(() => {
+  const section = typeof route.params.section === 'string' ? route.params.section : ''
+  return ['general', 'appearance', 'input', 'voice', 'configuration', 'archived', 'personalization', 'account'].includes(section)
+    ? section
+    : 'general'
+})
+watch(settingsSection, (section) => {
+  void nextTick(() => window.setTimeout(() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }), 0))
+}, { immediate: true })
 const sidebarAttentionThreadCount = computed(() => {
   const threadIds = new Set<string>()
   for (const group of projectGroups.value) {
@@ -1885,7 +1838,7 @@ const routeAutomationId = computed(() => {
 const contentTitle = computed(() => {
   if (isAutomationsRoute.value) return t('Automations')
   if (isSkillsRoute.value) return t('Skills')
-  if (isSettingsRoute.value) return t('Personalization')
+  if (isSettingsRoute.value) return t('Settings')
   if (isHomeRoute.value) return t('Start new thread')
   return selectedThread.value?.title ?? t('Choose a thread')
 })
@@ -1949,69 +1902,12 @@ const isTerminalKeyboardLayoutActive = computed(() => (
 ))
 const directoryCwd = computed(() => selectedThread.value?.cwd?.trim() ?? newThreadCwd.value.trim())
 const isSelectedThreadInProgress = computed(() => !isHomeRoute.value && selectedThread.value?.inProgress === true)
-const showThreadContextBadge = computed(() => !isHomeRoute.value && !isSkillsRoute.value && !isAutomationsRoute.value && !isSettingsRoute.value && selectedThreadId.value.trim().length > 0)
 const isAccountSwitchBlocked = computed(() =>
   isSendingMessage.value ||
   isInterruptingTurn.value ||
   isSelectedThreadInProgress.value ||
   selectedThreadServerRequests.value.length > 0,
 )
-
-function formatCompactTokenCount(value: number): string {
-  if (!Number.isFinite(value)) return '0'
-  return new Intl.NumberFormat('en-US', {
-    notation: value >= 1000 ? 'compact' : 'standard',
-    maximumFractionDigits: value >= 100000 ? 0 : 1,
-  }).format(Math.max(0, Math.trunc(value)))
-}
-
-function buildThreadContextTooltip(usage: UiThreadTokenUsage | null): string {
-  if (!usage) {
-    return t('Waiting for Codex thread/tokenUsage/updated events for this thread.')
-  }
-
-  const lines = [
-    `${t('Current context usage')}: ${usage.currentContextTokens.toLocaleString()} ${t('tokens')}`,
-    `${t('Cumulative thread usage')}: ${usage.total.totalTokens.toLocaleString()} ${t('tokens')}`,
-  ]
-
-  if (typeof usage.modelContextWindow === 'number') {
-    lines.unshift(`${t('Model context window')}: ${usage.modelContextWindow.toLocaleString()} ${t('tokens')}`)
-    lines.push(`${t('Remaining context')}: ${(usage.remainingContextTokens ?? 0).toLocaleString()} ${t('tokens')}`)
-  } else {
-    lines.push(t('Model context window is unavailable in the latest usage event.'))
-  }
-
-  return lines.join('\n')
-}
-
-const threadContextBadgeState = computed(() => {
-  const remainingPercent = selectedThreadTokenUsage.value?.remainingContextPercent
-  if (remainingPercent === null || typeof remainingPercent !== 'number') return 'pending'
-  if (remainingPercent <= 10) return 'danger'
-  if (remainingPercent <= 25) return 'warning'
-  return 'ok'
-})
-
-const threadContextPrimaryText = computed(() => {
-  const usage = selectedThreadTokenUsage.value
-  if (!usage) return t('Awaiting data')
-  if (typeof usage.remainingContextTokens === 'number') {
-    return `${formatCompactTokenCount(usage.remainingContextTokens)} ${t('left')}`
-  }
-  return `${formatCompactTokenCount(usage.currentContextTokens)} ${t('used')}`
-})
-
-const threadContextSecondaryText = computed(() => {
-  const usage = selectedThreadTokenUsage.value
-  if (!usage) return t('Updates after the next token usage event')
-  if (typeof usage.modelContextWindow === 'number') {
-    return `${formatCompactTokenCount(usage.currentContextTokens)} ${t('used')} / ${formatCompactTokenCount(usage.modelContextWindow)}`
-  }
-  return t('Window size unavailable')
-})
-
-const threadContextTooltip = computed(() => buildThreadContextTooltip(selectedThreadTokenUsage.value))
 
 function hasDuplicateFolderLeaf(path: string, knownPaths: string[]): boolean {
   const normalizedPath = normalizePathForUi(path).trim()
@@ -2277,8 +2173,6 @@ onMounted(() => {
   void loadHomeDirectory()
   void loadWorkspaceRootOptionsState()
   void refreshDefaultProjectName()
-  void refreshTelegramConfig()
-  void refreshTelegramStatus()
   void loadFreeModeStatus()
   void loadCcSwitchStatus()
   void refreshThreadTerminalStatus()
@@ -3257,6 +3151,16 @@ async function onForkThreadFromMessage(payload: {
   }
 }
 
+async function onContinueInterruptedTurn(): Promise<void> {
+  if (!selectedThreadId.value || isSelectedThreadInProgress.value || isContinuingInterruptedTurn.value) return
+  isContinuingInterruptedTurn.value = true
+  try {
+    await sendMessageToSelectedThread('请基于刚才已显示但任务中断前的输出继续并完成回答；不要重复已经完成的操作。', [], [], 'steer', [])
+  } finally {
+    isContinuingInterruptedTurn.value = false
+  }
+}
+
 function setSidebarCollapsed(nextValue: boolean): void {
   if (isSidebarCollapsed.value === nextValue) return
   if (nextValue) {
@@ -3538,9 +3442,10 @@ function onSettingsAreaClick(event: MouseEvent): void {
   isSettingsOpen.value = false
 }
 
-function openPersonalizationSettings(): void {
-  isSettingsOpen.value = false
-  void router.push({ name: 'personalization-settings' })
+function openSettings(section = 'general'): void {
+  void router.push({ name: 'settings', params: { section } }).then(() => {
+    void nextTick(() => document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' }))
+  })
   if (isMobile.value) setSidebarCollapsed(true)
 }
 
@@ -5914,6 +5819,30 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-settings-panel {
   @apply mb-1 max-h-[min(70vh,36rem)] overflow-y-auto rounded-lg border border-zinc-200 bg-white;
+}
+
+.settings-center-panel {
+  @apply mx-auto flex w-full max-w-[820px] flex-col gap-8 pb-12;
+}
+
+.settings-center-section {
+  @apply scroll-mt-8 rounded-lg border border-zinc-200 bg-white;
+}
+
+.settings-center-personalization-section {
+  @apply border-0 bg-transparent;
+}
+
+.settings-center-personalization-section :deep(.personalization-settings) {
+  @apply block max-w-none overflow-visible;
+}
+
+.settings-center-personalization-section :deep(.personalization-settings-rail) {
+  @apply hidden;
+}
+
+.settings-center-personalization-section :deep(.personalization-settings-main) {
+  @apply overflow-visible px-0 py-0;
 }
 
 .sidebar-settings-row {

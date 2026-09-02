@@ -236,10 +236,16 @@
                 <small>{{ t('Agent proposes a plan before acting') }}</small>
               </span>
             </button>
-            <template v-if="isLoadingComposerPlugins || visibleComposerPlugins.length > 0">
+            <template v-if="isLoadingComposerPlugins || composerPluginsError || visibleComposerPlugins.length > 0">
               <div class="thread-composer-attach-separator" />
               <div class="thread-composer-attach-section-label">{{ t('Plugins') }}</div>
               <div v-if="isLoadingComposerPlugins" class="thread-composer-attach-loading">{{ t('Loading plugins...') }}</div>
+              <div v-else-if="composerPluginsError" class="thread-composer-attach-error" role="status">
+                <span>{{ composerPluginsError }}</span>
+                <button type="button" :disabled="isInteractionDisabled" @click="() => loadComposerPlugins({ force: true })">
+                  {{ t('Retry') }}
+                </button>
+              </div>
               <button
                 v-for="plugin in visibleComposerPlugins"
                 :key="plugin.id"
@@ -267,7 +273,7 @@
               <div v-if="isLoadingChatGptConversations" class="thread-composer-attach-loading">{{ t('Loading ChatGPT conversations...') }}</div>
               <div v-else-if="chatGptConversationsError" class="thread-composer-attach-error" role="status">
                 <span>{{ chatGptConversationsError }}</span>
-                <button type="button" :disabled="isInteractionDisabled" @click="loadChatGptConversations">
+                <button type="button" :disabled="isInteractionDisabled" @click="() => loadChatGptConversations()">
                   {{ t('Retry') }}
                 </button>
               </div>
@@ -284,6 +290,15 @@
                   <span class="thread-composer-attach-plugin-name">{{ conversation.title }}</span>
                   <span class="thread-composer-attach-plugin-description">{{ t('ChatGPT conversation') }}</span>
                 </span>
+              </button>
+              <button
+                v-if="chatGptNextOffset !== null && !isLoadingChatGptConversations"
+                class="thread-composer-attach-item"
+                type="button"
+                :disabled="isInteractionDisabled"
+                @click="() => loadChatGptConversations({ more: true })"
+              >
+                {{ t('Load more') }}
               </button>
             </template>
             <template v-if="isUnifiedAttachMenu && fileMentionSuggestions.length > 0">
@@ -533,6 +548,7 @@ import {
   uploadFile,
   type ComposerFileSuggestion,
   type ChatGptConversationPreview,
+  type ChatGptConversationPage,
   type ChatGptConversationSummary,
   type DirectoryPluginSummary,
 } from '../../api/codexGateway'
@@ -707,11 +723,13 @@ const isAttachMenuOpen = ref(false)
 const isMentionDrivenAttachMenu = ref(false)
 const composerPlugins = ref<DirectoryPluginSummary[]>([])
 const isLoadingComposerPlugins = ref(false)
-const hasLoadedComposerPlugins = ref(false)
+const composerPluginsError = ref('')
+const composerPluginsCwd = ref<string | null>(null)
 const chatGptConversations = ref<ChatGptConversationSummary[]>([])
 const isLoadingChatGptConversations = ref(false)
 const hasLoadedChatGptConversations = ref(false)
 const chatGptConversationsError = ref('')
+const chatGptNextOffset = ref<number | null>(null)
 const chatGptConversationLoadingId = ref('')
 const mentionStartIndex = ref<number | null>(null)
 const mentionQuery = ref('')
@@ -1390,29 +1408,56 @@ function toggleAttachMenu(): void {
   }
 }
 
-async function loadComposerPlugins(): Promise<void> {
-  if (hasLoadedComposerPlugins.value || isLoadingComposerPlugins.value) return
+async function loadComposerPlugins(options: { force?: boolean; retryAttempt?: number } = {}): Promise<void> {
+  const cwd = (props.cwd ?? '').trim()
+  if (isLoadingComposerPlugins.value) return
+  if (!options.force && composerPluginsCwd.value === cwd && !composerPluginsError.value) return
   isLoadingComposerPlugins.value = true
+  composerPluginsError.value = ''
   try {
-    const cwd = (props.cwd ?? '').trim()
-    composerPlugins.value = await listDirectoryPlugins(cwd ? [cwd] : undefined)
-    hasLoadedComposerPlugins.value = true
-  } catch {
+    const plugins = await listDirectoryPlugins(cwd ? [cwd] : undefined)
+    if ((props.cwd ?? '').trim() !== cwd) {
+      composerPlugins.value = []
+      composerPluginsCwd.value = null
+      if (isAttachMenuOpen.value) window.setTimeout(() => void loadComposerPlugins(), 0)
+      return
+    }
+    composerPlugins.value = plugins
+    composerPluginsCwd.value = cwd
+  } catch (error) {
     composerPlugins.value = []
+    composerPluginsCwd.value = null
+    if ((options.retryAttempt ?? 0) === 0) {
+      window.setTimeout(() => void loadComposerPlugins({ force: true, retryAttempt: 1 }), 500)
+      return
+    }
+    composerPluginsError.value = error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : t('Failed to load plugins')
   } finally {
     isLoadingComposerPlugins.value = false
   }
 }
 
-async function loadChatGptConversations(): Promise<void> {
-  if (hasLoadedChatGptConversations.value || isLoadingChatGptConversations.value) return
+async function loadChatGptConversations(options: { more?: boolean; retryAttempt?: number } = {}): Promise<void> {
+  if (isLoadingChatGptConversations.value) return
+  if (!options.more && hasLoadedChatGptConversations.value && !chatGptConversationsError.value) return
   isLoadingChatGptConversations.value = true
   chatGptConversationsError.value = ''
   try {
-    chatGptConversations.value = await listChatGptConversations()
+    const offset = options.more ? chatGptNextOffset.value : 0
+    if (offset === null) return
+    const page: ChatGptConversationPage = await listChatGptConversations(offset)
+    const merged = options.more ? [...chatGptConversations.value, ...page.conversations] : page.conversations
+    chatGptConversations.value = Array.from(new Map(merged.map((item) => [item.conversationId, item])).values())
+    chatGptNextOffset.value = page.nextOffset
     hasLoadedChatGptConversations.value = true
   } catch (error) {
-    chatGptConversations.value = []
+    if ((options.retryAttempt ?? 0) === 0) {
+      window.setTimeout(() => void loadChatGptConversations({ ...options, retryAttempt: 1 }), 500)
+      return
+    }
+    if (!options.more) chatGptConversations.value = []
     chatGptConversationsError.value = error instanceof Error && error.message.trim()
       ? error.message.trim()
       : t('Failed to load ChatGPT conversations')

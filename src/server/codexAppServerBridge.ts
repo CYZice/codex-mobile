@@ -10615,7 +10615,9 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 
       if (req.method === 'GET' && url.pathname === '/codex-api/chatgpt-conversations') {
         try {
-          const payload = asRecord(await fetchChatgptBackend('/conversations?limit=20&offset=0&order=updated&is_archived=false&hide_snorlax=true'))
+          const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') ?? '0', 10) || 0)
+          const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get('limit') ?? '50', 10) || 50))
+          const payload = asRecord(await fetchChatgptBackend(`/conversations?limit=${limit}&offset=${offset}&order=updated&is_archived=false&hide_snorlax=true`))
           const rows = Array.isArray(payload?.items) ? payload.items : []
           const data = rows.flatMap((value) => {
             const row = asRecord(value)
@@ -10628,7 +10630,11 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
               updatedAt: readNonEmptyString(row.update_time ?? row.updatedAt ?? row.updated_at),
             }]
           })
-          setJson(res, 200, { data })
+          const total = typeof payload?.total === 'number' ? payload.total : null
+          const nextOffset = total !== null
+            ? offset + data.length < total ? offset + data.length : null
+            : data.length === limit ? offset + data.length : null
+          setJson(res, 200, { data, nextOffset })
         } catch (error) {
           setJson(res, 502, { error: getErrorMessage(error, 'Failed to load ChatGPT conversations') })
         }

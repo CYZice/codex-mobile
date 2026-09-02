@@ -10,6 +10,7 @@
 
 1. Open a projectless chat and click `+`.
 2. Confirm the menu is above the input, has a bounded scroll region, and is grouped as `Add`, `Plugins`, and `ChatGPT conversations` when conversation data is available.
+3. With more than 50 recent ChatGPT conversations, confirm the first page contains at most 50 rows, `Load more` appends the next page without duplicate rows, and the menu remains scrollable.
 3. Type ordinary text, add a space, then type `@` and continue with part of a plugin or conversation title. Confirm the same menu opens above the input and filters the unified results.
 4. Select a ChatGPT conversation and confirm the `@query` token is replaced at the cursor by a compact, non-editable reference node inside the same editable paragraph. It must not render in a separate row above the editor.
 5. Continue typing after the reference, add another space and `@query`, then select a plugin. Confirm repeated mentions work without removing the earlier reference or surrounding text.
@@ -32,7 +33,8 @@
 - ChatGPT references serialize as `[title](chatgpt-conversation://conversation-id)`; plugin references serialize with the `plugin://` prefix.
 - The ChatGPT context block contains at most the latest three user-turn branches, limits each text item to 2,000 characters, and instructs the agent to call `read_thread` when more context is needed.
 - Unauthenticated or unavailable ChatGPT data leaves the composer usable and does not block attachments, plugins, or skills.
-- ChatGPT list failures are not rendered as an empty list: the server detail is visible, Retry issues a fresh request, and a successful retry restores the rows in place.
+- ChatGPT list failures are not rendered as an empty list: the app retries once automatically, then shows the server detail and a Retry action that restores rows in place.
+- ChatGPT conversations are fetched in pages of at most 50 items, avoiding an unbounded initial menu render.
 - ChatGPT list/detail and connector-logo requests honor environment proxy variables first and fall back to the enabled Windows system proxy.
 - Proxy resolution is cached briefly and does not execute a registry query for every conversation request.
 - Mobile keeps the original permission/model-above-input layout and hides the context ring.

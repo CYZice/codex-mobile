@@ -3,7 +3,7 @@
     <p v-if="isLoading" class="conversation-loading">Loading messages...</p>
 
     <p
-      v-else-if="messages.length === 0 && pendingRequests.length === 0 && !liveOverlay"
+      v-else-if="messages.length === 0 && pendingRequests.length === 0 && !liveOverlay && !interruptedTurnId"
       class="conversation-empty"
     >
       No messages in this thread yet.
@@ -819,6 +819,23 @@
           </div>
         </div>
       </li>
+      <li v-if="interruptedTurnId" class="conversation-item conversation-item-interrupted">
+        <div class="message-row">
+          <div class="message-stack">
+            <article class="interrupted-turn-notice" role="status">
+              <p>任务在等待输入时中断，已保留当前输出。</p>
+              <button
+                type="button"
+                class="interrupted-turn-continue"
+                :disabled="isContinuingInterruptedTurn"
+                @click="emit('continueInterruptedTurn')"
+              >
+                {{ isContinuingInterruptedTurn ? '继续中…' : '继续' }}
+              </button>
+            </article>
+          </div>
+        </div>
+      </li>
       <li ref="bottomAnchorRef" class="conversation-bottom-anchor" />
     </ul>
 
@@ -1427,6 +1444,8 @@ const props = defineProps<{
   liveOverlay: UiLiveOverlay | null
   isTurnInProgress?: boolean
   isStopPending?: boolean
+  interruptedTurnId?: string
+  isContinuingInterruptedTurn?: boolean
   isLoading: boolean
   activeThreadId: string
   cwd: string
@@ -1447,6 +1466,7 @@ const emit = defineEmits<{
   implementPlan: [payload: { turnId: string }]
   revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
+  continueInterruptedTurn: []
 }>()
 
 const conversationListRef = ref<HTMLElement | null>(null)
@@ -4742,6 +4762,22 @@ onBeforeUnmount(() => {
 
 .conversation-item-overlay {
   @apply justify-center;
+}
+
+.conversation-item-interrupted {
+  @apply justify-center;
+}
+
+.interrupted-turn-notice {
+  @apply flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950;
+}
+
+:global(.dark) .interrupted-turn-notice {
+  @apply border-amber-800 bg-amber-950/40 text-amber-100;
+}
+
+.interrupted-turn-continue {
+  @apply shrink-0 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 .message-row {

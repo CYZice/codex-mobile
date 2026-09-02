@@ -28,8 +28,8 @@ const router = createRouter({
       component: EmptyRouteView,
     },
     {
-      path: '/settings/personalization',
-      name: 'personalization-settings',
+      path: '/settings/:section?',
+      name: 'settings',
       component: EmptyRouteView,
     },
     {

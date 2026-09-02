@@ -61,6 +61,20 @@ describe('ChatGPT conversation loading', () => {
 
     await expect(listChatGptConversations()).rejects.toThrow('Unable to connect to ChatGPT via http://127.0.0.1:7897 proxy')
   })
+
+  it('requests a bounded page and returns its next offset', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ conversationId: 'conversation-1', title: 'First chat' }],
+      nextOffset: 50,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listChatGptConversations(0, 100)).resolves.toEqual({
+      conversations: [{ conversationId: 'conversation-1', title: 'First chat', updatedAt: null }],
+      nextOffset: 50,
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/codex-api/chatgpt-conversations?offset=0&limit=50')
+  })
 })
 
 describe('startThreadTurn collaboration mode payloads', () => {

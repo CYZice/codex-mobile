@@ -328,6 +328,11 @@ export type ChatGptConversationPreview = ChatGptConversationSummary & {
   preview: ChatGptPriorConversation | null
 }
 
+export type ChatGptConversationPage = {
+  conversations: ChatGptConversationSummary[]
+  nextOffset: number | null
+}
+
 export type GlobalInstructionsState = {
   content: string
   path: string
@@ -2764,15 +2769,20 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
   }
 }
 
-export async function listChatGptConversations(): Promise<ChatGptConversationSummary[]> {
-  const response = await fetch('/codex-api/chatgpt-conversations')
+export async function listChatGptConversations(offset = 0, limit = 50): Promise<ChatGptConversationPage> {
+  const query = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(Math.min(50, Math.max(1, limit))) })
+  const response = await fetch(`/codex-api/chatgpt-conversations?${query.toString()}`)
   const payload = await response.json().catch(() => null) as { data?: unknown } | null
   if (!response.ok) {
     throw new Error(extractErrorMessage(payload, `Failed to load ChatGPT conversations (${response.status})`))
   }
-  return Array.isArray(payload?.data)
+  const conversations = Array.isArray(payload?.data)
     ? payload.data.map(normalizeChatGptConversationSummary).filter((item): item is ChatGptConversationSummary => item !== null)
     : []
+  const nextOffset = typeof (payload as { nextOffset?: unknown } | null)?.nextOffset === 'number'
+    ? (payload as { nextOffset: number }).nextOffset
+    : null
+  return { conversations, nextOffset }
 }
 
 export async function getGlobalInstructions(): Promise<GlobalInstructionsState> {

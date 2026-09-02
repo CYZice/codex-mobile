@@ -840,6 +840,7 @@ type TurnStartedInfo = {
 type TurnCompletedInfo = {
   threadId: string
   turnId: string
+  status: string
   completedAtMs: number
   startedAtMs?: number
 }
@@ -1393,6 +1394,8 @@ export function useDesktopState() {
   const persistedMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const livePlanMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const liveAgentMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
+  const preservedLiveAgentMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
+  const interruptedTurnIdByThreadId = ref<Record<string, string>>({})
   const liveSteerMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const liveReasoningTextByThreadId = ref<Record<string, string>>({})
   const liveCommandsByThreadId = ref<Record<string, UiMessage[]>>({})
@@ -1585,6 +1588,10 @@ export function useDesktopState() {
     if (!threadId) return false
     return interruptBlockedUntilPersistedByThreadId.value[threadId] === true
   })
+  const selectedInterruptedTurnId = computed(() => {
+    const threadId = selectedThreadId.value
+    return threadId ? interruptedTurnIdByThreadId.value[threadId] ?? '' : ''
+  })
   const selectedThreadServerRequests = computed<UiServerRequest[]>(() => {
     const rows: UiServerRequest[] = []
     const selected = selectedThreadId.value
@@ -1641,11 +1648,12 @@ export function useDesktopState() {
 
     const persisted = persistedMessagesByThreadId.value[threadId] ?? []
     const livePlan = livePlanMessagesByThreadId.value[threadId] ?? []
+    const preservedLiveAgent = preservedLiveAgentMessagesByThreadId.value[threadId] ?? []
     const liveAgent = liveAgentMessagesByThreadId.value[threadId] ?? []
     const liveSteers = liveSteerMessagesByThreadId.value[threadId] ?? []
     const liveCommands = liveCommandsByThreadId.value[threadId] ?? []
     const liveFileChanges = liveFileChangeMessagesByThreadId.value[threadId] ?? []
-    const combined = [...persisted, ...livePlan, ...liveCommands, ...liveFileChanges, ...liveAgent, ...liveSteers]
+    const combined = [...persisted, ...livePlan, ...liveCommands, ...liveFileChanges, ...preservedLiveAgent, ...liveAgent, ...liveSteers]
 
     const summary = turnSummaryByThreadId.value[threadId]
     if (!summary) return combined
@@ -2430,6 +2438,11 @@ export function useDesktopState() {
     turnIndexByTurnIdByThreadId.value = pruneThreadStateMap(turnIndexByTurnIdByThreadId.value, activeThreadIds)
     persistedMessagesByThreadId.value = pruneThreadStateMap(persistedMessagesByThreadId.value, activeThreadIds)
     liveAgentMessagesByThreadId.value = pruneThreadStateMap(liveAgentMessagesByThreadId.value, activeThreadIds)
+    preservedLiveAgentMessagesByThreadId.value = pruneThreadStateMap(
+      preservedLiveAgentMessagesByThreadId.value,
+      activeThreadIds,
+    )
+    interruptedTurnIdByThreadId.value = pruneThreadStateMap(interruptedTurnIdByThreadId.value, activeThreadIds)
     liveReasoningTextByThreadId.value = pruneThreadStateMap(liveReasoningTextByThreadId.value, activeThreadIds)
     liveCommandsByThreadId.value = pruneThreadStateMap(liveCommandsByThreadId.value, activeThreadIds)
     liveFileChangeMessagesByThreadId.value = pruneThreadStateMap(liveFileChangeMessagesByThreadId.value, activeThreadIds)
@@ -2742,6 +2755,38 @@ export function useDesktopState() {
     if (!threadId) return
     if (!(threadId in liveAgentMessagesByThreadId.value)) return
     liveAgentMessagesByThreadId.value = omitKey(liveAgentMessagesByThreadId.value, threadId)
+  }
+
+  function setPreservedLiveAgentMessagesForThread(threadId: string, nextMessages: UiMessage[]): void {
+    const previous = preservedLiveAgentMessagesByThreadId.value[threadId] ?? []
+    if (areMessageArraysEqual(previous, nextMessages)) return
+    if (nextMessages.length === 0) {
+      preservedLiveAgentMessagesByThreadId.value = omitKey(preservedLiveAgentMessagesByThreadId.value, threadId)
+      return
+    }
+    preservedLiveAgentMessagesByThreadId.value = {
+      ...preservedLiveAgentMessagesByThreadId.value,
+      [threadId]: nextMessages,
+    }
+  }
+
+  function preserveLiveAgentMessagesForInterruptedTurn(threadId: string, turnId: string): void {
+    const liveMessages = liveAgentMessagesByThreadId.value[threadId] ?? []
+    if (liveMessages.length > 0) {
+      const preserved = preservedLiveAgentMessagesByThreadId.value[threadId] ?? []
+      setPreservedLiveAgentMessagesForThread(threadId, mergeMessages(preserved, liveMessages, { preserveMissing: true }))
+      clearLiveAgentMessagesForThread(threadId)
+    }
+    interruptedTurnIdByThreadId.value = {
+      ...interruptedTurnIdByThreadId.value,
+      [threadId]: turnId,
+    }
+  }
+
+  function clearInterruptedTurnState(threadId: string): void {
+    if (interruptedTurnIdByThreadId.value[threadId]) {
+      interruptedTurnIdByThreadId.value = omitKey(interruptedTurnIdByThreadId.value, threadId)
+    }
   }
 
   function appendLiveSteerMessage(
@@ -3568,6 +3613,7 @@ export function useDesktopState() {
     return {
       threadId,
       turnId,
+      status: readString(turnPayload?.status),
       completedAtMs,
       startedAtMs,
     }
@@ -4040,6 +4086,7 @@ export function useDesktopState() {
       maybeUnblockInterruptForActiveTurn(startedTurn.threadId, startedTurn.turnId)
       clearLivePlansForThread(startedTurn.threadId)
       clearLiveFileChangesForThread(startedTurn.threadId)
+      clearInterruptedTurnState(startedTurn.threadId)
       setTurnSummaryForThread(startedTurn.threadId, null)
       setTurnErrorForThread(startedTurn.threadId, null)
       setThreadInProgress(startedTurn.threadId, true)
@@ -4079,6 +4126,9 @@ export function useDesktopState() {
         activeTurnIdByThreadId.value = omitKey(activeTurnIdByThreadId.value, completedTurn.threadId)
       }
       setThreadInProgress(completedTurn.threadId, false)
+      if (completedTurn.status === 'interrupted') {
+        preserveLiveAgentMessagesForInterruptedTurn(completedTurn.threadId, completedTurn.turnId)
+      }
       setTurnActivityForThread(completedTurn.threadId, null)
       markThreadUnreadByEvent(completedTurn.threadId)
       if (!shouldRetryWithFallback) {
@@ -4741,6 +4791,9 @@ export function useDesktopState() {
       removeLiveSteersPersistedIn(threadId, nextMessages)
 
       const previousLiveAgent = liveAgentMessagesByThreadId.value[threadId] ?? []
+      const previousPreservedLiveAgent = preservedLiveAgentMessagesByThreadId.value[threadId] ?? []
+      const nextPreservedLiveAgent = removeRedundantLiveAgentMessages(previousPreservedLiveAgent, nextMessages)
+      setPreservedLiveAgentMessagesForThread(threadId, nextPreservedLiveAgent)
       if (inProgress) {
         const nextLiveAgent = removeRedundantLiveAgentMessages(previousLiveAgent, nextMessages)
         setLiveAgentMessagesForThread(threadId, nextLiveAgent)
@@ -5998,6 +6051,8 @@ export function useDesktopState() {
     persistedMessagesByThreadId.value = {}
     livePlanMessagesByThreadId.value = {}
     liveAgentMessagesByThreadId.value = {}
+    preservedLiveAgentMessagesByThreadId.value = {}
+    interruptedTurnIdByThreadId.value = {}
     liveSteerMessagesByThreadId.value = {}
     liveReasoningTextByThreadId.value = {}
     liveCommandsByThreadId.value = {}
@@ -6087,6 +6142,7 @@ export function useDesktopState() {
     selectedThreadTokenUsage,
     selectedThreadTerminalOpen,
     isSelectedThreadInterruptPending,
+    selectedInterruptedTurnId,
     selectedThreadServerRequests,
     selectedLiveOverlay,
     codexQuota,

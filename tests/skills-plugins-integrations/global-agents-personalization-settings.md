@@ -21,7 +21,8 @@
 
 - The settings page is a real route and is reachable from the existing settings popover.
 - Save is disabled while loading, unchanged, or already saving; success and failure are visibly reported.
-- Existing `AGENTS.md` symbolic links are preserved, including the repository's skill-sync link.
+- Legacy `AGENTS.md` symbolic links created by older builds are migrated to a regular global `AGENTS.md` file without losing their content.
+- The global personalization file remains independent from the `skills` checkout and is not changed by Skills sync.
 - A non-empty `AGENTS.override.md` is reported as effective; saving still updates `AGENTS.md` without claiming immediate precedence.
 - The page explains that updated instructions apply to new chats/runs, matching Codex instruction discovery timing.
 - Light and dark surfaces have readable text, borders, focus state, warnings, and status messages.

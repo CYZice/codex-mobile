@@ -705,6 +705,61 @@ describe('live error overlay', () => {
     })
   })
 
+  it('keeps streamed output visible when a turn is interrupted before it persists', async () => {
+    installTestWindow()
+    let notificationHandler: ((notification: { method: string; params: unknown }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notificationHandler = handler
+      return () => {}
+    })
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.6-terra',
+      modelProvider: 'custom',
+      messages: [],
+      inProgress: true,
+      activeTurnId: 'turn-interrupted',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-interrupted')
+    await state.loadMessages('thread-interrupted')
+    state.startPolling()
+
+    notificationHandler?.({
+      method: 'item/agentMessage/delta',
+      params: { threadId: 'thread-interrupted', turnId: 'turn-interrupted', itemId: 'live-output', delta: 'Partial output' },
+    })
+    expect(state.messages.value).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'live-output', text: 'Partial output', messageType: 'agentMessage.live' }),
+    ]))
+
+    notificationHandler?.({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-interrupted',
+        turn: { id: 'turn-interrupted', status: 'interrupted' },
+      },
+    })
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.6-terra',
+      modelProvider: 'custom',
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+    await state.loadMessages('thread-interrupted', { force: true })
+
+    expect(state.messages.value).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'live-output', text: 'Partial output', messageType: 'agentMessage.live' }),
+    ]))
+    expect(state.selectedInterruptedTurnId.value).toBe('turn-interrupted')
+  })
+
   it('keeps a new live error visible when an older persisted turn error exists', async () => {
     installTestWindow()
     let notificationHandler: (notification: { method: string; params?: unknown }) => void = () => {}
