@@ -1,6 +1,42 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github-dark.css";
 
+:root {
+  --codex-surface: #f9f9f7;
+  --codex-ink: #2d2d2b;
+  --codex-accent: #cc7d5e;
+  --codex-diff-added: #00c853;
+  --codex-diff-removed: #ff5f38;
+  --codex-skill: #cc7d5e;
+}
+
+:root[data-codex-theme="absolutely"] .desktop-layout,
+:root[data-codex-theme="absolutely"] .desktop-main,
+:root[data-codex-theme="absolutely"] .content-root,
+:root[data-codex-theme="absolutely"] .settings-center,
+:root[data-codex-theme="absolutely"] .settings-center-main,
+:root[data-codex-theme="absolutely"] .settings-center-section,
+:root[data-codex-theme="absolutely"] .activity-page,
+:root[data-codex-theme="absolutely"] .native-config,
+:root[data-codex-theme="absolutely"] .settings-data-page {
+  background-color: var(--codex-surface);
+  color: var(--codex-ink);
+}
+
+:root[data-codex-theme="absolutely"] .content-header-accent-icon,
+:root[data-codex-theme="absolutely"] .skills-route-header-icon {
+  background-color: var(--codex-accent);
+}
+
+:root[data-codex-theme="absolutely"] .hljs-keyword,
+:root[data-codex-theme="absolutely"] .hljs-selector-tag,
+:root[data-codex-theme="absolutely"] .hljs-title.function_ {
+  color: var(--codex-accent);
+}
+
+:root[data-codex-theme="absolutely"] .hljs-addition { color: var(--codex-diff-added); }
+:root[data-codex-theme="absolutely"] .hljs-deletion { color: var(--codex-diff-removed); }
+
 .composer-menu-surface {
   @apply rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
 }
@@ -50,6 +86,20 @@
 
 :root.dark .content-root {
   @apply bg-zinc-950;
+}
+
+:root.dark[data-codex-theme="absolutely"] body,
+:root.dark[data-codex-theme="absolutely"] .desktop-layout,
+:root.dark[data-codex-theme="absolutely"] .desktop-main,
+:root.dark[data-codex-theme="absolutely"] .content-root,
+:root.dark[data-codex-theme="absolutely"] .settings-center,
+:root.dark[data-codex-theme="absolutely"] .settings-center-main,
+:root.dark[data-codex-theme="absolutely"] .settings-center-section,
+:root.dark[data-codex-theme="absolutely"] .activity-page,
+:root.dark[data-codex-theme="absolutely"] .native-config,
+:root.dark[data-codex-theme="absolutely"] .settings-data-page {
+  background-color: var(--codex-surface);
+  color: var(--codex-ink);
 }
 
 :root.dark .thread-message-refresh {
@@ -259,6 +309,20 @@
 :root.dark .native-config,
 :root.dark .activity {
   @apply border-zinc-800 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .sidebar-quick-settings {
+  @apply border-zinc-700 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .sidebar-quick-settings-heading,
+:root.dark .theme-preview,
+:root.dark .settings-data-archive-row {
+  @apply border-zinc-700;
+}
+
+:root.dark .sidebar-quick-settings-row {
+  @apply hover:bg-zinc-800;
 }
 
 :root.dark .native-config input,

@@ -2841,8 +2841,10 @@ export interface CodexActivitySummary {
 
 export async function getCodexActivitySummary(): Promise<CodexActivitySummary> {
   const response = await fetch('/codex-api/activity-summary')
-  if (!response.ok) throw new Error((await response.text()).trim() || 'Failed to load activity summary')
-  const payload = await response.json() as { data: CodexActivitySummary }
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+  if (!contentType.includes('application/json')) throw new Error('The Codex Mobile web host is out of date. Restart Codex Mobile to load Activity data.')
+  const payload = await response.json() as { data?: CodexActivitySummary; error?: string }
+  if (!response.ok || !payload.data) throw new Error(payload.error?.trim() || 'Failed to load activity summary')
   return payload.data
 }
 

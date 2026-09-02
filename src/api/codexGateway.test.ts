@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -43,6 +43,34 @@ describe('Codex app-server runtime reload', () => {
     await reloadCodexAppServer()
 
     expect(fetchMock).toHaveBeenCalledWith('/codex-api/runtime/reload', { method: 'POST' })
+  })
+})
+
+describe('Codex activity summary', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('returns the current JSON summary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        totalChats: 12,
+        archivedChats: 2,
+        activeDays: 4,
+        totalTokens: 3200,
+        topModel: 'gpt-5.6-terra',
+        topReasoningEffort: 'medium',
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } })))
+
+    await expect(getCodexActivitySummary()).resolves.toMatchObject({ totalChats: 12, topModel: 'gpt-5.6-terra' })
+  })
+
+  it('explains when an old web host serves the app shell instead of JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    })))
+
+    await expect(getCodexActivitySummary()).rejects.toThrow('Restart Codex Mobile to load Activity data')
   })
 })
 

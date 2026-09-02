@@ -34,7 +34,8 @@ const sections = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'voice', label: 'Voice' },
   { id: 'personalization', label: 'Personalization' },
-  { id: 'data', label: 'Data & activity' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'data', label: 'Data' },
   { id: 'account', label: 'Accounts & limits' },
 ]
 const filteredSections = computed(() => sections.filter(section => t(section.label).toLowerCase().includes(query.value.trim().toLowerCase())))

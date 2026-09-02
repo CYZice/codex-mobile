@@ -122,8 +122,19 @@
               <section v-if="settingsSection === 'personalization'" id="settings-personalization" class="settings-center-section settings-center-personalization-section">
                 <PersonalizationSettings />
               </section>
-              <CodexConfigurationSettings v-if="settingsSection === 'agent'" :cwd="directoryCwd" />
-              <ActivitySettings v-if="settingsSection === 'data'" />
+              <CodexConfigurationSettings v-if="settingsSection === 'agent'" :cwd="directoryCwd" :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts" :project-options="settingsProjectOptions" />
+              <ActivitySettings v-if="settingsSection === 'activity'" />
+              <DataSettings
+                v-if="settingsSection === 'data'"
+                :is-open="isArchivedChatsOpen"
+                :threads="archivedThreads"
+                :cursor="archivedThreadCursor"
+                :loading="isLoadingArchivedThreads"
+                :error="archivedThreadsError"
+                @toggle="toggleArchivedChats"
+                @load-more="loadArchivedThreads()"
+                @restore="restoreArchivedThread"
+              />
               <div v-if="settingsSection === 'account'" id="settings-account" class="sidebar-settings-account-section">
                 <div class="sidebar-settings-account-header">
                   <div class="sidebar-settings-account-header-main">
@@ -232,29 +243,15 @@
                 <span class="sidebar-settings-label">{{ t('Require ⌘ + enter to send') }}</span>
                 <span class="sidebar-settings-toggle" :class="{ 'is-on': !sendWithEnter }" />
               </button>
-              <button
-                v-if="settingsSection === 'agent'"
-                class="sidebar-settings-row"
-                type="button"
-                :disabled="isReloadingCodexConfiguration"
-                :title="t('Reload the local Codex configuration, including changes made by CC Switch.')"
-                @click="onReloadCodexConfiguration"
-              >
-                <span class="sidebar-settings-label">{{ t('Reload Codex configuration') }}</span>
-                <span class="sidebar-settings-value">{{ isReloadingCodexConfiguration ? t('Reloading…') : t('Local') }}</span>
-              </button>
-              <div v-if="settingsSection === 'agent' && codexConfigurationReloadError" class="sidebar-settings-row sidebar-settings-error">
-                <span>{{ codexConfigurationReloadError }}</span>
-                <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, codexConfigurationReloadError)">{{ t('Send feedback') }}</a>
-              </div>
               <button v-if="settingsSection === 'general'" id="settings-general" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.inProgressSendMode" @click="cycleInProgressSendMode">
                 <span class="sidebar-settings-label">{{ t('When busy, send as') }}</span>
                 <span class="sidebar-settings-value">{{ inProgressSendMode === 'steer' ? t('Steer') : t('Queue') }}</span>
               </button>
-              <button v-if="settingsSection === 'appearance'" id="settings-appearance" class="sidebar-settings-row" type="button" :title="SETTINGS_HELP.appearance" @click="cycleDarkMode">
+              <div v-if="settingsSection === 'appearance'" id="settings-appearance" class="sidebar-settings-row sidebar-settings-row--select" :title="SETTINGS_HELP.appearance">
                 <span class="sidebar-settings-label">{{ t('Appearance') }}</span>
-                <span class="sidebar-settings-value">{{ darkMode === 'system' ? t('System') : darkMode === 'dark' ? t('Dark') : t('Light') }}</span>
-              </button>
+                <ComposerDropdown :model-value="darkMode" :options="themeModeOptions" menu-align="end" @update:model-value="onThemeModeChange" />
+              </div>
+              <div v-if="settingsSection === 'appearance'" class="theme-preview"><span class="theme-preview-accent" /><div><strong>Absolutely</strong><p>{{ t('Surface, ink, accent, code, diff, and skill colors use the selected Codex theme.') }}</p></div></div>
               <div v-if="settingsSection === 'general'" class="sidebar-settings-row sidebar-settings-row--select" :title="t('Choose the interface language for the app.')">
                 <span class="sidebar-settings-label">{{ t('UI language') }}</span>
                 <ComposerDropdown
@@ -461,31 +458,6 @@
                   @update:model-value="onDictationLanguageChange"
                 />
               </div>
-              <button v-if="settingsSection === 'data'" id="settings-archived" class="sidebar-settings-row" type="button" :aria-expanded="isArchivedChatsOpen" @click="toggleArchivedChats">
-                <span class="sidebar-settings-label">{{ t('Archived chats') }}</span>
-                <span class="sidebar-settings-value">{{ isArchivedChatsOpen ? t('Hide') : t('Manage') }}</span>
-              </button>
-              <div v-if="settingsSection === 'data' && isArchivedChatsOpen" class="sidebar-settings-archived-panel">
-                <p v-if="archivedThreadsError" class="sidebar-settings-telegram-error">{{ archivedThreadsError }}</p>
-                <p v-else-if="isLoadingArchivedThreads && archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('Loading archived chats…') }}</p>
-                <p v-else-if="archivedThreads.length === 0" class="sidebar-settings-field-help">{{ t('No archived chats') }}</p>
-                <div v-else class="sidebar-settings-archived-list">
-                  <article v-for="thread in archivedThreads" :key="thread.id" class="sidebar-settings-archived-item">
-                    <span class="sidebar-settings-archived-title">{{ thread.title }}</span>
-                    <span v-if="thread.preview" class="sidebar-settings-archived-preview">{{ thread.preview }}</span>
-                    <button type="button" :disabled="isLoadingArchivedThreads" @click="restoreArchivedThread(thread.id)">{{ t('Restore') }}</button>
-                  </article>
-                </div>
-                <button
-                  v-if="archivedThreadCursor"
-                  class="sidebar-settings-telegram-save"
-                  type="button"
-                  :disabled="isLoadingArchivedThreads"
-                  @click="loadArchivedThreads()"
-                >
-                  {{ isLoadingArchivedThreads ? t('Loading…') : t('Load more') }}
-                </button>
-              </div>
               <div v-if="settingsSection === 'account'" class="sidebar-settings-rate-limits">
                 <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
               </div>
@@ -494,10 +466,20 @@
               </div>
             </div>
           </Teleport>
+          <Transition name="settings-panel">
+            <div v-if="isSettingsOpen && !isSettingsRoute" ref="settingsPanelRef" class="sidebar-quick-settings" @click.stop>
+              <div class="sidebar-quick-settings-heading"><div><strong>{{ accounts.find(account => account.isActive)?.email || t('Account') }}</strong><span>{{ accounts.find(account => account.isActive)?.planType || 'Codex' }}</span></div></div>
+              <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
+              <button type="button" class="sidebar-quick-settings-row" :disabled="isReloadingCodexConfiguration" @click="onReloadCodexConfiguration"><span>{{ t('Reload app-server') }}</span><span>{{ isReloadingCodexConfiguration ? t('Reloading…') : '↻' }}</span></button>
+              <button type="button" class="sidebar-quick-settings-row" @click="openSettings('general')"><span>{{ t('Settings') }}</span><span>›</span></button>
+              <p v-if="codexConfigurationReloadError" class="sidebar-quick-settings-error">{{ codexConfigurationReloadError }}</p>
+            </div>
+          </Transition>
           <button
+            ref="settingsButtonRef"
             class="sidebar-settings-button"
             type="button"
-            @click="openSettings('general')"
+            @click.stop="isSettingsOpen = !isSettingsOpen"
           >
             <IconTablerSettings class="sidebar-settings-icon" />
             <span>{{ t('Settings') }}</span>
@@ -1187,6 +1169,7 @@ import ComposerRuntimeDropdown from './components/content/ComposerRuntimeDropdow
 import SettingsCenter from './components/content/SettingsCenter.vue'
 import CodexConfigurationSettings from './components/content/CodexConfigurationSettings.vue'
 import ActivitySettings from './components/content/ActivitySettings.vue'
+import DataSettings from './components/content/DataSettings.vue'
 import SidebarThreadControls from './components/sidebar/SidebarThreadControls.vue'
 import IconTablerBolt from './components/icons/IconTablerBolt.vue'
 import IconTablerSearch from './components/icons/IconTablerSearch.vue'
@@ -1684,10 +1667,12 @@ const DICTATION_AUTO_SEND_KEY = 'codex-web-local.dictation-auto-send.v1'
 const DICTATION_LANGUAGE_KEY = 'codex-web-local.dictation-language.v1'
 
 const CHAT_WIDTH_KEY = 'codex-web-local.chat-width.v1'
+const CODEX_THEME_KEY = 'codex-theme-v1'
 const MOBILE_RESUME_RELOAD_MIN_HIDDEN_MS = 400
 const sendWithEnter = ref(loadBoolPref(SEND_WITH_ENTER_KEY, true))
 const inProgressSendMode = ref<'steer' | 'queue'>(loadInProgressSendModePref())
 const darkMode = ref<'system' | 'light' | 'dark'>(loadDarkModePref())
+const themeModeOptions = computed(() => [{ value: 'system', label: t('System') }, { value: 'light', label: t('Light') }, { value: 'dark', label: t('Dark') }])
 const chatWidth = ref<ChatWidthMode>(loadChatWidthPref())
 const dictationClickToToggle = ref(loadBoolPref(DICTATION_CLICK_TO_TOGGLE_KEY, false))
 const dictationAutoSend = ref(loadBoolPref(DICTATION_AUTO_SEND_KEY, true))
@@ -1819,7 +1804,7 @@ const isAutomationsRoute = computed(() => route.name === 'automations')
 const isSettingsRoute = computed(() => route.name === 'settings')
 const settingsSection = computed(() => {
   const section = typeof route.params.section === 'string' ? route.params.section : ''
-  return ['general', 'agent', 'appearance', 'voice', 'personalization', 'data', 'account'].includes(section)
+  return ['general', 'agent', 'appearance', 'voice', 'personalization', 'activity', 'data', 'account'].includes(section)
     ? section
     : 'general'
 })
@@ -2008,6 +1993,7 @@ const newThreadFolderOptions = computed(() => {
 
   return options
 })
+const settingsProjectOptions = computed(() => newThreadFolderOptions.value.filter(option => option.value.trim().length > 0))
 const isNewThreadCwdGitRepo = computed(() => {
   const cwd = newThreadCwd.value.trim()
   return cwd ? gitRepoStatusByCwd.value[cwd] === true : false
@@ -4560,6 +4546,13 @@ function toggleDictationAutoSend(): void {
   window.localStorage.setItem(DICTATION_AUTO_SEND_KEY, dictationAutoSend.value ? '1' : '0')
 }
 
+function onThemeModeChange(value: string): void {
+  if (value !== 'system' && value !== 'light' && value !== 'dark') return
+  darkMode.value = value
+  window.localStorage.setItem(DARK_MODE_KEY, value)
+  applyDarkMode()
+}
+
 async function loadCcSwitchStatus(options: { silent?: boolean } = {}): Promise<void> {
   try {
     const status = await getCcSwitchStatus()
@@ -4844,14 +4837,21 @@ function normalizeToWhisperLanguage(raw: string): string {
 
 function applyDarkMode(): void {
   const root = document.documentElement
-  if (darkMode.value === 'dark') {
-    root.classList.add('dark')
-  } else if (darkMode.value === 'light') {
-    root.classList.remove('dark')
-  } else {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    root.classList.toggle('dark', prefersDark)
-  }
+  const resolvedVariant = darkMode.value === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : darkMode.value
+  const theme = resolvedVariant === 'dark'
+    ? { codeThemeId: 'absolutely', theme: { accent: '#cc7d5e', accentSource: 'custom', contrast: 60, fonts: { code: null, ui: null }, ink: '#f9f9f7', opaqueWindows: true, semanticColors: { diffAdded: '#00c853', diffRemoved: '#ff5f38', skill: '#cc7d5e' }, surface: '#2d2d2b' }, variant: 'dark' as const }
+    : { codeThemeId: 'absolutely', theme: { accent: '#cc7d5e', accentSource: 'custom', contrast: 45, fonts: { code: null, ui: null }, ink: '#2d2d2b', opaqueWindows: true, semanticColors: { diffAdded: '#00c853', diffRemoved: '#ff5f38', skill: '#cc7d5e' }, surface: '#f9f9f7' }, variant: 'light' as const }
+  root.classList.toggle('dark', resolvedVariant === 'dark')
+  root.dataset.codexTheme = 'absolutely'
+  root.style.setProperty('--codex-surface', theme.theme.surface)
+  root.style.setProperty('--codex-ink', theme.theme.ink)
+  root.style.setProperty('--codex-accent', theme.theme.accent)
+  root.style.setProperty('--codex-diff-added', theme.theme.semanticColors.diffAdded)
+  root.style.setProperty('--codex-diff-removed', theme.theme.semanticColors.diffRemoved)
+  root.style.setProperty('--codex-skill', theme.theme.semanticColors.skill)
+  window.localStorage.setItem(CODEX_THEME_KEY, JSON.stringify(theme))
 }
 
 function loadSidebarCollapsed(): boolean {
@@ -5806,7 +5806,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .sidebar-settings-area {
-  @apply shrink-0 bg-slate-100 pt-2 px-2 pb-2 border-t border-zinc-200;
+  @apply relative shrink-0 overflow-visible bg-slate-100 pt-2 px-2 pb-2 border-t border-zinc-200;
 }
 
 .sidebar-settings-button {
@@ -5848,6 +5848,53 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 .settings-center-personalization-section :deep(.personalization-settings-main) {
   @apply overflow-visible px-0 py-0;
 }
+
+.sidebar-quick-settings {
+  @apply absolute bottom-[calc(100%+0.5rem)] left-2 right-2 z-50 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl;
+}
+
+.sidebar-quick-settings-heading {
+  @apply border-b border-zinc-200 px-3 py-2;
+}
+
+.sidebar-quick-settings-heading strong,
+.sidebar-quick-settings-heading span {
+  @apply block truncate;
+}
+
+.sidebar-quick-settings-heading span {
+  @apply mt-0.5 text-xs text-zinc-500;
+}
+
+.sidebar-quick-settings :deep(.rate-limit-card) {
+  @apply max-w-none border-0 bg-transparent text-left shadow-none;
+}
+
+.sidebar-quick-settings :deep(.rate-limit-card-header),
+.sidebar-quick-settings :deep(.rate-limit-card-metrics) {
+  @apply justify-start;
+}
+
+.sidebar-quick-settings-row {
+  @apply flex w-full items-center justify-between rounded-xl border-0 bg-transparent px-3 py-2.5 text-left text-sm hover:bg-zinc-100 disabled:opacity-60;
+}
+
+.sidebar-quick-settings-error {
+  @apply px-3 py-2 text-xs text-red-600;
+}
+
+.theme-preview {
+  @apply flex items-center gap-3 border-y border-zinc-200 px-3 py-4;
+}
+
+.theme-preview-accent {
+  @apply h-10 w-10 shrink-0 rounded-xl;
+  background: var(--codex-accent);
+}
+
+.theme-preview strong { @apply text-sm; }
+.theme-preview p { @apply mt-0.5 text-xs text-zinc-500; }
+.settings-data-archive-row { @apply mt-8 border-t border-zinc-200 pt-5; }
 
 .sidebar-settings-row {
   @apply flex items-center justify-between w-full px-3 py-2.5 text-sm text-zinc-700 border-0 bg-transparent transition hover:bg-zinc-50 cursor-pointer;
