@@ -2363,6 +2363,36 @@
   @apply bg-zinc-900 text-zinc-200;
 }
 
+:root.dark .thread-summary-panel {
+  @apply border-zinc-700 bg-zinc-900;
+}
+
+:root.dark .thread-summary-header,
+:root.dark .thread-summary-section + .thread-summary-section {
+  @apply border-zinc-700;
+}
+
+:root.dark .thread-summary-title,
+:root.dark .thread-summary-section-toggle,
+:root.dark .thread-summary-row-value {
+  @apply text-zinc-100;
+}
+
+:root.dark .thread-summary-section-toggle:hover,
+:root.dark .thread-summary-close:hover {
+  @apply bg-zinc-800;
+}
+
+:root.dark .thread-summary-close {
+  @apply text-zinc-500 hover:text-zinc-100;
+}
+
+:root.dark .thread-summary-row-label,
+:root.dark .thread-summary-row-value.is-muted,
+:root.dark .thread-summary-empty {
+  @apply text-zinc-500;
+}
+
 @media (max-width: 768px) {
   .composer-dropdown-search-input,
   .search-dropdown-search,

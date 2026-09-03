@@ -931,19 +931,20 @@
             </div>
           </template>
           <template v-else>
-            <div class="content-grid">
-              <ReviewPane
-                v-if="isReviewPaneOpen && selectedThreadId && composerCwd"
-                :thread-id="selectedThreadId"
-                :cwd="composerCwd"
-                :is-thread-in-progress="isSelectedThreadInProgress"
-                :initial-file-path="reviewInitialFilePath"
-                :commit-sha="reviewInitialCommitSha"
-                @close="isReviewPaneOpen = false"
-              />
+                <div class="content-grid" :class="{ 'content-grid-with-summary': isThreadSummaryAvailable && isThreadSummaryOpen }">
+                  <ReviewPane
+                    v-if="isReviewPaneOpen && selectedThreadId && composerCwd"
+                    :thread-id="selectedThreadId"
+                    :cwd="composerCwd"
+                    :is-thread-in-progress="isSelectedThreadInProgress"
+                    :initial-file-path="reviewInitialFilePath"
+                    :commit-sha="reviewInitialCommitSha"
+                    @close="isReviewPaneOpen = false"
+                  />
 
-              <template v-else>
-                <div class="content-thread">
+                  <template v-else>
+                    <div class="thread-workspace">
+                      <div class="content-thread">
                   <button
                     class="thread-message-refresh"
                     type="button"
@@ -971,9 +972,9 @@
                     @revise-plan="onRevisePlan"
                     @continue-interrupted-turn="onContinueInterruptedTurn"
                     @respond-server-request="onRespondServerRequest" />
-                </div>
+                      </div>
 
-                <div class="composer-with-queue">
+                      <div class="composer-with-queue">
                   <div v-if="codexCliMissingError" class="composer-runtime-error" role="alert">
                     <span>{{ t(codexCliMissingError) }}</span>
                     <a class="visible-error-feedback" :href="feedbackMailto" @click="prepareFeedbackLink($event, codexCliMissingError)">{{ t('Send feedback') }}</a>
@@ -1033,9 +1034,36 @@
                     @update:selected-reasoning-effort="onSelectReasoningEffort"
                     @update:selected-speed-mode="onSelectSpeedMode"
                     @interrupt="onInterruptTurn" />
+                      </div>
+                    </div>
+                  </template>
+
+                  <ThreadSummaryPanel
+                    v-if="isThreadSummaryAvailable && isThreadSummaryOpen"
+                    :cwd="composerCwd"
+                    :branch="currentThreadBranch"
+                    :head-sha="currentThreadHeadSha"
+                    :head-subject="currentThreadHeadSubject"
+                    :dirty="isThreadWorktreeDirty"
+                    :added-line-count="threadWorktreeChangeSummary.addedLineCount"
+                    :removed-line-count="threadWorktreeChangeSummary.removedLineCount"
+                    :plan-explanation="threadSummaryPlan.explanation"
+                    :plan-step="threadSummaryPlan.step"
+                    :plan-step-count="threadSummaryPlan.stepCount"
+                    :sources="threadSummarySources"
+                    @close="setThreadSummaryOpen(false)"
+                  />
+                  <button
+                    v-else-if="isThreadSummaryAvailable"
+                    class="thread-summary-open-button"
+                    type="button"
+                    aria-label="显示摘要"
+                    title="显示摘要"
+                    @click="setThreadSummaryOpen(true)"
+                  >
+                    <IconTablerLayoutSidebar aria-hidden="true" />
+                  </button>
                 </div>
-              </template>
-            </div>
           </template>
         </section>
       </section>
@@ -1160,6 +1188,7 @@ import DesktopLayout from './components/layout/DesktopLayout.vue'
 import SidebarThreadTree from './components/sidebar/SidebarThreadTree.vue'
 import ContentHeader from './components/content/ContentHeader.vue'
 import ThreadComposer from './components/content/ThreadComposer.vue'
+import ThreadSummaryPanel from './components/content/ThreadSummaryPanel.vue'
 import ThreadPendingRequestPanel from './components/content/ThreadPendingRequestPanel.vue'
 import QueuedMessages from './components/content/QueuedMessages.vue'
 import RateLimitStatus from './components/content/RateLimitStatus.vue'
@@ -1177,6 +1206,7 @@ import IconTablerBell from './components/icons/IconTablerBell.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
 import IconTablerRefresh from './components/icons/IconTablerRefresh.vue'
+import IconTablerLayoutSidebar from './components/icons/IconTablerLayoutSidebar.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
 import { useDesktopState } from './composables/useDesktopState'
 import { useMobile } from './composables/useMobile'
@@ -1480,6 +1510,14 @@ const {
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useMobile()
+const THREAD_SUMMARY_OPEN_KEY = 'codex-web-local.thread-summary-open.v1'
+const isThreadSummaryOpen = ref(loadBoolPref(THREAD_SUMMARY_OPEN_KEY, true))
+const isThreadSummaryAvailable = computed(() => route.name === 'thread' && Boolean(selectedThreadId.value) && !isMobile.value)
+
+function setThreadSummaryOpen(open: boolean): void {
+  isThreadSummaryOpen.value = open
+  window.localStorage.setItem(THREAD_SUMMARY_OPEN_KEY, open ? '1' : '0')
+}
 type SidebarThreadTreeExposed = {
   openAutomationEditorFromPanel: (payload: AutomationEditRequest) => void
   openAutomationCreatorFromPanel: () => void
@@ -1664,7 +1702,6 @@ const DARK_MODE_KEY = 'codex-web-local.dark-mode.v1'
 const DICTATION_CLICK_TO_TOGGLE_KEY = 'codex-web-local.dictation-click-to-toggle.v1'
 const DICTATION_AUTO_SEND_KEY = 'codex-web-local.dictation-auto-send.v1'
 const DICTATION_LANGUAGE_KEY = 'codex-web-local.dictation-language.v1'
-
 const CHAT_WIDTH_KEY = 'codex-web-local.chat-width.v1'
 const CODEX_THEME_KEY = 'codex-theme-v1'
 const MOBILE_RESUME_RELOAD_MIN_HIDDEN_MS = 400
@@ -1846,6 +1883,36 @@ const filteredMessages = computed(() =>
     return true
   }),
 )
+const threadSummaryPlan = computed(() => {
+  for (let index = filteredMessages.value.length - 1; index >= 0; index -= 1) {
+    const plan = filteredMessages.value[index]?.plan
+    if (!plan) continue
+    const active = plan.steps.find((step) => step.status === 'inProgress') ?? plan.steps.find((step) => step.status === 'pending') ?? plan.steps[plan.steps.length - 1]
+    return {
+      explanation: plan.explanation?.trim() ?? '',
+      step: active?.step?.trim() ?? '',
+      stepCount: plan.steps.length,
+    }
+  }
+  return { explanation: '', step: '', stepCount: 0 }
+})
+const threadSummarySources = computed(() => {
+  const sources: string[] = []
+  const seen = new Set<string>()
+  for (let index = filteredMessages.value.length - 1; index >= 0 && sources.length < 8; index -= 1) {
+    const message = filteredMessages.value[index]
+    for (const attachment of message.fileAttachments ?? []) {
+      const value = attachment.label?.trim() || attachment.path?.trim()
+      if (value && !seen.has(value)) { seen.add(value); sources.push(value) }
+    }
+    for (const skill of message.skills ?? []) {
+      const value = skill.name?.trim() || skill.path?.trim()
+      if (value && !seen.has(value)) { seen.add(value); sources.push(value) }
+    }
+    if ((message.images?.length ?? 0) > 0 && !seen.has('图片附件')) { seen.add('图片附件'); sources.push('图片附件') }
+  }
+  return sources
+})
 const latestUserTurnId = computed(() => {
   for (let index = messages.value.length - 1; index >= 0; index -= 1) {
     const message = messages.value[index]
@@ -5427,6 +5494,44 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .content-thread {
   @apply relative flex-1 min-h-0;
+}
+
+.thread-workspace {
+  @apply flex min-h-0 min-w-0 flex-1 flex-col;
+}
+
+.content-grid-with-summary {
+  @apply grid grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)] gap-3;
+}
+
+.content-grid-with-summary .thread-summary-panel {
+  @apply static row-span-1 h-fit max-h-full w-full overflow-y-auto rounded-lg shadow-sm;
+}
+
+.thread-summary-open-button {
+  @apply absolute right-3 top-3 z-20 grid h-8 w-8 place-items-center rounded-md border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:focus:ring-zinc-600;
+}
+
+.thread-summary-open-button svg {
+  @apply h-4 w-4;
+}
+
+@media (max-width: 1100px) {
+  .content-grid-with-summary {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem);
+  }
+}
+
+@media (max-width: 900px) {
+  .content-grid-with-summary {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .content-grid-with-summary > .thread-summary-panel {
+    order: -1;
+    max-height: 16rem;
+  }
 }
 
 .thread-message-refresh {

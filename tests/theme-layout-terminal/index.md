@@ -14,6 +14,7 @@ Return to the [manual test index](../../tests.md).
 | [Feature: Revert PR #16 mobile viewport and chat scroll behavior changes](revert-pr-16-mobile-viewport-and-chat-scroll-behavior-changes.md) |
 | [Feature: Revert Renat scrolling/input-layout behavior (without Fast mode changes)](revert-renat-scrolling-input-layout-behavior-without-fast-mode-changes.md) |
 | [Feature: Dark theme command rows in chat remain readable](dark-theme-command-rows-in-chat-remain-readable.md) |
+| [Feature: Thread summary panel layout and visibility](thread-summary-panel-layout-and-visibility.md) |
 | [Feature: Home composer vertical alignment matches reference layout](home-composer-vertical-alignment-matches-reference-layout.md) |
 | [Fix: Delete/rename thread dialog height cap](delete-rename-thread-dialog-height-cap.md) |
 | [Integrated terminal mobile keyboard avoidance](integrated-terminal-mobile-keyboard-avoidance.md) |
