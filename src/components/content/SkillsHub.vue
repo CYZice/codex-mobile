@@ -1,10 +1,5 @@
 <template>
   <div class="skills-hub">
-    <div class="skills-hub-header">
-      <h2 class="skills-hub-title">{{ t('Skills Hub') }}</h2>
-      <p class="skills-hub-subtitle">{{ t('Manage installed skills on this machine') }}</p>
-    </div>
-
     <div class="skills-sync-panel">
       <div class="skills-sync-header">
         <strong>{{ t('Skills Sync (GitHub)') }}</strong>
@@ -103,20 +98,38 @@
 
     <slot name="before-installed" />
 
-    <div v-if="filteredInstalled.length > 0" class="skills-hub-section">
+    <div v-if="filteredInstalled.length > 0" class="skills-hub-section skills-installed-section">
       <button class="skills-hub-section-toggle" type="button" @click="isInstalledOpen = !isInstalledOpen">
         <span class="skills-hub-section-title">{{ t('Installed skills ({count})', { count: filteredInstalled.length }) }}</span>
         <IconTablerChevronRight class="skills-hub-section-chevron" :class="{ 'is-open': isInstalledOpen }" />
       </button>
-      <div v-if="isInstalledOpen" class="skills-hub-grid">
-        <SkillCard
+      <div v-if="isInstalledOpen" class="skills-installed-list">
+        <article
           v-for="skill in filteredInstalled"
           :key="skill.name"
-          :skill="skill"
-          :show-status-badge="false"
-          :show-owner="false"
-          @select="(skill) => openDetail(skill as HubSkill)"
-        />
+          class="skills-installed-row"
+          :class="{ 'is-disabled': skill.enabled === false }"
+        >
+          <button class="skills-installed-main" type="button" @click="openDetail(skill)">
+            <img v-if="skill.avatarUrl" class="skills-installed-avatar" :src="skill.avatarUrl" :alt="skill.owner" loading="lazy" />
+            <span v-else class="skills-installed-avatar-fallback">{{ skill.owner.charAt(0) || 'S' }}</span>
+            <span class="skills-installed-copy">
+              <strong>{{ skill.displayName || skill.name }}</strong>
+              <span>{{ skill.description || skill.name }}</span>
+            </span>
+          </button>
+          <span class="skills-installed-owner">{{ t('Personal') }}</span>
+          <button
+            class="skills-toggle"
+            :class="{ 'is-on': skill.enabled !== false }"
+            type="button"
+            :aria-label="`${skill.displayName || skill.name}: ${skill.enabled !== false ? t('Disable') : t('Enable')}`"
+            :aria-pressed="skill.enabled !== false"
+            @click.stop="handleToggleEnabled(skill, skill.enabled === false)"
+          >
+            <span class="skills-toggle-thumb" />
+          </button>
+        </article>
       </div>
     </div>
 
@@ -425,7 +438,7 @@ watch(visibleSkillErrors, (values, oldValues) => {
 @reference "tailwindcss";
 
 .skills-hub {
-  @apply flex flex-col gap-3 sm:gap-4 p-3 sm:p-6 max-w-4xl mx-auto w-full overflow-y-auto h-full;
+  @apply flex flex-col gap-4 p-3 sm:p-6 max-w-4xl mx-auto w-full overflow-y-auto h-full;
 }
 
 .skills-hub-header {
@@ -445,7 +458,7 @@ watch(visibleSkillErrors, (values, oldValues) => {
 }
 
 .skills-sync-panel {
-  @apply rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col gap-2;
+  @apply rounded-xl border border-zinc-200 bg-zinc-50/70 p-3 flex flex-col gap-2;
 }
 
 .skills-sync-header {
@@ -538,6 +551,67 @@ watch(visibleSkillErrors, (values, oldValues) => {
 
 .skills-hub-grid {
   @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3;
+}
+
+.skills-installed-list {
+  @apply flex flex-col divide-y divide-zinc-100 border-y border-zinc-100;
+}
+
+.skills-installed-row {
+  @apply flex min-h-16 items-center gap-3 py-3 transition;
+}
+
+.skills-installed-row:hover {
+  @apply bg-zinc-50;
+}
+
+.skills-installed-row.is-disabled {
+  @apply opacity-55;
+}
+
+.skills-installed-main {
+  @apply flex min-w-0 flex-1 items-center gap-3 border-0 bg-transparent p-0 text-left;
+}
+
+.skills-installed-avatar,
+.skills-installed-avatar-fallback {
+  @apply h-10 w-10 shrink-0 rounded-xl border border-zinc-200 bg-zinc-50 object-cover;
+}
+
+.skills-installed-avatar-fallback {
+  @apply flex items-center justify-center text-sm font-medium uppercase text-zinc-500;
+}
+
+.skills-installed-copy {
+  @apply flex min-w-0 flex-col gap-0.5;
+}
+
+.skills-installed-copy strong {
+  @apply truncate text-sm font-medium text-zinc-900;
+}
+
+.skills-installed-copy span {
+  @apply line-clamp-1 text-sm text-zinc-500;
+}
+
+.skills-installed-owner {
+  @apply hidden shrink-0 text-sm text-zinc-500 sm:block;
+}
+
+.skills-toggle {
+  @apply relative h-7 w-12 shrink-0 rounded-full border-0 bg-zinc-200 p-0 transition;
+}
+
+.skills-toggle.is-on {
+  @apply bg-orange-500;
+}
+
+.skills-toggle-thumb {
+  @apply absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform;
+}
+
+.skills-toggle.is-on .skills-toggle-thumb {
+  @apply translate-x-5;
 }
 
 .skills-hub-loading {

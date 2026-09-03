@@ -32,16 +32,6 @@
                     class="thread-status-indicator"
                     :data-state="getThreadState(thread)"
                   />
-                  <button
-                    class="thread-delete-button"
-                    type="button"
-                    :data-confirming="isInlineDeleteConfirming(thread.id)"
-                    :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
-                    @click.stop="onInlineDeleteClick(thread.id)"
-                  >
-                    <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
-                    <IconTablerTrash v-else class="thread-icon" />
-                  </button>
                 </span>
               </template>
               <button class="thread-main-button activity-thread-main" type="button" @click.stop="onSelect(thread.id)">
@@ -58,6 +48,12 @@
               </button>
               <template #right-hover>
                 <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                  <button class="thread-quick-action" type="button" :aria-label="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" :title="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" @click.stop="onTogglePinFromRow(thread.id)">
+                    <IconTablerPin class="thread-icon" />
+                  </button>
+                  <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
+                    <IconTablerArchive class="thread-icon" />
+                  </button>
                   <button class="thread-menu-trigger" type="button" title="thread_menu" @click.stop="toggleThreadMenu(thread.id)">
                     <IconTablerDots class="thread-icon" />
                   </button>
@@ -104,16 +100,6 @@
             <template #left>
               <span class="thread-left-stack">
                 <span v-if="shouldShowThreadIndicator(thread)" class="thread-status-indicator" :data-state="getThreadState(thread)" />
-                <button
-                  class="thread-delete-button"
-                  type="button"
-                  :data-confirming="isInlineDeleteConfirming(thread.id)"
-                  :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
-                  @click.stop="onInlineDeleteClick(thread.id)"
-                >
-                  <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
-                  <IconTablerTrash v-else class="thread-icon" />
-                </button>
               </span>
             </template>
             <button class="thread-main-button" type="button" @click.stop="onSelect(thread.id)">
@@ -146,6 +132,12 @@
             </template>
             <template #right-hover>
               <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                <button class="thread-quick-action" type="button" :aria-label="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" :title="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" @click.stop="onTogglePinFromRow(thread.id)">
+                  <IconTablerPin class="thread-icon" />
+                </button>
+                <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
+                  <IconTablerArchive class="thread-icon" />
+                </button>
                 <button
                   class="thread-menu-trigger"
                   type="button"
@@ -272,16 +264,6 @@
                 class="thread-status-indicator"
                 :data-state="getThreadState(thread)"
               />
-              <button
-                class="thread-delete-button"
-                type="button"
-                :data-confirming="isInlineDeleteConfirming(thread.id)"
-                :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
-                @click.stop="onInlineDeleteClick(thread.id)"
-              >
-                <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
-                <IconTablerTrash v-else class="thread-icon" />
-              </button>
             </span>
           </template>
           <button class="thread-main-button" type="button" @click.stop="onSelect(thread.id)">
@@ -312,9 +294,15 @@
           <template #right>
             <span class="thread-row-time">{{ formatRelativeThread(thread) }}</span>
           </template>
-          <template #right-hover>
-            <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
-              <button
+            <template #right-hover>
+              <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                <button class="thread-quick-action" type="button" :aria-label="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" :title="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" @click.stop="onTogglePinFromRow(thread.id)">
+                  <IconTablerPin class="thread-icon" />
+                </button>
+                <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
+                  <IconTablerArchive class="thread-icon" />
+                </button>
+                <button
                 class="thread-menu-trigger"
                 type="button"
                 title="thread_menu"
@@ -477,16 +465,6 @@
                       class="thread-status-indicator"
                       :data-state="getThreadState(thread)"
                     />
-                    <button
-                      class="thread-delete-button"
-                      type="button"
-                      :data-confirming="isInlineDeleteConfirming(thread.id)"
-                      :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
-                      @click.stop="onInlineDeleteClick(thread.id)"
-                    >
-                      <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
-                      <IconTablerTrash v-else class="thread-icon" />
-                    </button>
                   </span>
                 </template>
                 <button class="thread-main-button" type="button" @click.stop="onSelect(thread.id)">
@@ -519,6 +497,12 @@
                 </template>
                 <template #right-hover>
                   <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                    <button class="thread-quick-action" type="button" :aria-label="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" :title="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" @click.stop="onTogglePinFromRow(thread.id)">
+                      <IconTablerPin class="thread-icon" />
+                    </button>
+                    <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
+                      <IconTablerArchive class="thread-icon" />
+                    </button>
                     <button
                       class="thread-menu-trigger"
                       type="button"
@@ -606,16 +590,6 @@
                   class="thread-status-indicator"
                   :data-state="getThreadState(thread)"
                 />
-                <button
-                  class="thread-delete-button"
-                  type="button"
-                  :data-confirming="isInlineDeleteConfirming(thread.id)"
-                  :title="isInlineDeleteConfirming(thread.id) ? 'Confirm delete' : t('Delete thread')"
-                  @click.stop="onInlineDeleteClick(thread.id)"
-                >
-                  <span v-if="isInlineDeleteConfirming(thread.id)" class="thread-delete-confirm-label">Confirm</span>
-                  <IconTablerTrash v-else class="thread-icon" />
-                </button>
               </span>
             </template>
             <button class="thread-main-button" type="button" @click.stop="onSelect(thread.id)">
@@ -648,6 +622,12 @@
             </template>
             <template #right-hover>
               <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                <button class="thread-quick-action" type="button" :aria-label="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" :title="isPinned(thread.id) ? 'Unpin thread' : 'Pin thread'" @click.stop="onTogglePinFromRow(thread.id)">
+                  <IconTablerPin class="thread-icon" />
+                </button>
+                <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
+                  <IconTablerArchive class="thread-icon" />
+                </button>
                 <button
                   class="thread-menu-trigger"
                   type="button"
@@ -681,18 +661,32 @@
         :data-open-direction="getThreadMenuDirection(openThreadMenuThread.id)"
         @click.stop
       >
-        <button class="thread-menu-item" type="button" @click="openAutomationDialog(openThreadMenuThread.id)">
-          {{ threadHasAutomation(openThreadMenuThread.id) ? 'Manage automations…' : 'Add automation…' }}
+        <button class="thread-menu-item" type="button" @click="openRenameThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
+          <IconTablerFilePencil class="thread-menu-item-icon" />
+          <span>{{ t('Rename thread') }}</span>
         </button>
+        <button class="thread-menu-item" type="button" @click="onTogglePinFromMenu(openThreadMenuThread.id)">
+          <IconTablerPin class="thread-menu-item-icon" />
+          <span>{{ isPinned(openThreadMenuThread.id) ? 'Unpin thread' : 'Pin thread' }}</span>
+        </button>
+        <button class="thread-menu-item" type="button" @click="openDeleteThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
+          <IconTablerArchive class="thread-menu-item-icon" />
+          <span>{{ t('Archive thread') }}</span>
+        </button>
+        <div class="thread-menu-separator" />
         <button class="thread-menu-item" type="button" @click="onBrowseThreadFiles(openThreadMenuThread.id)">
-          Browse files
+          <IconTablerFolder class="thread-menu-item-icon" />
+          <span>Browse files</span>
         </button>
         <button class="thread-menu-item" type="button" @click="onSaveThreadProject(openThreadMenuThread.id)">
-          Export Project
+          <IconTablerFolderOpen class="thread-menu-item-icon" />
+          <span>Export project</span>
         </button>
         <button class="thread-menu-item" type="button" @click="onCopyThreadPath(openThreadMenuThread.id)">
-          Copy path
+          <IconTablerCopy class="thread-menu-item-icon" />
+          <span>Copy path</span>
         </button>
+        <div class="thread-menu-separator" />
         <button
           class="thread-menu-item"
           type="button"
@@ -700,19 +694,16 @@
           :title="openThreadMenuThread.id === selectedThreadId ? 'Copy chat' : 'Open this chat before copying'"
           @click="onCopyThreadChat(openThreadMenuThread.id)"
         >
-          Copy chat
+          <IconTablerCopy class="thread-menu-item-icon" />
+          <span>Copy chat</span>
         </button>
         <button class="thread-menu-item" type="button" @click="onForkThread(openThreadMenuThread.id)">
-          Create chat fork
-        </button>
-        <button class="thread-menu-item" type="button" @click="onTogglePinFromMenu(openThreadMenuThread.id)">
-          {{ isPinned(openThreadMenuThread.id) ? 'Unpin thread' : 'Pin thread' }}
-        </button>
-        <button class="thread-menu-item" type="button" @click="openRenameThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
-          {{ t('Rename thread') }}
+          <IconTablerGitFork class="thread-menu-item-icon" />
+          <span>Create chat fork</span>
         </button>
         <button class="thread-menu-item thread-menu-item-danger" type="button" @click="openDeleteThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
-          {{ t('Delete thread') }}
+          <IconTablerTrash class="thread-menu-item-icon" />
+          <span>{{ t('Delete thread') }}</span>
         </button>
       </div>
     </Teleport>
@@ -967,6 +958,9 @@ import IconTablerFolderOpen from '../icons/IconTablerFolderOpen.vue'
 import IconTablerGitFork from '../icons/IconTablerGitFork.vue'
 import IconTablerBolt from '../icons/IconTablerBolt.vue'
 import IconTablerTrash from '../icons/IconTablerTrash.vue'
+import IconTablerPin from '../icons/IconTablerPin.vue'
+import IconTablerArchive from '../icons/IconTablerArchive.vue'
+import IconTablerCopy from '../icons/IconTablerCopy.vue'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
 import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPath } from '../../pathUtils.js'
@@ -1069,7 +1063,6 @@ const chatSortMode = ref<ChatSortMode>(loadChatSortMode())
 let hasLoadedPinnedThreadState = false
 const pinnedThreadIds = ref<string[]>([])
 const hydratedPinnedThreadById = ref<Record<string, UiThread>>({})
-const inlineDeleteConfirmThreadId = ref('')
 const optimisticallyArchivedThreadIds = ref<string[]>([])
 const openProjectMenuId = ref('')
 const openThreadMenuId = ref('')
@@ -1331,7 +1324,11 @@ const filteredGroups = computed<UiProjectGroup[]>(() => {
   return props.groups.flatMap((group) => {
     const threads = group.threads.filter((thread) => !isProjectlessChatPath(thread.cwd) && threadMatchesSearch(thread))
     if (threads.length > 0) return [{ ...group, threads }]
-    return !isSearchActive.value && group.threads.length === 0 ? [{ ...group, threads }] : []
+    // Keep registered workspace placeholders so their "new thread" action remains available,
+    // but drop orphaned empty groups that cannot resolve to a workspace root.
+    return !isSearchActive.value && group.threads.length === 0 && Boolean(props.projectCwdByName[group.projectName]?.trim())
+      ? [{ ...group, threads }]
+      : []
   })
 })
 
@@ -1673,8 +1670,11 @@ function onTogglePinFromMenu(threadId: string): void {
   closeThreadMenu()
 }
 
+function onTogglePinFromRow(threadId: string): void {
+  togglePin(threadId)
+}
+
 function onSelect(threadId: string): void {
-  inlineDeleteConfirmThreadId.value = ''
   emit('select', threadId)
 }
 
@@ -1900,7 +1900,6 @@ function closeThreadMenu(): void {
 }
 
 function toggleThreadMenu(threadId: string): void {
-  inlineDeleteConfirmThreadId.value = ''
   if (openThreadMenuId.value === threadId) {
     closeThreadMenu()
     return
@@ -1916,7 +1915,6 @@ function toggleThreadMenu(threadId: string): void {
 
 function onThreadRowContextMenu(event: MouseEvent, threadId: string): void {
   event.preventDefault()
-  inlineDeleteConfirmThreadId.value = ''
   openThreadMenuId.value = threadId
 }
 
@@ -1946,7 +1944,6 @@ function submitRenameThread(): void {
 }
 
 function openDeleteThreadDialog(threadId: string, currentTitle: string): void {
-  inlineDeleteConfirmThreadId.value = ''
   deleteThreadDialogThreadId.value = threadId
   deleteThreadTitle.value = currentTitle
   deleteThreadDialogVisible.value = true
@@ -1966,26 +1963,10 @@ async function submitDeleteThread(): Promise<void> {
   closeDeleteThreadDialog()
 }
 
-function isInlineDeleteConfirming(threadId: string): boolean {
-  return inlineDeleteConfirmThreadId.value === threadId
-}
-
-function onInlineDeleteClick(threadId: string): void {
-  if (inlineDeleteConfirmThreadId.value !== threadId) {
-    inlineDeleteConfirmThreadId.value = threadId
-    closeThreadMenu()
-    return
-  }
-
-  deleteThreadById(threadId)
-  inlineDeleteConfirmThreadId.value = ''
-}
-
 function deleteThreadById(threadId: string): void {
   if (!optimisticallyArchivedThreadIdSet.value.has(threadId)) {
     optimisticallyArchivedThreadIds.value = [threadId, ...optimisticallyArchivedThreadIds.value]
   }
-  inlineDeleteConfirmThreadId.value = ''
   closeThreadMenu()
   pinnedThreadIds.value = pinnedThreadIds.value.filter((id) => id !== threadId)
   emit('archive', threadId)
@@ -3362,7 +3343,7 @@ onBeforeUnmount(() => {
 }
 
 .project-group > .thread-list {
-  @apply mt-px pl-6;
+  @apply mt-px pl-0;
 }
 
 .thread-row-item {
@@ -3383,18 +3364,6 @@ onBeforeUnmount(() => {
 
 .thread-left-stack {
   @apply relative w-4 h-4 flex items-center justify-center;
-}
-
-.thread-delete-button {
-  @apply absolute left-0 top-1/2 -translate-y-1/2 h-4 min-w-4 rounded text-zinc-500 opacity-0 pointer-events-none transition flex items-center justify-center;
-}
-
-.thread-delete-button[data-confirming='true'] {
-  @apply z-10 h-5 min-w-16 px-1.5 bg-rose-600 text-white opacity-100 pointer-events-auto shadow-sm;
-}
-
-.thread-delete-confirm-label {
-  @apply text-[11px] font-medium leading-none;
 }
 
 .thread-main-button {
@@ -3438,15 +3407,27 @@ onBeforeUnmount(() => {
 }
 
 .thread-menu-wrap {
-  @apply relative;
+  @apply relative flex items-center gap-0.5;
 }
 
 .thread-menu-trigger {
-  @apply h-4 w-4 rounded p-0 text-xs text-zinc-600 flex items-center justify-center;
+  @apply h-6 w-6 rounded-md p-0 text-zinc-500 flex items-center justify-center transition hover:bg-zinc-300/70 hover:text-zinc-800;
+}
+
+.thread-quick-action {
+  @apply h-6 w-6 rounded-md p-0 text-zinc-500 opacity-0 pointer-events-none flex items-center justify-center transition hover:bg-zinc-300/70 hover:text-zinc-800;
+}
+
+.thread-quick-action:first-child {
+  @apply text-zinc-400;
+}
+
+.thread-quick-action[aria-label='Unpin thread'] {
+  @apply text-orange-500 opacity-100 pointer-events-auto;
 }
 
 .thread-menu-panel {
-  @apply absolute right-0 top-full mt-1 z-20 min-w-36 rounded-md border border-zinc-200 bg-white p-1 shadow-md flex flex-col gap-0.5;
+  @apply absolute right-0 top-full mt-1 z-20 min-w-56 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl flex flex-col gap-0.5;
 }
 
 .thread-menu-panel-fixed {
@@ -3460,7 +3441,15 @@ onBeforeUnmount(() => {
 }
 
 .thread-menu-item {
-  @apply rounded px-2 py-1 text-left text-sm text-zinc-700 hover:bg-zinc-100;
+  @apply flex min-h-8 items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100;
+}
+
+.thread-menu-item-icon {
+  @apply h-4 w-4 shrink-0 text-zinc-500;
+}
+
+.thread-menu-separator {
+  @apply my-1 border-t border-zinc-200;
 }
 
 .thread-menu-item:disabled {
@@ -3511,9 +3500,9 @@ onBeforeUnmount(() => {
   @apply bg-zinc-200 text-zinc-950;
 }
 
-.thread-row:hover .thread-delete-button,
-.thread-row:focus-within .thread-delete-button,
-.thread-delete-button[data-confirming='true'] {
+.thread-row:hover .thread-quick-action,
+.thread-row:focus-within .thread-quick-action,
+.thread-row[data-menu-open='true'] .thread-quick-action {
   @apply opacity-100 pointer-events-auto;
 }
 

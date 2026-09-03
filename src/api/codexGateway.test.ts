@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, listDirectoryComposioConnectors, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -269,33 +269,6 @@ describe('getCurrentModelConfig', () => {
       model: 'gpt-5.6-sol',
       reasoningEffort,
     })
-  })
-})
-
-describe('listDirectoryComposioConnectors', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('sends search queries as query params expected by the server', async () => {
-    const requests: string[] = []
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      requests.push(String(input))
-      return new Response(JSON.stringify({
-        data: [],
-        nextCursor: null,
-        total: 0,
-      }), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-    }))
-
-    await listDirectoryComposioConnectors('instagram', '50', 25)
-
-    expect(requests).toEqual(['/codex-api/composio/connectors?query=instagram&cursor=50&limit=25'])
   })
 })
 

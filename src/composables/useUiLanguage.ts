@@ -25,6 +25,8 @@ const zhCN: Record<string, string> = {
   'New chat': '新聊天',
   'Chat without project': '普通聊天',
   'No chats': '没有聊天',
+  'Archive thread': '归档线程',
+  'Personal': '个人',
   'Skills Hub': '技能中心',
   'Expand accounts': '展开账户',
   'Collapse accounts': '折叠账户',

@@ -1272,7 +1272,7 @@ type ThreadTerminalPanelExposed = {
 }
 
 type DirectoryTryItemPayload = {
-  kind: 'app' | 'plugin' | 'skill' | 'composio'
+  kind: 'app' | 'plugin' | 'skill'
   name: string
   displayName: string
   skillPath?: string
@@ -5209,9 +5209,7 @@ function buildDirectoryTryPrompt(payload: DirectoryTryItemPayload): string {
     ? 'skill'
     : payload.kind === 'plugin'
       ? 'plugin'
-      : payload.kind === 'composio'
-        ? 'Composio connector'
-        : 'app'
+      : 'app'
   return `Test ${label} ${itemType}. Give me a list of what it can do and one useful example.`
 }
 
@@ -5426,7 +5424,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .content-grid {
-  @apply flex-1 min-h-0 flex flex-col gap-3;
+  @apply relative flex-1 min-h-0 flex flex-col gap-3;
 }
 
 .content-grid-home {
