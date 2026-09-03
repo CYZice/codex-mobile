@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
@@ -107,6 +107,105 @@ class CcSwitchIntegrationError extends Error {
 
 let switchingProviderId = ''
 let switchMutation: Promise<void> = Promise.resolve()
+
+export type CcSwitchExternalChangeWatcher = {
+  close(): void
+}
+
+type ExternalChangeWatcherOptions = {
+  paths?: CcSwitchPaths
+  reloadRuntime: () => Promise<void>
+  isBlocked: () => string
+  debounceMs?: number
+}
+
+function getStatusSignature(status: CcSwitchStatus): string {
+  return JSON.stringify({
+    available: status.available,
+    currentProviderId: status.currentProviderId,
+    providers: status.providers.map((provider) => ({
+      id: provider.id,
+      current: provider.current,
+      compatible: provider.compatible,
+      model: provider.model,
+      endpointHost: provider.endpointHost,
+    })),
+  })
+}
+
+export function watchCcSwitchExternalChanges(
+  options: ExternalChangeWatcherOptions,
+): CcSwitchExternalChangeWatcher {
+  const paths = options.paths ?? getCcSwitchPaths()
+  const watchedFiles = new Set([
+    basename(paths.databasePath),
+    basename(paths.settingsPath),
+    basename(paths.configPath),
+  ])
+  const watchers: FSWatcher[] = []
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let closed = false
+  let lastSignature = ''
+
+  const schedule = (): void => {
+    if (closed) return
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      void checkAndReload()
+    }, options.debounceMs ?? 500)
+  }
+
+  const checkAndReload = async (): Promise<void> => {
+    if (closed) return
+    const status = await readCcSwitchStatus(paths)
+    const signature = getStatusSignature(status)
+    if (signature === lastSignature) return
+    lastSignature = signature
+    if (!status.available) return
+
+    const blockReason = options.isBlocked()
+    if (blockReason) {
+      if (!closed) {
+        timer = setTimeout(() => {
+          timer = null
+          void checkAndReload()
+        }, 1000)
+      }
+      return
+    }
+
+    try {
+      await options.reloadRuntime()
+    } catch { /* A later file event or retry can attempt the reload again. */ }
+  }
+
+  const onChange = (filename: string | null): void => {
+    if (!filename || watchedFiles.has(basename(filename))) schedule()
+  }
+
+  for (const directory of new Set([dirname(paths.databasePath), dirname(paths.configPath)])) {
+    try {
+      watchers.push(watch(directory, { persistent: false }, (_eventType, filename) => onChange(filename)))
+    } catch {
+      // CC Switch may not be installed yet; status remains available on demand.
+    }
+  }
+
+  void readCcSwitchStatus(paths).then((status) => {
+    lastSignature = getStatusSignature(status)
+  })
+
+  return {
+    close: () => {
+      closed = true
+      if (timer) clearTimeout(timer)
+      timer = null
+      watchers.forEach((entry) => entry.close())
+      watchers.length = 0
+    },
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
