@@ -5,6 +5,7 @@ import {
   composerReferenceFromHref,
   composerReferenceHref,
   serializeComposerReference,
+  stripChatGptConversationReferenceBlocks,
 } from './composerReferences'
 
 describe('composer references', () => {
@@ -32,5 +33,26 @@ describe('composer references', () => {
     expect(block).toContain('call `read_thread` with `threadId` set to `conversationId` and `turnLimit` set to 10')
     expect(block).toContain('\"conversationId\":\"conversation-id\"')
     expect(block).toContain('\"priorConversation\":{\"conversation\":[],\"diff\":null}')
+  })
+
+  it('removes internal conversation context blocks from rendered user text', () => {
+    const firstBlock = buildChatGptConversationReferenceBlock({
+      conversationId: 'conversation-1',
+      title: 'First conversation',
+      preview: null,
+    })
+    const secondBlock = buildChatGptConversationReferenceBlock({
+      conversationId: 'conversation-2',
+      title: 'Second conversation',
+      preview: { conversation: [] },
+    })
+
+    expect(stripChatGptConversationReferenceBlocks([
+      '[First conversation](chatgpt-conversation://conversation-1)',
+      '',
+      firstBlock,
+      '',
+      secondBlock,
+    ].join('\n'))).toBe('[First conversation](chatgpt-conversation://conversation-1)')
   })
 })

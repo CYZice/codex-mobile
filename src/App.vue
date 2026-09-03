@@ -1475,7 +1475,6 @@ const {
   stopPolling,
   primeSelectedThread,
   rollbackSelectedThread,
-  rollbackThreadInThread,
 } = useDesktopState()
 
 const route = useRoute()
@@ -4337,11 +4336,6 @@ async function onEditMessage(payload: {
   onComplete: (success: boolean, errorMessage?: string) => void
 }): Promise<void> {
   const message = payload.message
-  const rolledBack = await rollbackThreadInThread(payload.threadId, payload.turnId)
-  if (!rolledBack) {
-    payload.onComplete(false, 'Edit failed. The original message was kept.')
-    return
-  }
   try {
     if (selectedThreadId.value === payload.threadId) scheduleMobileConversationJumpToLatest()
     await sendMessageToSelectedThread(
@@ -4361,7 +4355,7 @@ async function onEditMessage(payload: {
     )
     payload.onComplete(true)
   } catch {
-    payload.onComplete(false, 'Edit failed. The original message was kept.')
+    payload.onComplete(false, 'Edit resend failed. The original message was kept.')
   }
 }
 

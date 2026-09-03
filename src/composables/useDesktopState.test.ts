@@ -4,11 +4,13 @@ import {
   collectWorkspaceRootPathsForProjectRemoval,
   filterGroupsByWorkspaceRoots,
   findAdjacentThreadId,
+  mergeIncomingWithLocalInProgressThreads,
   removeThreadFromGroups,
   useDesktopState,
 } from './useDesktopState'
 import type { UiProjectGroup } from '../types/codex'
 import type { AvailableModel, WorkspaceRootsState } from '../api/codexGateway'
+import { buildChatGptConversationReferenceBlock } from '../composerReferences'
 
 const gatewayMocks = vi.hoisted(() => ({
   archiveThread: vi.fn(),
@@ -631,6 +633,19 @@ describe('startup request deduplication', () => {
 })
 
 describe('forking from a completed response', () => {
+  it('keeps a local fork visible until the server thread list includes it', () => {
+    const source = thread('source-thread', '/tmp/project')
+    const forked = thread('forked-thread', '/tmp/project')
+    const merged = mergeIncomingWithLocalInProgressThreads(
+      [{ projectName: 'project', threads: [forked, source] }],
+      [{ projectName: 'project', threads: [source] }],
+      {},
+      new Set(['forked-thread']),
+    )
+
+    expect(merged[0]?.threads.map((item) => item.id)).toEqual(['forked-thread', 'source-thread'])
+  })
+
   it('allows a historical fork while the source thread is streaming and removes newer turns from the child', async () => {
     installTestWindow()
     gatewayMocks.getPendingServerRequests.mockResolvedValue([])
@@ -1434,6 +1449,52 @@ describe('provider model selection', () => {
 
     resolveTurnStart?.('turn-existing')
     await sendPromise
+  })
+
+  it('keeps internal ChatGPT reference context out of optimistic message text', async () => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{ projectName: 'Project', threads: [thread('reference-thread', '/tmp/project')] }],
+      nextCursor: null,
+    })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.5',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue(modelsWithoutReasoning('gpt-5.5'))
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+    gatewayMocks.startThreadTurn.mockResolvedValue('turn-reference')
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+    state.primeSelectedThread('reference-thread')
+    await state.loadMessages('reference-thread')
+
+    const visibleText = '[Recommended plugin](chatgpt-conversation://conversation-id)'
+    const submittedText = `${visibleText}\n\n${buildChatGptConversationReferenceBlock({
+      conversationId: 'conversation-id',
+      title: 'Recommended plugin',
+      preview: null,
+    })}`
+    await state.sendMessageToSelectedThread(submittedText)
+
+    expect(state.messages.value.at(-1)?.text).toBe(visibleText)
+    expect(gatewayMocks.startThreadTurn.mock.calls.at(-1)?.[0]).toBe('reference-thread')
+    expect(gatewayMocks.startThreadTurn.mock.calls.at(-1)?.[1]).toBe(submittedText)
   })
 
   it('steers an active turn without starting another turn', async () => {

@@ -54,9 +54,6 @@
                   <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
                     <IconTablerArchive class="thread-icon" />
                   </button>
-                  <button class="thread-menu-trigger" type="button" title="thread_menu" @click.stop="toggleThreadMenu(thread.id)">
-                    <IconTablerDots class="thread-icon" />
-                  </button>
                 </div>
               </template>
             </SidebarMenuRow>
@@ -138,14 +135,6 @@
                 <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
                   <IconTablerArchive class="thread-icon" />
                 </button>
-                <button
-                  class="thread-menu-trigger"
-                  type="button"
-                  title="thread_menu"
-                  @click.stop="toggleThreadMenu(thread.id)"
-                >
-                  <IconTablerDots class="thread-icon" />
-                </button>
               </div>
             </template>
           </SidebarMenuRow>
@@ -176,7 +165,7 @@
               :title="t('Organize threads')"
               @click.stop="toggleOrganizeMenu"
             >
-              <IconTablerDots class="thread-icon" />
+              <IconTablerFilter class="thread-icon" />
             </button>
 
             <div v-if="isOrganizeMenuOpen" class="organize-menu-panel" @click.stop>
@@ -302,14 +291,6 @@
                 <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
                   <IconTablerArchive class="thread-icon" />
                 </button>
-                <button
-                class="thread-menu-trigger"
-                type="button"
-                title="thread_menu"
-                @click.stop="toggleThreadMenu(thread.id)"
-              >
-                <IconTablerDots class="thread-icon" />
-              </button>
             </div>
           </template>
         </SidebarMenuRow>
@@ -372,15 +353,6 @@
             <template #right>
               <div class="project-hover-controls">
                 <div :ref="(el) => setProjectMenuWrapRef(group.projectName, el)" class="project-menu-wrap">
-                  <button
-                    class="project-menu-trigger"
-                    type="button"
-                    title="project_menu"
-                    @click.stop="toggleProjectMenu(group.projectName)"
-                  >
-                    <IconTablerDots class="thread-icon" />
-                  </button>
-
                   <div
                     v-if="isProjectMenuOpen(group.projectName)"
                     class="project-menu-panel"
@@ -503,14 +475,6 @@
                     <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
                       <IconTablerArchive class="thread-icon" />
                     </button>
-                    <button
-                      class="thread-menu-trigger"
-                      type="button"
-                      title="thread_menu"
-                      @click.stop="toggleThreadMenu(thread.id)"
-                    >
-                      <IconTablerDots class="thread-icon" />
-                    </button>
                   </div>
                 </template>
               </SidebarMenuRow>
@@ -627,14 +591,6 @@
                 </button>
                 <button class="thread-quick-action" type="button" aria-label="Archive thread" :title="t('Archive thread')" @click.stop="openDeleteThreadDialog(thread.id, thread.title)">
                   <IconTablerArchive class="thread-icon" />
-                </button>
-                <button
-                  class="thread-menu-trigger"
-                  type="button"
-                  title="thread_menu"
-                  @click.stop="toggleThreadMenu(thread.id)"
-                >
-                  <IconTablerDots class="thread-icon" />
                 </button>
               </div>
             </template>
@@ -951,7 +907,7 @@ import {
 import type { UiProjectGroup, UiThread, UiThreadAutomation, UiThreadAutomationStatus } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
 import IconTablerChevronRight from '../icons/IconTablerChevronRight.vue'
-import IconTablerDots from '../icons/IconTablerDots.vue'
+import IconTablerFilter from '../icons/IconTablerFilter.vue'
 import IconTablerFilePencil from '../icons/IconTablerFilePencil.vue'
 import IconTablerFolder from '../icons/IconTablerFolder.vue'
 import IconTablerFolderOpen from '../icons/IconTablerFolderOpen.vue'
@@ -1899,20 +1855,6 @@ function closeThreadMenu(): void {
   openThreadMenuStyle.value = {}
 }
 
-function toggleThreadMenu(threadId: string): void {
-  if (openThreadMenuId.value === threadId) {
-    closeThreadMenu()
-    return
-  }
-
-  closeProjectMenu()
-  isOrganizeMenuOpen.value = false
-  openThreadMenuId.value = threadId
-  nextTick(() => {
-    updateOpenThreadMenuPlacement(threadId)
-  })
-}
-
 function onThreadRowContextMenu(event: MouseEvent, threadId: string): void {
   event.preventDefault()
   openThreadMenuId.value = threadId
@@ -2354,20 +2296,6 @@ function requestProjectGitStatusAndUpdateMenuDirection(projectName: string): voi
   nextTick(() => {
     updateProjectMenuDirection(projectName)
   })
-}
-
-function toggleProjectMenu(projectName: string): void {
-  if (openProjectMenuId.value === projectName) {
-    closeProjectMenu()
-    return
-  }
-
-  closeThreadMenu()
-  isOrganizeMenuOpen.value = false
-  openProjectMenuId.value = projectName
-  projectMenuMode.value = 'actions'
-  projectRenameDraft.value = getProjectDisplayName(projectName)
-  requestProjectGitStatusAndUpdateMenuDirection(projectName)
 }
 
 function openProjectContextMenu(projectName: string): void {
@@ -3292,10 +3220,6 @@ onBeforeUnmount(() => {
   @apply flex items-center gap-1;
 }
 
-.project-menu-trigger {
-  @apply h-4 w-4 rounded p-0 text-zinc-600 flex items-center justify-center;
-}
-
 .project-menu-panel {
   @apply absolute right-0 top-full mt-1 z-20 min-w-36 rounded-md border border-zinc-200 bg-white p-1 shadow-md flex flex-col gap-0.5;
 }
@@ -3408,10 +3332,6 @@ onBeforeUnmount(() => {
 
 .thread-menu-wrap {
   @apply relative flex items-center gap-0.5;
-}
-
-.thread-menu-trigger {
-  @apply h-6 w-6 rounded-md p-0 text-zinc-500 flex items-center justify-center transition hover:bg-zinc-300/70 hover:text-zinc-800;
 }
 
 .thread-quick-action {

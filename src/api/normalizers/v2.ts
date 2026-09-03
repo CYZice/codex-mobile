@@ -18,6 +18,7 @@ import type {
   UiThread,
 } from '../../types/codex'
 import { normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
+import { stripChatGptConversationReferenceBlocks } from '../../composerReferences'
 
 function toIso(seconds: number): string {
   return new Date(seconds * 1000).toISOString()
@@ -174,7 +175,7 @@ function parseUserMessageContent(
   const heartbeat = parseHeartbeatEnvelope(fullText)
 
   return {
-    text: heartbeat?.instructions ?? extractCodexUserRequestText(fullText),
+    text: heartbeat?.instructions ?? stripChatGptConversationReferenceBlocks(extractCodexUserRequestText(fullText)),
     images,
     skills,
     fileAttachments,

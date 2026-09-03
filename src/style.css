@@ -886,13 +886,11 @@
 }
 
 :root.dark .thread-menu-item-icon,
-:root.dark .thread-quick-action,
-:root.dark .thread-menu-trigger {
+:root.dark .thread-quick-action {
   @apply text-zinc-400;
 }
 
-:root.dark .thread-quick-action:hover,
-:root.dark .thread-menu-trigger:hover {
+:root.dark .thread-quick-action:hover {
   @apply bg-zinc-700 text-zinc-100;
 }
 
@@ -910,10 +908,6 @@
 
 :root.dark .thread-menu-item-danger {
   @apply text-rose-300 hover:bg-rose-900/40;
-}
-
-:root.dark .thread-menu-trigger {
-  @apply text-zinc-400;
 }
 
 :root.dark .rename-thread-panel {

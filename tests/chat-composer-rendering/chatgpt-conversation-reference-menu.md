@@ -16,11 +16,12 @@
 5. Continue typing after the reference, add another space and `@query`, then select a plugin. Confirm repeated mentions work without removing the earlier reference or surrounding text.
 6. Reload a persisted draft containing `[title](chatgpt-conversation://conversation-id)` and confirm it is restored as the same inline reference node.
 7. Submit and confirm the visible draft keeps Desktop-compatible Markdown reference links while the outgoing text also includes the bounded, untrusted ChatGPT conversation context block.
-8. Open `$` in the same composer and confirm its visual surface, width, scrolling, separators, and row states match the `+` menu.
-9. Repeat in dark mode and on mobile.
-10. On Windows with only the system proxy enabled, reload the menu and confirm the conversation list loads without adding proxy variables to the app process.
-11. Temporarily use an unreachable proxy in an isolated test process and confirm the error distinguishes a ChatGPT network-route failure from missing authentication.
-12. While the list request is failing, confirm the ChatGPT conversations group remains visible with the backend error and a Retry action; restore connectivity and retry without reloading the page.
+8. Refresh the submitted thread and confirm only the inline reference is visible; the internal `Referenced ChatGPT conversation` notice and JSON payload are not rendered in the user bubble.
+9. Open `$` in the same composer and confirm its visual surface, width, scrolling, separators, and row states match the `+` menu.
+10. Repeat in dark mode and on mobile.
+11. On Windows with only the system proxy enabled, reload the menu and confirm the conversation list loads without adding proxy variables to the app process.
+12. Temporarily use an unreachable proxy in an isolated test process and confirm the error distinguishes a ChatGPT network-route failure from missing authentication.
+13. While the list request is failing, confirm the ChatGPT conversations group remains visible with the backend error and a Retry action; restore connectivity and retry without reloading the page.
 
 ## Expected results
 
@@ -32,6 +33,7 @@
 - ChatGPT and plugin selections remain inline in the editable document. Long labels may wrap naturally on mobile but must stay in the same paragraph and cursor flow.
 - ChatGPT references serialize as `[title](chatgpt-conversation://conversation-id)`; plugin references serialize with the `plugin://` prefix.
 - The ChatGPT context block contains at most the latest three user-turn branches, limits each text item to 2,000 characters, and instructs the agent to call `read_thread` when more context is needed.
+- Internal reference context remains in the request sent to Codex but is removed from optimistic and persisted user-message rendering.
 - Unauthenticated or unavailable ChatGPT data leaves the composer usable and does not block attachments, plugins, or skills.
 - ChatGPT list failures are not rendered as an empty list: the app retries once automatically, then shows the server detail and a Retry action that restores rows in place.
 - ChatGPT conversations are fetched in pages of at most 50 items, avoiding an unbounded initial menu render.

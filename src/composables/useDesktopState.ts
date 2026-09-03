@@ -70,6 +70,7 @@ import type {
   UiThread,
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
+import { stripChatGptConversationReferenceBlocks } from '../composerReferences'
 import {
   DEFAULT_PERMISSION_PRESET,
   inferPermissionPresetFromSettings,
@@ -1028,14 +1029,17 @@ function mergeThreadGroups(
   return areGroupArraysEqual(previous, mergedGroups) ? previous : mergedGroups
 }
 
-function mergeIncomingWithLocalInProgressThreads(
+export function mergeIncomingWithLocalInProgressThreads(
   previous: UiProjectGroup[],
   incoming: UiProjectGroup[],
   inProgressById: Record<string, boolean>,
+  optimisticThreadIds: ReadonlySet<string> = new Set(),
 ): UiProjectGroup[] {
   const incomingThreadIds = new Set(flattenThreads(incoming).map((thread) => thread.id))
   const localInProgressThreads = flattenThreads(previous).filter(
-    (thread) => inProgressById[thread.id] === true && !incomingThreadIds.has(thread.id),
+    (thread) => (
+      inProgressById[thread.id] === true || optimisticThreadIds.has(thread.id)
+    ) && !incomingThreadIds.has(thread.id),
   )
 
   if (localInProgressThreads.length === 0) {
@@ -1402,6 +1406,7 @@ export function useDesktopState() {
   const liveFileChangeMessagesByThreadId = ref<Record<string, UiMessage[]>>({})
   const inProgressById = ref<Record<string, boolean>>({})
   const forkInFlightSourceTurns = new Set<string>()
+  const optimisticThreadIdsAwaitingList = new Set<string>()
   type FileAttachment = { label: string; path: string; fsPath: string }
   type QueuedMessage = {
     id: string
@@ -2357,6 +2362,7 @@ export function useDesktopState() {
   }
 
   function insertOptimisticThread(threadId: string, cwd: string, firstMessageText: string): void {
+    optimisticThreadIdsAwaitingList.add(threadId)
     const nowIso = new Date().toISOString()
     const normalizedCwd = normalizePathForUi(cwd)
     const projectName = toProjectName(normalizedCwd)
@@ -4467,11 +4473,15 @@ export function useDesktopState() {
     }
 
     const orderedGroups = orderGroupsByProjectOrder(visibleGroups, projectOrder.value)
+    for (const thread of flattenThreads(orderedGroups)) {
+      optimisticThreadIdsAwaitingList.delete(thread.id)
+    }
     markServerListedThreads(new Set(flattenThreads(orderedGroups).map((thread) => thread.id)))
     const mergedWithInProgress = mergeIncomingWithLocalInProgressThreads(
       sourceGroups.value,
       orderedGroups,
       inProgressById.value,
+      optimisticThreadIdsAwaitingList,
     )
     sourceGroups.value = mergeThreadGroups(sourceGroups.value, mergedWithInProgress)
     inProgressById.value = pruneThreadStateMap(
@@ -4553,6 +4563,7 @@ export function useDesktopState() {
   }
 
   function removeArchivedThreadFromLoadedLists(threadId: string): void {
+    optimisticThreadIdsAwaitingList.delete(threadId)
     loadedThreadListGroups = removeThreadFromGroups(loadedThreadListGroups, threadId)
     sourceGroups.value = removeThreadFromGroups(sourceGroups.value, threadId)
     inProgressById.value = omitKey(inProgressById.value, threadId)
@@ -5252,6 +5263,7 @@ export function useDesktopState() {
 
     const threadId = targetThreadId?.trim() || selectedThreadId.value
     const nextText = text.trim()
+    const visibleText = stripChatGptConversationReferenceBlocks(nextText)
     if (!threadId || (!nextText && imageUrls.length === 0 && fileAttachments.length === 0)) return
 
     if (await maybeReplyToPendingUserInputRequest(threadId, nextText, imageUrls, skills, fileAttachments)) {
@@ -5290,7 +5302,7 @@ export function useDesktopState() {
     }
 
     if (isInProgress && mode === 'steer') {
-      const liveSteerMessageId = appendLiveSteerMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+      const liveSteerMessageId = appendLiveSteerMessage(threadId, visibleText, imageUrls, skills, fileAttachments)
       const expectedTurnId = activeTurnIdByThreadId.value[threadId]?.trim() ?? ''
       if (expectedTurnId) {
         try {
@@ -5320,7 +5332,7 @@ export function useDesktopState() {
     // Keep the submitted prompt visible while the app-server persists the next
     // turn. New threads already do this; selected threads must follow the same
     // optimistic path so Thinking never replaces the user's message.
-    const optimisticMessageId = appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+    const optimisticMessageId = appendOptimisticUserMessage(threadId, visibleText, imageUrls, skills, fileAttachments)
 
     if (isInProgress) {
       shouldAutoScrollOnNextAgentEvent = true
@@ -5398,6 +5410,7 @@ export function useDesktopState() {
     if (isUpdatingSpeedMode.value) return ''
 
     const nextText = text.trim()
+    const visibleText = stripChatGptConversationReferenceBlocks(nextText)
     const targetCwd = cwd.trim()
     const selectedModel = readModelIdForThread(NEW_THREAD_COLLABORATION_MODE_CONTEXT).trim()
     const selectedMode = selectedCollaborationMode.value
@@ -5445,8 +5458,8 @@ export function useDesktopState() {
         // The turn still carries this preset even if durable state is temporarily unavailable.
       })
 
-      insertOptimisticThread(threadId, resolvedThreadCwd, nextText || '[Image]')
-      appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
+      insertOptimisticThread(threadId, resolvedThreadCwd, visibleText || '[Image]')
+      appendOptimisticUserMessage(threadId, visibleText, imageUrls, skills, fileAttachments)
       blockInterruptUntilThreadIsPersisted(threadId)
       resumedThreadById.value = {
         ...resumedThreadById.value,
@@ -5470,7 +5483,7 @@ export function useDesktopState() {
       setThreadInProgress(threadId, true)
       const capturedThreadId = threadId
       const capturedCwd = resolvedThreadCwd || null
-      const capturedPrompt = nextText
+      const capturedPrompt = visibleText
       void startTurnForThread(
         threadId,
         nextText,
