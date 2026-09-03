@@ -304,6 +304,13 @@ function toggleOpen(): void {
   isOpen.value = !isOpen.value
 }
 
+function openMenu(): void {
+  if (disabled.value) return
+  isOpen.value = true
+}
+
+defineExpose({ openMenu })
+
 function toggleReview(): void {
   emit('toggleReview')
 }

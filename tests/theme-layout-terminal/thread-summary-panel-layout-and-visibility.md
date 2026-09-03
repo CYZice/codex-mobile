@@ -14,6 +14,10 @@
 6. Refresh the page and confirm the last open/hidden summary state is preserved.
 7. Repeat the open, hide, and reopen flow in dark theme.
 8. At a mobile viewport, confirm the desktop summary panel is not rendered.
+9. In the environment section, confirm added and removed line counts use distinct green and red text colors.
+10. Select the local, branch, and commit rows and confirm they open the local browser, branch chooser, and existing Git menu respectively.
+11. In the branch chooser, search for a branch and select a different branch; confirm the selected branch and busy/error state follow the existing checkout flow.
+12. In the sources section, select a file, image, web link, or skill/text reference and confirm each opens its corresponding local or external target in a new tab.
 
 #### Expected Results
 - Opening the summary creates a stable two-column desktop layout with the summary on the right.
@@ -22,6 +26,8 @@
 - Both toggle controls have accessible labels and preserve the selected state across refreshes.
 - Light and dark themes use matching surfaces, borders, text colors, and hover states.
 - Mobile retains the existing chat layout without the summary panel.
+- Change counts remain visually distinguishable and summary actions reuse the existing local, branch, review, and Git workflows.
+- Every displayed source is an accessible link with a useful label and target.
 
 #### Rollback/Cleanup
 - Restore the preferred summary visibility and appearance settings.

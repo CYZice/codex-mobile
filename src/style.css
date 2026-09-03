@@ -2373,24 +2373,60 @@
 }
 
 :root.dark .thread-summary-title,
-:root.dark .thread-summary-section-toggle,
-:root.dark .thread-summary-row-value {
+:root.dark .thread-summary-section-title,
+:root.dark .thread-summary-action-label,
+:root.dark .thread-summary-action-value,
+:root.dark .thread-summary-plan-value,
+:root.dark .thread-summary-branch-search,
+:root.dark .thread-summary-branch-option {
   @apply text-zinc-100;
 }
 
+:root.dark .thread-summary-section-heading,
+:root.dark .thread-summary-section-toggle,
+:root.dark .thread-summary-plan-label,
+:root.dark .thread-summary-current-label,
+:root.dark .thread-summary-empty,
+:root.dark .thread-summary-action-icon,
+:root.dark .thread-summary-row-chevron,
+:root.dark .thread-summary-chevron,
+:root.dark .thread-summary-source-icon,
+:root.dark .thread-summary-source-chevron,
+:root.dark .thread-summary-branch-search-wrap {
+  @apply text-zinc-400;
+}
+
+:root.dark .thread-summary-action-row:hover,
+:root.dark .thread-summary-source-link:hover,
 :root.dark .thread-summary-section-toggle:hover,
-:root.dark .thread-summary-close:hover {
+:root.dark .thread-summary-icon-button:hover,
+:root.dark .thread-summary-branch-option:hover,
+:root.dark .thread-summary-branch-option.is-current {
   @apply bg-zinc-800;
 }
 
-:root.dark .thread-summary-close {
+:root.dark .thread-summary-icon-button {
   @apply text-zinc-500 hover:text-zinc-100;
 }
 
-:root.dark .thread-summary-row-label,
-:root.dark .thread-summary-row-value.is-muted,
-:root.dark .thread-summary-empty {
-  @apply text-zinc-500;
+:root.dark .thread-summary-branch-menu {
+  @apply border-zinc-700 bg-zinc-950;
+}
+
+:root.dark .thread-summary-branch-search-wrap {
+  @apply border-zinc-700;
+}
+
+:root.dark .thread-summary-branch-option.is-current {
+  @apply text-zinc-100;
+}
+
+:root.dark .thread-summary-branch-error {
+  @apply border-rose-900 bg-rose-950 text-rose-200;
+}
+
+:root.dark .thread-summary-source-link {
+  @apply text-zinc-300;
 }
 
 @media (max-width: 768px) {

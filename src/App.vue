@@ -537,6 +537,7 @@
             />
             <HeaderGitBranchDropdown
               v-if="canShowContentHeaderBranchDropdown"
+              ref="contentHeaderGitDropdownRef"
               class="content-header-branch-dropdown"
               :current-branch="currentThreadBranch"
               :head-sha="currentThreadHeadSha"
@@ -1051,7 +1052,14 @@
                     :plan-step="threadSummaryPlan.step"
                     :plan-step-count="threadSummaryPlan.stepCount"
                     :sources="threadSummarySources"
+                    :branches="threadBranchOptions"
+                    :branch-busy="isSwitchingThreadBranch"
+                    :branch-error="threadBranchError"
                     @close="setThreadSummaryOpen(false)"
+                    @open-changes="onToggleContentHeaderReview"
+                    @open-local="onOpenThreadSummaryLocal"
+                    @open-git="onOpenThreadSummaryGit"
+                    @checkout-branch="onCheckoutContentHeaderBranch"
                   />
                   <button
                     v-else-if="isThreadSummaryAvailable"
@@ -1258,6 +1266,7 @@ import type { PermissionPreset } from './permissions'
 import type { CcSwitchStatus, GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
+import { buildThreadSummarySources } from './threadSummarySources'
 import { copyTextToClipboard } from './utils/clipboard'
 import { isAttentionThread } from './components/sidebar/activityThreadGroups'
 
@@ -1518,6 +1527,9 @@ function setThreadSummaryOpen(open: boolean): void {
   isThreadSummaryOpen.value = open
   window.localStorage.setItem(THREAD_SUMMARY_OPEN_KEY, open ? '1' : '0')
 }
+type HeaderGitBranchDropdownExposed = {
+  openMenu: () => void
+}
 type SidebarThreadTreeExposed = {
   openAutomationEditorFromPanel: (payload: AutomationEditRequest) => void
   openAutomationCreatorFromPanel: () => void
@@ -1548,6 +1560,7 @@ function prepareFeedbackLink(event: MouseEvent, message?: string): void {
     target.href = buildFeedbackMailto()
   }
 }
+const contentHeaderGitDropdownRef = ref<HeaderGitBranchDropdownExposed | null>(null)
 const homeThreadComposerRef = ref<ThreadComposerExposed | null>(null)
 const threadComposerRef = ref<ThreadComposerExposed | null>(null)
 const isHomeComposerSubmitting = ref(false)
@@ -1896,23 +1909,7 @@ const threadSummaryPlan = computed(() => {
   }
   return { explanation: '', step: '', stepCount: 0 }
 })
-const threadSummarySources = computed(() => {
-  const sources: string[] = []
-  const seen = new Set<string>()
-  for (let index = filteredMessages.value.length - 1; index >= 0 && sources.length < 8; index -= 1) {
-    const message = filteredMessages.value[index]
-    for (const attachment of message.fileAttachments ?? []) {
-      const value = attachment.label?.trim() || attachment.path?.trim()
-      if (value && !seen.has(value)) { seen.add(value); sources.push(value) }
-    }
-    for (const skill of message.skills ?? []) {
-      const value = skill.name?.trim() || skill.path?.trim()
-      if (value && !seen.has(value)) { seen.add(value); sources.push(value) }
-    }
-    if ((message.images?.length ?? 0) > 0 && !seen.has('图片附件')) { seen.add('图片附件'); sources.push('图片附件') }
-  }
-  return sources
-})
+const threadSummarySources = computed(() => buildThreadSummarySources(filteredMessages.value, composerCwd.value))
 const latestUserTurnId = computed(() => {
   for (let index = messages.value.length - 1; index >= 0; index -= 1) {
     const message = messages.value[index]
@@ -3920,6 +3917,17 @@ function onOpenContentHeaderCommitFile(payload: { sha: string; path: string }): 
   reviewInitialFilePath.value = targetPath
   reviewInitialCommitSha.value = targetSha
   isReviewPaneOpen.value = true
+}
+
+function onOpenThreadSummaryLocal(): void {
+  const cwd = composerCwd.value.trim()
+  if (!cwd) return
+  const absolute = cwd.startsWith('/') ? cwd : `/${cwd}`
+  window.open(`/codex-local-browse${encodeURI(absolute)}`, '_blank', 'noopener,noreferrer')
+}
+
+function onOpenThreadSummaryGit(): void {
+  contentHeaderGitDropdownRef.value?.openMenu()
 }
 
 function onToggleContentHeaderReview(): void {
