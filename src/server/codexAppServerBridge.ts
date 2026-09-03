@@ -13,7 +13,7 @@ import { once } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { handleAccountRoutes } from './accountRoutes.js'
 import { buildAppServerArgs, resolveAppServerRuntimeConfig } from './appServerRuntimeConfig.js'
-import { handleCcSwitchRoutes } from './ccSwitch.js'
+import { handleCcSwitchRoutes, watchCcSwitchExternalChanges } from './ccSwitch.js'
 import { callRpcWithRateLimitDecodeRecovery } from './rateLimitDecodeRecovery.js'
 import { handleReviewRoutes } from './reviewGit.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
@@ -8020,6 +8020,10 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
   const workspaceRootsCompatibilityMigration = migrateWorkspaceRootsStateCompatibility().catch(() => false)
   let threadSearchIndex: ThreadSearchIndex | null = null
   let threadSearchIndexPromise: Promise<ThreadSearchIndex> | null = null
+  const ccSwitchExternalChangeWatcher = watchCcSwitchExternalChanges({
+    reloadRuntime: () => appServer.reload(),
+    isBlocked: () => appServer.getRuntimeConfigurationChangeBlockReason(),
+  })
 
   function invalidateThreadSearchIndex(): void {
     threadSearchIndex = null
@@ -10494,6 +10498,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 
   middleware.dispose = () => {
     threadSearchIndex = null
+    ccSwitchExternalChangeWatcher.close()
     telegramBridge.stop()
     terminalManager.dispose()
     backendQueueProcessor.dispose()
