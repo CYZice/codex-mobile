@@ -5517,7 +5517,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .thread-summary-open-button {
-  @apply absolute right-3 top-3 z-20 grid h-8 w-8 place-items-center rounded-md border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:focus:ring-zinc-600;
+  @apply absolute right-14 top-3 z-20 grid h-8 w-8 place-items-center rounded-md border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:focus:ring-zinc-600;
 }
 
 .thread-summary-open-button svg {
@@ -5527,18 +5527,6 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 @media (max-width: 1100px) {
   .content-grid-with-summary {
     grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem);
-  }
-}
-
-@media (max-width: 900px) {
-  .content-grid-with-summary {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .content-grid-with-summary > .thread-summary-panel {
-    order: -1;
-    max-height: 16rem;
   }
 }
 
