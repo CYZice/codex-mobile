@@ -1,5 +1,6 @@
 import type { RpcEnvelope, RpcMethodCatalog } from '../types/codex'
 import { CodexApiError, extractErrorMessage } from './codexErrors'
+import { recordFeedbackDiagnostic } from '../composables/useFeedbackDiagnostics'
 
 type RpcRequestBody = {
   method: string
@@ -166,7 +167,9 @@ function emitReadyNotification(
   })
 }
 
-export function subscribeRpcNotifications(onNotification: (value: RpcNotification) => void): () => void {
+export type RpcTransportEvent = { type: 'open' | 'close' | 'error' | 'reconnect' | 'sse'; code?: number; reason?: string; attempt?: number }
+
+export function subscribeRpcNotifications(onNotification: (value: RpcNotification) => void, onTransportEvent?: (event: RpcTransportEvent) => void): () => void {
   if (typeof window === 'undefined') {
     return () => {}
   }
@@ -201,6 +204,8 @@ export function subscribeRpcNotifications(onNotification: (value: RpcNotificatio
   const attachSse = (attempt = 0) => {
     if (typeof EventSource === 'undefined' || closed) return
     cleanup?.()
+    onTransportEvent?.({ type: 'sse', attempt })
+    recordFeedbackDiagnostic({ kind: 'fetch-error', message: `Notification transport using SSE (attempt ${attempt + 1})`, url: '/codex-api/events' })
     const source = new EventSource('/codex-api/events')
     let isConnectionClosed = false
 
@@ -255,6 +260,7 @@ export function subscribeRpcNotifications(onNotification: (value: RpcNotificatio
     }, 2500)
 
     socket.onopen = () => {
+      onTransportEvent?.({ type: 'open' })
       didOpen = true
       clearReconnectTimer()
       if (fallbackTimer !== null) {
@@ -272,10 +278,13 @@ export function subscribeRpcNotifications(onNotification: (value: RpcNotificatio
     }
 
     socket.onerror = () => {
+      onTransportEvent?.({ type: 'error' })
+      recordFeedbackDiagnostic({ kind: 'fetch-error', message: 'Notification WebSocket error', url: '/codex-api/ws' })
       // Wait for close so we do not race duplicate reconnect/fallback paths.
     }
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      onTransportEvent?.({ type: 'close', code: event.code, reason: event.reason })
       if (fallbackTimer !== null) {
         window.clearTimeout(fallbackTimer)
         fallbackTimer = null
