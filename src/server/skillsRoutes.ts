@@ -593,10 +593,15 @@ async function scanInstalledSkillsFromDisk(): Promise<Map<string, InstalledSkill
   return await scanInstalledSkillsFromDir(getSkillsInstallDir())
 }
 
-async function collectInstalledSkillsMap(appServer: AppServerLike): Promise<Map<string, InstalledSkillInfo>> {
+export async function collectInstalledSkillsMap(
+  appServer: AppServerLike,
+  options: { forceReload?: boolean } = {},
+): Promise<Map<string, InstalledSkillInfo>> {
   const installedMap = await scanInstalledSkillsFromDisk()
   try {
-    const result = await appServer.rpc('skills/list', {}) as { data?: Array<{ skills?: RpcSkillRecord[] }> }
+    const result = await appServer.rpc('skills/list', options.forceReload === true ? { forceReload: true } : {}) as {
+      data?: Array<{ skills?: RpcSkillRecord[] }>
+    }
     for (const entry of result.data ?? []) {
       for (const skill of groupRpcSkillRecords(entry.skills ?? [])) {
         if (skill.name) {
@@ -604,7 +609,9 @@ async function collectInstalledSkillsMap(appServer: AppServerLike): Promise<Map<
         }
       }
     }
-  } catch {}
+  } catch {
+    // Keep the disk scan available while app-server is starting or unavailable.
+  }
   return installedMap
 }
 

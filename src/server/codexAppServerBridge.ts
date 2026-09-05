@@ -50,6 +50,7 @@ import {
 } from '../commandResolution.js'
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
 import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
+import { hashDiagnosticThreadId, redactDiagnosticText, runtimeDiagnostics } from './runtimeDiagnostics.js'
 import {
   DEFAULT_PERMISSION_PRESET,
   normalizePermissionPreset,
@@ -66,6 +67,38 @@ type JsonRpcCall = {
   params?: unknown
 }
 
+const SKILLS_RELOAD_ATTEMPTS = 3
+const SKILLS_RELOAD_RETRY_DELAY_MS = 250
+
+type SkillsReloadInvoker = (method: string, params: unknown) => Promise<unknown>
+
+type SkillsReloadOptions = {
+  attempts?: number
+  retryDelayMs?: number
+  wait?: (ms: number) => Promise<void>
+}
+
+export async function forceReloadSkillsAfterRuntimeRestart(
+  invokeRpc: SkillsReloadInvoker,
+  options: SkillsReloadOptions = {},
+): Promise<void> {
+  const attempts = Math.max(1, options.attempts ?? SKILLS_RELOAD_ATTEMPTS)
+  const retryDelayMs = Math.max(0, options.retryDelayMs ?? SKILLS_RELOAD_RETRY_DELAY_MS)
+  const wait = options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await invokeRpc('skills/list', { forceReload: true })
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt + 1 < attempts) await wait(retryDelayMs)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to reload skills after restarting Codex app-server')
+}
 type JsonRpcResponse = {
   id?: number
   result?: unknown
@@ -6599,6 +6632,9 @@ class AppServerProcess {
   private activeConfigSignature = ''
   private reloadPromise: Promise<void> | null = null
 
+  private syncDiagnosticsState(): void {
+    runtimeDiagnostics.setAppServerState({ lifecycle: this.getLifecycleStatus(), pid: this.process?.pid ?? null, pendingRpcCount: this.pending.size, activeTurnCount: this.activeTurnKeys.size, pendingServerRequestCount: this.pendingServerRequests.size })
+  }
 
   private getCodexCommand(): string {
     const codexCommand = resolveCodexCommand()
@@ -6643,6 +6679,9 @@ class AppServerProcess {
       : undefined
     const proc = spawn(invocation.command, invocation.args, { stdio: ['pipe', 'pipe', 'pipe'], ...(spawnEnv ? { env: spawnEnv } : {}) })
     this.process = proc
+    const generation = runtimeDiagnostics.snapshot().appServer.generation + 1
+    runtimeDiagnostics.setAppServerState({ lifecycle: 'starting', generation, pid: proc.pid ?? null, startedAtIso: new Date().toISOString(), initializedAtIso: null, command: basename(invocation.command), sandbox: invocation.args.find((value) => value.includes('sandbox_mode='))?.match(/sandbox_mode="([^"]+)/u)?.[1] ?? null, approval: invocation.args.find((value) => value.includes('approval_policy='))?.match(/approval_policy="([^"]+)/u)?.[1] ?? null, memories: invocation.args.find((value) => value.includes('features.memories='))?.match(/features\.memories=(true|false)/u)?.[1] === 'true' ? true : invocation.args.find((value) => value.includes('features.memories='))?.includes('false') ? false : null })
+    runtimeDiagnostics.record('app-server.spawn', { generation, pid: proc.pid ?? null, command: basename(invocation.command) })
 
     proc.stdout.setEncoding('utf8')
     proc.stdout.on('data', (chunk: string) => {
@@ -6662,14 +6701,23 @@ class AppServerProcess {
     })
 
     proc.stderr.setEncoding('utf8')
-    proc.stderr.on('data', () => {
-      // Keep stderr silent in dev middleware; JSON-RPC errors are forwarded via responses.
+    proc.stderr.on('data', (chunk: string) => {
+      runtimeDiagnostics.appendStderr(chunk)
+      runtimeDiagnostics.record('app-server.stderr', { tail: redactDiagnosticText(chunk, 400) })
+    })
+    proc.stdin.on('error', (error) => runtimeDiagnostics.record('app-server.stdin-error', { message: redactDiagnosticText(error) }))
+    proc.on('error', (error) => {
+      runtimeDiagnostics.record('app-server.error', { message: redactDiagnosticText(error) })
+      runtimeDiagnostics.setAppServerState({ lastError: { atIso: new Date().toISOString(), message: redactDiagnosticText(error) } })
     })
 
-    proc.on('exit', () => {
+    proc.on('exit', (code, signal) => {
       if (this.process !== proc) {
         return
       }
+
+      runtimeDiagnostics.record('app-server.exit', { code, signal, expected: this.stopping })
+      runtimeDiagnostics.setAppServerState({ lifecycle: 'idle', pid: null, lastExit: { atIso: new Date().toISOString(), code, signal }, ...(code === 0 || this.stopping ? { lastError: null } : { lastError: { atIso: new Date().toISOString(), message: 'codex app-server exited unexpectedly' } }) })
 
       const failure = new Error(this.stopping ? 'codex app-server stopped' : 'codex app-server exited unexpectedly')
       for (const request of this.pending.values()) {
@@ -6682,6 +6730,7 @@ class AppServerProcess {
       this.initialized = false
       this.initializePromise = null
       this.readBuffer = ''
+      this.syncDiagnosticsState()
     })
   }
 
@@ -6690,7 +6739,7 @@ class AppServerProcess {
       throw new Error('codex app-server is not running')
     }
 
-    this.process.stdin.write(`${JSON.stringify(payload)}\n`)
+    if (!this.process.stdin.write(`${JSON.stringify(payload)}\n`)) runtimeDiagnostics.record('app-server.stdin-backpressure')
   }
 
   private handleLine(line: string): void {
@@ -6733,6 +6782,7 @@ class AppServerProcess {
     this.trackTurnActivity(notification)
     this.recordStreamEvent(notification)
     this.captureItemFromNotification(notification)
+    if (notification.method === 'turn/started' || notification.method === 'turn/completed' || notification.method === 'error') runtimeDiagnostics.record(`app-server.notification.${notification.method.replace(/\//gu, '.')}`, { threadKey: hashDiagnosticThreadId(this.extractThreadIdFromParams(notification.params)) })
     const nThreadId = this.extractThreadIdFromParams(notification.params)
     if (nThreadId) {
       this.invalidateLiveStateCache(nThreadId)
@@ -6963,6 +7013,7 @@ class AppServerProcess {
       throw new Error(`No pending server request found for id ${String(requestId)}`)
     }
     this.pendingServerRequests.delete(requestId)
+    this.syncDiagnosticsState()
 
     this.sendServerRequestReply(requestId, reply)
     const requestParams = asRecord(pendingRequest.params)
@@ -7032,6 +7083,8 @@ class AppServerProcess {
       receivedAtIso: new Date().toISOString(),
     }
     this.pendingServerRequests.set(requestId, pendingRequest)
+    runtimeDiagnostics.record('app-server.server-request.pending', { method })
+    this.syncDiagnosticsState()
 
     this.emitNotification({
       method: 'server/request',
@@ -7044,7 +7097,12 @@ class AppServerProcess {
     const id = this.nextId++
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const startedAt = Date.now()
+      runtimeDiagnostics.record('app-server.rpc.start', { method, threadKey: hashDiagnosticThreadId(this.extractThreadIdFromParams(params)) })
+      this.pending.set(id, {
+        resolve: (value) => { runtimeDiagnostics.record('app-server.rpc.complete', { method, latencyMs: Date.now() - startedAt }); this.syncDiagnosticsState(); resolve(value) },
+        reject: (error) => { runtimeDiagnostics.record('app-server.rpc.failure', { method, latencyMs: Date.now() - startedAt, message: redactDiagnosticText(error) }); this.syncDiagnosticsState(); reject(error) },
+      })
 
       this.sendLine({
         jsonrpc: '2.0',
@@ -7076,6 +7134,8 @@ class AppServerProcess {
         method: 'initialized',
       })
       this.initialized = true
+      runtimeDiagnostics.setAppServerState({ initializedAtIso: new Date().toISOString(), lifecycle: 'ready' })
+      this.syncDiagnosticsState()
     }).finally(() => {
       this.initializePromise = null
     })
@@ -7107,8 +7167,11 @@ class AppServerProcess {
     if (this.reloadPromise) return await this.reloadPromise
 
     this.reloadPromise = (async () => {
+      runtimeDiagnostics.record('app-server.reload', { cause: 'explicit' })
+      runtimeDiagnostics.setAppServerState({ lastReload: { atIso: new Date().toISOString(), cause: 'explicit' } })
       this.dispose()
       await this.ensureInitialized()
+      await forceReloadSkillsAfterRuntimeRestart((method, params) => this.call(method, params))
     })().finally(() => {
       this.reloadPromise = null
     })
@@ -10081,6 +10144,11 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to load global instructions') })
         }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/runtime/diagnostics') {
+        setJson(res, 200, { data: runtimeDiagnostics.snapshot() })
         return
       }
 

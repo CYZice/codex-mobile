@@ -2687,6 +2687,21 @@ export interface CodexActivitySummary {
   topReasoningEffort: string | null
 }
 
+export type RuntimeDiagnosticsSnapshot = {
+  appServer: { lifecycle: string; generation: number; pid: number | null; startedAtIso: string | null; initializedAtIso: string | null; command: string | null; sandbox: string | null; approval: string | null; memories: boolean | null; pendingRpcCount: number; activeTurnCount: number; pendingServerRequestCount: number; lastExit: { atIso: string; code: number | null; signal: string | null } | null; lastReload: { atIso: string; cause: string } | null; lastError: { atIso: string; message: string } | null }
+  stderrTail: string
+  recentEvents: Array<{ atIso: string; kind: string; detail?: Record<string, unknown> }>
+  websocket: { activeSubscribers: number; totalConnections: number; lastEvent: { atIso: string; kind: string; detail?: Record<string, unknown> } | null }
+  log: { enabled: boolean; currentBytes: number; backupCount: number; maxBytes: number }
+}
+
+export async function getRuntimeDiagnostics(): Promise<RuntimeDiagnosticsSnapshot> {
+  const response = await fetch('/codex-api/runtime/diagnostics')
+  const payload = await response.json().catch(() => null) as { data?: RuntimeDiagnosticsSnapshot; error?: string } | null
+  if (!response.ok || !payload?.data) throw new Error(payload?.error?.trim() || 'Failed to load runtime diagnostics')
+  return payload.data
+}
+
 export async function getCodexActivitySummary(): Promise<CodexActivitySummary> {
   const response = await fetch('/codex-api/activity-summary')
   const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
@@ -3887,10 +3902,14 @@ type SkillsListResponseEntry = {
   errors: unknown[]
 }
 
-export async function getSkillsList(cwds?: string[]): Promise<SkillInfo[]> {
+export async function getSkillsList(
+  cwds?: string[],
+  options: { forceReload?: boolean } = {},
+): Promise<SkillInfo[]> {
   try {
     const params: Record<string, unknown> = {}
     if (cwds && cwds.length > 0) params.cwds = cwds
+    if (options.forceReload === true) params.forceReload = true
     const payload = await callRpc<{ data: SkillsListResponseEntry[] }>('skills/list', params)
     const allSkills = payload.data.flatMap((entry) => entry.skills)
     const pathSet = new Set(allSkills.map((skill) => normalizeSkillMarkdownPath(skill.path)).filter(Boolean))
