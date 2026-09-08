@@ -22,6 +22,8 @@
 11. On Windows with only the system proxy enabled, reload the menu and confirm the conversation list loads without adding proxy variables to the app process.
 12. Temporarily use an unreachable proxy in an isolated test process and confirm the error distinguishes a ChatGPT network-route failure from missing authentication.
 13. While the list request is failing, confirm the ChatGPT conversations group remains visible with the backend error and a Retry action; restore connectivity and retry without reloading the page.
+14. In a referenced conversation with more than ten messages, ask Codex to inspect older history. Confirm the model makes a real `read_thread` call, receives a page with `nextCursor`, and can continue with that cursor.
+15. Add a new message to the referenced ChatGPT conversation after selecting it, then ask Codex to reread the reference. Confirm the tool response contains the new current-branch message rather than the original selection-time preview.
 
 ## Expected results
 
@@ -37,6 +39,8 @@
 - Unauthenticated or unavailable ChatGPT data leaves the composer usable and does not block attachments, plugins, or skills.
 - ChatGPT list failures are not rendered as an empty list: the app retries once automatically, then shows the server detail and a Retry action that restores rows in place.
 - ChatGPT conversations are fetched in pages of at most 50 items, avoiding an unbounded initial menu render.
+- `read_thread` is registered as a per-thread dynamic tool and returns at most 10 text messages per call with an opaque cursor for older pages.
+- Every `read_thread` call refetches the ChatGPT conversation, so a later current-branch update is observable without reloading the web page.
 - ChatGPT list/detail and connector-logo requests honor environment proxy variables first and fall back to the enabled Windows system proxy.
 - Proxy resolution is cached briefly and does not execute a registry query for every conversation request.
 - Mobile keeps the original permission/model-above-input layout and hides the context ring.

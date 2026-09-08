@@ -4943,7 +4943,10 @@ export function useDesktopState() {
 
     refreshSkillsPromise = (async () => {
       try {
-        installedSkills.value = await getSkillsList(selectedCwd ? [selectedCwd] : undefined)
+        installedSkills.value = await getSkillsList(
+          selectedCwd ? [selectedCwd] : undefined,
+          { forceReload: options.force === true },
+        )
         hasLoadedSkills = true
         lastSkillsLoadAt = Date.now()
         lastSkillsLoadKey = skillsLoadKey
@@ -4967,7 +4970,7 @@ export function useDesktopState() {
       }),
       refreshRateLimits(),
       refreshCollaborationModes(),
-      refreshSkills(),
+      refreshSkills({ force: options.providerChanged === true }),
     ])
   }
 

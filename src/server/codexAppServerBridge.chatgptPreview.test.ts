@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractChatgptPreview } from './codexAppServerBridge'
+import { extractChatgptPreview, paginateChatgptConversationRows } from './codexAppServerBridge'
 
 function node(parent: string | null, role: 'user' | 'assistant', text: string, status?: string) {
   return {
@@ -56,5 +56,28 @@ describe('extractChatgptPreview', () => {
     expect(preview?.conversation).toHaveLength(2)
     expect(preview?.conversation[0]?.content[0]?.text).toHaveLength(2000)
     expect(preview?.conversation[1]?.content[0]?.text).toBe('complete')
+  })
+
+  it('pages older messages with an opaque cursor and caps the page size at ten', () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      nodeId: 'node-' + index,
+      role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+      text: 'message-' + index,
+    }))
+
+    const latest = paginateChatgptConversationRows(rows, 50, null)
+    expect(latest.messages).toHaveLength(10)
+    expect(latest.messages[0]?.content[0]?.text).toBe('message-2')
+    expect(latest.messages.at(-1)?.content[0]?.text).toBe('message-11')
+    expect(latest.nextCursor).toBeTruthy()
+
+    const older = paginateChatgptConversationRows(rows, 10, latest.nextCursor)
+    expect(older.messages.map((item) => item.content[0]?.text)).toEqual(['message-0', 'message-1'])
+    expect(older.nextCursor).toBeNull()
+  })
+
+  it('rejects a cursor from a changed branch instead of returning misleading history', () => {
+    const rows = [{ nodeId: 'node-1', role: 'user' as const, text: 'message-1' }]
+    expect(() => paginateChatgptConversationRows(rows, 10, 'eyJub2RlSWQiOiJtaXNzaW5nIn0')).toThrow(/conversation changed/i)
   })
 })

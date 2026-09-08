@@ -52,6 +52,12 @@ import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } f
 import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
 import { hashDiagnosticThreadId, redactDiagnosticText, runtimeDiagnostics } from './runtimeDiagnostics.js'
 import {
+  addWorkspaceDependencyDynamicTool,
+  handleWorkspaceDependencyToolCall,
+  isWorkspaceDependencyToolCall,
+} from './workspaceDependencies.js'
+import { ensurePrimaryRuntimePluginsInstalled } from './primaryRuntimePlugins.js'
+import {
   DEFAULT_PERMISSION_PRESET,
   normalizePermissionPreset,
   normalizePermissionState,
@@ -4689,11 +4695,20 @@ type ChatgptPreviewMessage = {
   content: Array<{ content_type: 'text'; text: string }>
 }
 
-export function extractChatgptPreview(payload: unknown): { conversation: ChatgptPreviewMessage[]; diff: null } | null {
+type ChatgptBranchRow = {
+  nodeId: string
+  role: 'user' | 'assistant'
+  text: string
+}
+
+const CHATGPT_READ_THREAD_TOOL_NAME = 'read_thread'
+
+function extractChatgptBranchRows(payload: unknown): ChatgptBranchRow[] {
   const record = asRecord(payload)
   const mapping = asRecord(record?.mapping)
-  if (!mapping) return null
+  if (!mapping) return []
   const orderedNodes: Record<string, unknown>[] = []
+  const orderedNodeIds: string[] = []
   const visited = new Set<string>()
   let nodeId = readNonEmptyString(record?.current_node ?? record?.currentNode)
   while (nodeId && !visited.has(nodeId)) {
@@ -4701,12 +4716,15 @@ export function extractChatgptPreview(payload: unknown): { conversation: Chatgpt
     const node = asRecord(mapping[nodeId])
     if (!node) break
     orderedNodes.push(node)
+    orderedNodeIds.push(nodeId)
     nodeId = readNonEmptyString(node.parent)
   }
   orderedNodes.reverse()
+  orderedNodeIds.reverse()
 
-  const rows: Array<{ role: 'user' | 'assistant'; text: string }> = []
-  for (const node of orderedNodes) {
+  const rows: ChatgptBranchRow[] = []
+  for (let index = 0; index < orderedNodes.length; index += 1) {
+    const node = orderedNodes[index]
     const message = asRecord(node.message)
     const author = asRecord(message?.author)
     const role = readNonEmptyString(author?.role) ?? ''
@@ -4716,9 +4734,14 @@ export function extractChatgptPreview(payload: unknown): { conversation: Chatgpt
     const parts = Array.isArray(content?.parts) ? content.parts : []
     const text = parts.filter((part): part is string => typeof part === 'string').join('\n').trim()
     if ((role === 'user' || role === 'assistant') && text) {
-      rows.push({ role, text: text.slice(0, 2000) })
+      rows.push({ nodeId: orderedNodeIds[index] ?? '', role, text: text.slice(0, 2000) })
     }
   }
+  return rows
+}
+
+export function extractChatgptPreview(payload: unknown): { conversation: ChatgptPreviewMessage[]; diff: null } | null {
+  const rows = extractChatgptBranchRows(payload)
   const userIndexes = rows.flatMap((row, index) => row.role === 'user' ? [index] : [])
   const start = userIndexes[Math.max(0, userIndexes.length - 3)] ?? Math.max(0, rows.length - 6)
   const conversation = rows.slice(start).map((row): ChatgptPreviewMessage => ({
@@ -4726,6 +4749,60 @@ export function extractChatgptPreview(payload: unknown): { conversation: Chatgpt
     content: [{ content_type: 'text', text: row.text }],
   }))
   return conversation.length > 0 ? { conversation, diff: null } : null
+}
+
+function encodeChatgptCursor(nodeId: string): string {
+  return Buffer.from(JSON.stringify({ nodeId }), 'utf8').toString('base64url')
+}
+
+function decodeChatgptCursor(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const payload = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown
+    const record = asRecord(payload)
+    return readNonEmptyString(record?.nodeId)
+  } catch {
+    throw new Error('Invalid ChatGPT conversation cursor')
+  }
+}
+
+export function paginateChatgptConversationRows(
+  rows: ChatgptBranchRow[],
+  turnLimit: number,
+  cursor: unknown,
+): { messages: ChatgptPreviewMessage[]; nextCursor: string | null } {
+  const limit = Math.min(10, Math.max(1, Math.trunc(turnLimit)))
+  const cursorNodeId = decodeChatgptCursor(cursor)
+  let endExclusive = rows.length
+  if (cursorNodeId) {
+    const cursorIndex = rows.findIndex((row) => row.nodeId === cursorNodeId)
+    if (cursorIndex < 0) throw new Error('ChatGPT conversation changed; restart reading from the latest page')
+    endExclusive = cursorIndex
+  }
+  const start = Math.max(0, endExclusive - limit)
+  return {
+    messages: rows.slice(start, endExclusive).map((row): ChatgptPreviewMessage => ({
+      role: row.role,
+      content: [{ content_type: 'text', text: row.text }],
+    })),
+    nextCursor: start > 0 ? encodeChatgptCursor(rows[start]?.nodeId ?? '') : null,
+  }
+}
+
+async function readChatgptConversationPage(
+  conversationId: string,
+  turnLimit: number,
+  cursor: unknown,
+): Promise<{ conversationId: string; messages: ChatgptPreviewMessage[]; nextCursor: string | null; refreshedAt: string }> {
+  const payload = asRecord(await fetchChatgptBackend('/conversation/' + encodeURIComponent(conversationId)))
+  const actualId = readNonEmptyString(payload?.conversation_id ?? payload?.conversationId ?? payload?.id) ?? conversationId
+  const rows = extractChatgptBranchRows(payload)
+  const page = paginateChatgptConversationRows(rows, turnLimit, cursor)
+  return {
+    conversationId: actualId,
+    ...page,
+    refreshedAt: new Date().toISOString(),
+  }
 }
 
 let codexGlobalStateMutationChain: Promise<unknown> = Promise.resolve()
@@ -7070,9 +7147,50 @@ class AppServerProcess {
     }
   }
 
+  private async handleChatgptReadThreadToolCall(requestId: number, params: unknown): Promise<void> {
+    try {
+      const request = asRecord(params)
+      const args = asRecord(request?.arguments) ?? {}
+      const conversationId = readNonEmptyString(args.threadId ?? args.conversationId)
+      if (!conversationId) throw new Error('read_thread requires threadId or conversationId')
+      const rawLimit = typeof args.turnLimit === 'number' ? args.turnLimit : 10
+      const page = await readChatgptConversationPage(conversationId, rawLimit, args.cursor)
+      this.sendServerRequestReply(requestId, {
+        result: {
+          success: true,
+          contentItems: [{
+            type: 'inputText',
+            text: JSON.stringify(page),
+          }],
+        },
+      })
+    } catch (error) {
+      this.sendServerRequestReply(requestId, {
+        result: {
+          success: false,
+          contentItems: [{
+            type: 'inputText',
+            text: JSON.stringify({ error: getErrorMessage(error, 'Failed to read ChatGPT conversation') }),
+          }],
+        },
+      })
+    }
+  }
+
   private handleServerRequest(requestId: number, method: string, params: unknown): void {
     if (method === 'account/chatgptAuthTokens/refresh') {
       void this.handleChatgptAuthTokensRefreshRequest(requestId, params)
+      return
+    }
+    const request = asRecord(params)
+    if (method === 'item/tool/call' && isWorkspaceDependencyToolCall(params)) {
+      void handleWorkspaceDependencyToolCall(params).then((result) => {
+        this.sendServerRequestReply(requestId, { result })
+      })
+      return
+    }
+    if (method === 'item/tool/call' && request?.namespace == null && request?.tool === CHATGPT_READ_THREAD_TOOL_NAME) {
+      void this.handleChatgptReadThreadToolCall(requestId, params)
       return
     }
 
@@ -7128,11 +7246,25 @@ class AppServerProcess {
       capabilities: {
         experimentalApi: true,
       },
-    }).then(() => {
+    }).then(async () => {
       this.sendLine({
         jsonrpc: '2.0',
         method: 'initialized',
       })
+      try {
+        const primaryRuntime = await ensurePrimaryRuntimePluginsInstalled({
+          rpc: (method, params) => this.call(method, params),
+        })
+        runtimeDiagnostics.record('primary-runtime.plugins.ready', {
+          installedCount: primaryRuntime.installed.length,
+          readyCount: primaryRuntime.alreadyReady.length,
+          skillCount: primaryRuntime.skills.length,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        runtimeDiagnostics.record('primary-runtime.plugins.failure', { message: redactDiagnosticText(message) })
+        console.warn(`[primary-runtime] failed to initialize artifact plugins: ${message}`)
+      }
       this.initialized = true
       runtimeDiagnostics.setAppServerState({ initializedAtIso: new Date().toISOString(), lifecycle: 'ready' })
       this.syncDiagnosticsState()
@@ -7152,7 +7284,8 @@ class AppServerProcess {
     this.disposeIfConfigChanged()
     try {
       await this.ensureInitialized()
-      return await this.call(method, params)
+      const effectiveParams = method === 'thread/start' ? addWorkspaceDependencyDynamicTool(params) : params
+      return await this.call(method, effectiveParams)
     } finally {
       if (startsTurn) this.pendingTurnStarts = Math.max(0, this.pendingTurnStarts - 1)
     }

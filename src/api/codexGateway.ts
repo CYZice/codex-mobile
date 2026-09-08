@@ -1731,6 +1731,22 @@ export type StartThreadOptions = {
   model?: string
 }
 
+const CHATGPT_READ_THREAD_DYNAMIC_TOOL = {
+  type: 'function',
+  name: 'read_thread',
+  description: 'Read the current branch of a referenced ChatGPT conversation. Use threadId or conversationId, turnLimit up to 10, and cursor for older messages.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      threadId: { type: 'string' },
+      conversationId: { type: 'string' },
+      turnLimit: { type: 'integer', minimum: 1, maximum: 10 },
+      cursor: { type: ['string', 'null'] },
+    },
+    additionalProperties: false,
+  },
+}
+
 export type ForkedThread = {
   threadId: string
   cwd: string
@@ -1753,6 +1769,7 @@ export async function startThread(options: StartThreadOptions = {}): Promise<Sta
     if (typeof options.model === 'string' && options.model.trim().length > 0) {
       params.model = options.model.trim()
     }
+    params.dynamicTools = [CHATGPT_READ_THREAD_DYNAMIC_TOOL]
     const payload = await callRpc<ThreadStartResponse>('thread/start', params)
     const threadId = normalizeThreadIdFromPayload(payload)
     if (!threadId) {
