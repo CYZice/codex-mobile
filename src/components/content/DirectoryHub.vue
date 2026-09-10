@@ -70,7 +70,7 @@
       </div>
       <div v-else-if="pluginError" class="directory-error">{{ pluginError }}</div>
       <div v-else-if="isLoadingPlugins" class="directory-loading">Loading plugins...</div>
-      <div v-else-if="visiblePlugins.length === 0" class="directory-empty">No plugins found.</div>
+      <div v-else-if="visiblePlugins.length === 0" class="directory-empty">No installed plugins found.</div>
       <div v-else class="directory-grid">
         <button
           v-for="plugin in visiblePlugins"
@@ -475,7 +475,7 @@ const route = useRoute()
 const router = useRouter()
 
 const tabs: Array<{ id: DirectoryTab; label: string; subtitle: string }> = [
-  { id: 'plugins', label: 'Plugins', subtitle: 'Plugins make Codex work your way.' },
+  { id: 'plugins', label: 'Plugins', subtitle: 'Manage installed plugins.' },
   { id: 'apps', label: 'Apps', subtitle: 'Connect Codex to external apps and services.' },
   { id: 'mcp', label: 'MCP', subtitle: 'Manage connected MCP servers.' },
   { id: 'skills', label: 'Skills', subtitle: 'Browse and manage installed skills.' },
@@ -561,7 +561,8 @@ const selectedPluginInstallUnavailable = computed(() =>
   selectedPlugin.value?.installPolicy === 'NOT_AVAILABLE' ||
   (selectedPluginDetail.value?.apps.some((app) => isPluginDetailAppUnavailable(app)) ?? false),
 )
-const visiblePlugins = computed(() => limitPopularRows(sortPlugins(filterPlugins(plugins.value, pluginSearchQuery.value), pluginSortMode.value), pluginSortMode.value, pluginSearchQuery.value))
+const installedPlugins = computed(() => plugins.value.filter((plugin) => plugin.installed))
+const visiblePlugins = computed(() => limitPopularRows(sortPlugins(filterPlugins(installedPlugins.value, pluginSearchQuery.value), pluginSortMode.value), pluginSortMode.value, pluginSearchQuery.value))
 const visibleApps = computed(() => limitPopularApps(sortApps(filterApps(apps.value, appSearchQuery.value), appSortMode.value), appSortMode.value, appSearchQuery.value))
 const visibleMcpServers = computed(() => sortMcpServers(mcpServers.value, 'popular'))
 const mcpStatusByName = computed(() => new Map(mcpServers.value.map((server) => [server.name, server])))
@@ -847,11 +848,7 @@ async function loadPlugins(): Promise<void> {
   pluginError.value = ''
   try {
     const cwd = props.cwd?.trim()
-    const [nextPlugins] = await Promise.all([
-      listDirectoryPlugins(cwd ? [cwd] : undefined),
-      supportsApps.value ? loadApps() : Promise.resolve(),
-    ])
-    plugins.value = nextPlugins
+    plugins.value = await listDirectoryPlugins(cwd ? [cwd] : undefined)
   } catch (error) {
     pluginError.value = error instanceof Error ? error.message : 'Failed to load plugins'
   } finally {
@@ -925,7 +922,7 @@ async function openPluginDetail(plugin: DirectoryPluginSummary): Promise<void> {
   try {
     selectedPluginDetail.value = await readDirectoryPlugin(plugin)
     selectedPlugin.value = selectedPluginDetail.value.summary
-    if (supportsApps.value && apps.value.length === 0) await loadApps()
+    if (supportsApps.value && selectedPluginDetail.value.apps.length > 0 && apps.value.length === 0) await loadApps()
     await refreshMcpStatusesForPluginDetail()
   } catch (error) {
     pluginDetailError.value = error instanceof Error ? error.message : 'Failed to load plugin'
@@ -1076,7 +1073,7 @@ watch(() => props.cwd, () => {
   if (activeTab.value === 'plugins') void loadPlugins()
 })
 watch(() => props.threadId, () => {
-  if (activeTab.value === 'apps' || activeTab.value === 'plugins') void loadApps()
+  if (activeTab.value === 'apps') void loadApps()
 })
 
 onMounted(async () => {
