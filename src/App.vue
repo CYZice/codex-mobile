@@ -909,7 +909,6 @@
                   :selected-permission-preset="selectedPermissionPreset"
                   :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts"
                   :selected-model="composerSelectedModelId"
-                  :model-reroute="modelRerouteByThreadId[composerThreadContextId] ?? null"
                   :selected-reasoning-effort="selectedReasoningEffort"
                   :selected-speed-mode="selectedSpeedMode"
                   :is-updating-speed-mode="isUpdatingSpeedMode"
@@ -1015,7 +1014,6 @@
                     :models="availableModelIds"
                     :model-reasoning-efforts="availableModelReasoningEfforts"
                     :selected-model="composerSelectedModelId"
-                    :model-reroute="modelRerouteByThreadId[composerThreadContextId] ?? null"
                     :selected-reasoning-effort="selectedReasoningEffort"
                     :selected-speed-mode="selectedSpeedMode"
                     :is-updating-speed-mode="isUpdatingSpeedMode"
@@ -1076,6 +1074,12 @@
                 </div>
           </template>
         </section>
+        <ModelRerouteStatus
+          v-if="route.name === 'thread' && selectedThreadId && composerSelectedModelId && !isReviewPaneOpen"
+          class="conversation-model-reroute"
+          :selected-model="composerSelectedModelId"
+          :reroute="modelRerouteByThreadId[selectedThreadId] ?? null"
+        />
       </section>
     </template>
   </DesktopLayout>
@@ -1198,6 +1202,7 @@ import DesktopLayout from './components/layout/DesktopLayout.vue'
 import SidebarThreadTree from './components/sidebar/SidebarThreadTree.vue'
 import ContentHeader from './components/content/ContentHeader.vue'
 import ThreadComposer from './components/content/ThreadComposer.vue'
+import ModelRerouteStatus from './components/content/ModelRerouteStatus.vue'
 import ThreadSummaryPanel from './components/content/ThreadSummaryPanel.vue'
 import ThreadPendingRequestPanel from './components/content/ThreadPendingRequestPanel.vue'
 import QueuedMessages from './components/content/QueuedMessages.vue'
@@ -5355,7 +5360,22 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .content-root {
-  @apply h-full min-h-0 min-w-0 w-full flex flex-col overflow-y-hidden overflow-x-hidden bg-white;
+  @apply relative h-full min-h-0 min-w-0 w-full flex flex-col overflow-y-hidden overflow-x-hidden bg-white;
+}
+
+.conversation-model-reroute {
+  @apply absolute bottom-4 left-4 z-10 pointer-events-none;
+  max-width: min(14rem, calc(100% - 2rem));
+}
+
+@media (max-width: 767px) {
+  .conversation-model-reroute {
+    bottom: calc(10rem + env(safe-area-inset-bottom));
+  }
+
+  .content-root.is-virtual-keyboard-open .conversation-model-reroute {
+    display: none;
+  }
 }
 
 .content-root.is-virtual-keyboard-open {
