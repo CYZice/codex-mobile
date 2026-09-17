@@ -632,6 +632,79 @@ describe('startup request deduplication', () => {
   })
 })
 
+describe('upstream model reroute notifications', () => {
+  it('keeps only explicit per-turn reports and never sends another model request', () => {
+    installTestWindow()
+    gatewayMocks.setThreadUnreadState.mockResolvedValue(undefined)
+    let notify: ((notification: { method: string; params: unknown; atIso: string }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notify = handler
+      return vi.fn()
+    })
+
+    const state = useDesktopState()
+    state.setSelectedModelIdForThread('thread-a', 'gpt-6-astra')
+    state.setSelectedModelIdForThread('thread-b', 'gpt-6-astra')
+    state.startPolling()
+    const send = (method: string, params: unknown) => notify!({ method, params, atIso: '2026-09-17T00:00:00Z' })
+
+    send('ready', { ok: true })
+    send('turn/started', { threadId: 'thread-a', turn: { id: 'turn-1' } })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+    send('thread/settings/updated', { threadId: 'thread-a', threadSettings: { model: 'gpt-5.6-sol' } })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+    send('model/rerouted', {
+      threadId: 'thread-a', turnId: 'turn-1', fromModel: 'gpt-6-astra', toModel: 'gpt-5.6-sol',
+      reason: 'highRiskCyberActivity',
+    })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toMatchObject({
+      fromModel: 'gpt-6-astra', toModel: 'gpt-5.6-sol', turnId: 'turn-1',
+    })
+    expect(state.modelRerouteByThreadId.value['thread-b']).toBeUndefined()
+
+    send('turn/started', { threadId: 'thread-a', turn: { id: 'turn-2' } })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+    send('model/rerouted', {
+      threadId: 'thread-a', turnId: 'turn-1', fromModel: 'gpt-6-astra', toModel: 'gpt-5.6-sol',
+    })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+    send('model/rerouted', {
+      threadId: 'thread-a', turnId: 'turn-2', fromModel: 'gpt-6-astra', toModel: 'gpt-5.6-sol',
+    })
+    send('turn/completed', { threadId: 'thread-a', turn: { id: 'turn-2', status: 'completed' } })
+    expect(state.modelRerouteByThreadId.value['thread-a']?.turnId).toBe('turn-2')
+    send('model/rerouted', {
+      threadId: 'thread-a', turnId: 'turn-1', fromModel: 'gpt-6-astra', toModel: 'gpt-reserve',
+    })
+    expect(state.modelRerouteByThreadId.value['thread-a']?.toModel).toBe('gpt-5.6-sol')
+
+    state.setSelectedModelIdForThread('thread-a', 'gpt-5.6-sol')
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+    expect(gatewayMocks.startThreadTurn).not.toHaveBeenCalled()
+    expect(gatewayMocks.startThread).not.toHaveBeenCalled()
+    expect(gatewayMocks.getAvailableModels).not.toHaveBeenCalled()
+  })
+
+  it('drops a prior report on reconnect instead of assuming it still applies', () => {
+    installTestWindow()
+    let notify: ((notification: { method: string; params: unknown; atIso: string }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notify = handler
+      return vi.fn()
+    })
+    const state = useDesktopState()
+    state.startPolling()
+    const send = (method: string, params: unknown) => notify!({ method, params, atIso: '2026-09-17T00:00:00Z' })
+    send('turn/started', { threadId: 'thread-a', turn: { id: 'turn-1' } })
+    send('model/rerouted', {
+      threadId: 'thread-a', turnId: 'turn-1', fromModel: 'gpt-6-astra', toModel: 'gpt-5.6-sol',
+    })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeDefined()
+    send('ready', { ok: true })
+    expect(state.modelRerouteByThreadId.value['thread-a']).toBeUndefined()
+  })
+})
+
 describe('forking from a completed response', () => {
   it('keeps a local fork visible until the server thread list includes it', () => {
     const source = thread('source-thread', '/tmp/project')

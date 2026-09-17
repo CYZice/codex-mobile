@@ -484,6 +484,11 @@
       </div>
 
     </div>
+    <ModelRerouteStatus
+      v-if="activeThreadId && activeThreadId !== '__new-thread__' && selectedModel"
+      :selected-model="selectedModel"
+      :reroute="modelReroute ?? null"
+    />
     <p v-if="!dictationErrorText && attachmentFeedbackText" class="thread-composer-attachment-feedback">
       {{ attachmentFeedbackText }}
     </p>
@@ -570,7 +575,9 @@ import ComposerRichInput, {
 import { buildChatGptConversationReferenceBlock, composerReferenceHref } from '../../composerReferences'
 import FullAccessConfirmation from './FullAccessConfirmation.vue'
 import ModelSettingsDropdown from './ModelSettingsDropdown.vue'
+import ModelRerouteStatus from './ModelRerouteStatus.vue'
 import PermissionsDropdown from './PermissionsDropdown.vue'
+import type { ModelReroute } from '../../modelReroute'
 
 type SkillItem = { name: string; displayName?: string; description: string; path: string; scope?: string; enabled?: boolean }
 
@@ -583,6 +590,7 @@ const props = defineProps<{
   models: string[]
   modelReasoningEfforts?: Record<string, ReasoningEffort[]>
   selectedModel: string
+  modelReroute?: ModelReroute | null
   selectedReasoningEffort: ReasoningEffort | ''
   selectedSpeedMode: SpeedMode
   skills?: SkillItem[]

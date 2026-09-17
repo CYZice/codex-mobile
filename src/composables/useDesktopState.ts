@@ -71,6 +71,7 @@ import type {
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
 import { stripChatGptConversationReferenceBlocks } from '../composerReferences'
+import { readModelReroute, type ModelReroute } from '../modelReroute'
 import {
   DEFAULT_PERMISSION_PRESET,
   inferPermissionPresetFromSettings,
@@ -1475,6 +1476,7 @@ export function useDesktopState() {
   const turnActivityByThreadId = ref<Record<string, TurnActivityState>>({})
   const turnErrorByThreadId = ref<Record<string, TurnErrorState>>({})
   const activeTurnIdByThreadId = ref<Record<string, string>>({})
+  const modelRerouteByThreadId = ref<Record<string, ModelReroute>>({})
   const interruptBlockedUntilPersistedByThreadId = ref<Record<string, boolean>>({})
   const threadListedByServerById = ref<Record<string, boolean>>({})
   const persistedUserMessageByThreadId = ref<Record<string, boolean>>({})
@@ -1792,6 +1794,9 @@ export function useDesktopState() {
   ): void {
     const normalizedModelId = modelId.trim()
     const contextId = toThreadContextId(threadId)
+    if (modelRerouteByThreadId.value[contextId] && readModelIdForThread(threadId) !== normalizedModelId) {
+      modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, contextId)
+    }
     const normalizedProviderId = normalizeProviderContextId(activeProviderId.value)
     const providerContextId = toProviderModelContextId(normalizedProviderId)
     const isNewThreadContext = contextId === NEW_THREAD_COLLABORATION_MODE_CONTEXT
@@ -1832,6 +1837,9 @@ export function useDesktopState() {
     if (!normalizedThreadId) return
 
     const normalizedModelId = modelId.trim()
+    if (modelRerouteByThreadId.value[normalizedThreadId] && readModelIdForThread(normalizedThreadId) !== normalizedModelId) {
+      modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, normalizedThreadId)
+    }
     if (normalizedModelId) {
       const nextModelMap = cloneStringKeyedRecord(selectedModelIdByContext.value)
       nextModelMap[normalizedThreadId] = normalizedModelId
@@ -2456,6 +2464,7 @@ export function useDesktopState() {
     turnActivityByThreadId.value = pruneThreadStateMap(turnActivityByThreadId.value, activeThreadIds)
     turnErrorByThreadId.value = pruneThreadStateMap(turnErrorByThreadId.value, activeThreadIds)
     activeTurnIdByThreadId.value = pruneThreadStateMap(activeTurnIdByThreadId.value, activeThreadIds)
+    modelRerouteByThreadId.value = pruneThreadStateMap(modelRerouteByThreadId.value, activeThreadIds)
     interruptBlockedUntilPersistedByThreadId.value = pruneThreadStateMap(
       interruptBlockedUntilPersistedByThreadId.value,
       activeThreadIds,
@@ -4022,6 +4031,20 @@ export function useDesktopState() {
       return
     }
 
+    const modelReroute = readModelReroute(notification)
+    if (modelReroute) {
+      const currentTurnId = activeTurnIdByThreadId.value[modelReroute.threadId]
+        || turnSummaryByThreadId.value[modelReroute.threadId]?.turnId
+      // An old event must not override a newer turn, even after it completes.
+      if (currentTurnId === modelReroute.turnId) {
+        modelRerouteByThreadId.value = {
+          ...modelRerouteByThreadId.value,
+          [modelReroute.threadId]: modelReroute,
+        }
+      }
+      return
+    }
+
     if (notification.method === 'bridge/threadQueueStateChanged') {
       const params = asRecord(notification.params)
       const threadId = readString(params?.threadId)
@@ -4083,6 +4106,7 @@ export function useDesktopState() {
 
     const startedTurn = readTurnStartedInfo(notification)
     if (startedTurn) {
+      modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, startedTurn.threadId)
       pendingTurnStartsById.set(startedTurn.turnId, startedTurn)
       setTurnIndexForThread(startedTurn.threadId, startedTurn.turnId, inferNextTurnIndex(startedTurn.threadId))
       activeTurnIdByThreadId.value = {
@@ -5996,6 +6020,8 @@ export function useDesktopState() {
     void loadPendingServerRequestsFromBridge()
     stopNotificationStream = subscribeCodexNotifications((notification) => {
       if (notification.method === 'ready') {
+        // Reconnection may have missed a turn/started event; discard stale reports.
+        modelRerouteByThreadId.value = {}
         clearAllTransientTurnErrors()
         const isReconnect = hasReceivedNotificationReady
         hasReceivedNotificationReady = true
@@ -6078,6 +6104,7 @@ export function useDesktopState() {
     turnSummaryByThreadId.value = {}
     turnErrorByThreadId.value = {}
     activeTurnIdByThreadId.value = {}
+    modelRerouteByThreadId.value = {}
     interruptBlockedUntilPersistedByThreadId.value = {}
     threadListedByServerById.value = {}
     persistedUserMessageByThreadId.value = {}
@@ -6169,6 +6196,7 @@ export function useDesktopState() {
     selectedCollaborationMode,
     selectedPermissionPreset,
     selectedModelId,
+    modelRerouteByThreadId,
     selectedReasoningEffort,
     selectedSpeedMode,
     codexCliMissingError,

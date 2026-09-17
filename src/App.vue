@@ -909,6 +909,7 @@
                   :selected-permission-preset="selectedPermissionPreset"
                   :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts"
                   :selected-model="composerSelectedModelId"
+                  :model-reroute="modelRerouteByThreadId[composerThreadContextId] ?? null"
                   :selected-reasoning-effort="selectedReasoningEffort"
                   :selected-speed-mode="selectedSpeedMode"
                   :is-updating-speed-mode="isUpdatingSpeedMode"
@@ -1014,6 +1015,7 @@
                     :models="availableModelIds"
                     :model-reasoning-efforts="availableModelReasoningEfforts"
                     :selected-model="composerSelectedModelId"
+                    :model-reroute="modelRerouteByThreadId[composerThreadContextId] ?? null"
                     :selected-reasoning-effort="selectedReasoningEffort"
                     :selected-speed-mode="selectedSpeedMode"
                     :is-updating-speed-mode="isUpdatingSpeedMode"
@@ -1462,6 +1464,7 @@ const {
   selectedCollaborationMode,
   selectedPermissionPreset,
   selectedModelId,
+  modelRerouteByThreadId,
   selectedReasoningEffort,
   selectedSpeedMode,
   codexCliMissingError,

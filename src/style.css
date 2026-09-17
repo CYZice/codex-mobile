@@ -428,6 +428,22 @@
   @apply border-zinc-700 bg-zinc-800;
 }
 
+:root.dark .model-reroute-status {
+  @apply text-zinc-400;
+}
+
+:root.dark .model-reroute-status strong {
+  @apply text-zinc-200;
+}
+
+:root.dark .model-reroute-status.is-rerouted {
+  @apply text-amber-300;
+}
+
+:root.dark .model-reroute-status.is-rerouted strong {
+  @apply text-amber-200;
+}
+
 :root.dark .thread-composer--expanded {
   @apply bg-zinc-950/95;
 }
