@@ -24,6 +24,7 @@
         <li
           v-if="!hiddenGroupedCommandIds.has(message.id) && !hiddenFileChangeMessageIds.has(message.id) && !hiddenTurnActivityMessageIds.has(message.id)"
           class="conversation-item"
+          :class="{ 'conversation-item-command': isCommandMessage(message) }"
           :data-role="message.role"
           :data-message-type="message.messageType || ''"
         >
@@ -5528,6 +5529,16 @@ onBeforeUnmount(() => {
   @apply flex flex-col;
 }
 
+@media (max-width: 767px) {
+  .conversation-item-command .cmd-row {
+    line-height: 1.25rem;
+  }
+
+  .conversation-item-command .cmd-group-inner {
+    @apply mb-0 gap-0.5 pl-1;
+  }
+}
+
 .image-modal-backdrop {
   @apply fixed inset-0 z-50 bg-black/40 p-6 flex items-center justify-center;
 }
@@ -5614,22 +5625,26 @@ onBeforeUnmount(() => {
 .cmd-output-wrap {
   @apply ml-4 border-l border-zinc-200 bg-transparent pl-3;
   display: grid;
-  grid-template-rows: 0fr;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 0fr);
   transition: grid-template-rows 300ms ease-out, border-color 300ms ease-out;
 }
 
 .cmd-output-wrap.cmd-output-visible {
-  grid-template-rows: 1fr;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .cmd-group-wrap {
   display: grid;
-  grid-template-rows: 0fr;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 0fr);
   transition: grid-template-rows 220ms ease-out;
 }
 
 .cmd-group-wrap.cmd-group-visible {
-  grid-template-rows: 1fr;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .cmd-group-inner {

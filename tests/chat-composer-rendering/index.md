@@ -29,6 +29,7 @@ Return to the [manual test index](../../tests.md).
 | [Feature: Chat file-link context menu (open/copy/edit)](chat-file-link-context-menu-open-copy-edit.md) |
 | [Feature: Restore composer drag-and-drop file attach on input field](restore-composer-drag-and-drop-file-attach-on-input-field.md) |
 | [Feature: Restore clipboard image paste attachments in composer](restore-clipboard-image-paste-attachments-in-composer.md) |
+| [Feature: Mobile composer attachment grid and compact command rows](mobile-composer-and-command-density.md) |
 | [Feature: Show user file attachments as visible chips in chat](show-user-file-attachments-as-visible-chips-in-chat.md) |
 | [Feature: Approval request uses legacy in-conversation request card only](approval-request-uses-legacy-in-conversation-request-card-only.md) |
 | [Feature: Thread RPC strips inline image/file payloads into links](thread-rpc-strips-inline-image-file-payloads-into-links.md) |

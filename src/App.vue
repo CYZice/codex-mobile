@@ -1075,7 +1075,7 @@
           </template>
         </section>
         <ModelRerouteStatus
-          v-if="route.name === 'thread' && selectedThreadId && composerSelectedModelId && !isReviewPaneOpen"
+          v-if="route.name === 'thread' && selectedThreadId && composerSelectedModelId && !isReviewPaneOpen && !isMobile"
           class="conversation-model-reroute"
           :selected-model="composerSelectedModelId"
           :reroute="modelRerouteByThreadId[selectedThreadId] ?? null"
@@ -5366,16 +5366,6 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 .conversation-model-reroute {
   @apply absolute bottom-4 left-4 z-10 pointer-events-none;
   max-width: min(14rem, calc(100% - 2rem));
-}
-
-@media (max-width: 767px) {
-  .conversation-model-reroute {
-    bottom: calc(10rem + env(safe-area-inset-bottom));
-  }
-
-  .content-root.is-virtual-keyboard-open .conversation-model-reroute {
-    display: none;
-  }
 }
 
 .content-root.is-virtual-keyboard-open {

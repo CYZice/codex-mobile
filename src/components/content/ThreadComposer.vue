@@ -2782,11 +2782,22 @@ watch(
     @apply grid grid-cols-[2.75rem_minmax(0,1fr)_auto] gap-x-2 gap-y-2 border-0 bg-transparent p-0 shadow-none;
   }
 
-  .thread-composer-attachments,
+  .thread-composer-draft-context {
+    @apply col-span-full min-w-0;
+  }
+
+  .thread-composer-attachments {
+    @apply mb-0 grid grid-cols-3 gap-2;
+  }
+
   .thread-composer-folder-chips,
   .thread-composer-file-chips,
   .thread-composer-skill-chips {
     @apply col-span-full mb-0;
+  }
+
+  .thread-composer-attachment {
+    @apply aspect-square h-auto w-auto;
   }
 
   .thread-composer-input-wrap {
