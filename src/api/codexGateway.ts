@@ -1457,11 +1457,11 @@ export async function getCcSwitchStatus(): Promise<CcSwitchStatus> {
   return payload as CcSwitchStatus
 }
 
-export async function switchCcSwitchProvider(providerId: string): Promise<CcSwitchStatus> {
+export async function switchCcSwitchProvider(providerId: string, expectedCurrentProviderId?: string): Promise<CcSwitchStatus> {
   const response = await fetch('/codex-api/cc-switch/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId }),
+    body: JSON.stringify({ providerId, expectedCurrentProviderId }),
   })
   const payload = (await response.json()) as unknown
   if (!response.ok) {

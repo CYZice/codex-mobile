@@ -25,6 +25,19 @@ Expected results:
 - Exactly one Codex runtime reload occurs and existing threads remain visible.
 - The SHA-256 hash of `~/.codex/auth.json` is unchanged.
 
+## External CC Switch synchronization and stale-state protection
+
+1. Leave CodexMobile open with the current provider visible.
+2. Switch the Codex provider from the CC Switch desktop application without refreshing CodexMobile.
+3. Keep the page visible for at least one polling interval, then start a new thread.
+
+Expected results:
+
+- CodexMobile updates its provider row and model list without a browser refresh.
+- The Codex app-server reloads after the external provider change; no CodexMobile restart is required.
+- If a Codex turn is active, the provider change remains pending until the turn is idle and does not interrupt the active turn.
+- If CodexMobile submits a switch using an outdated provider state, the request is rejected without changing `config.toml`, `settings.json`, or the CC Switch database, then the UI refreshes to the actual provider.
+
 ## Packaged CLI built-in module loading
 
 1. Build the CLI with `pnpm run build:cli`.

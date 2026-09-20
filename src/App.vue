@@ -1631,6 +1631,8 @@ const settingsButtonRef = ref<HTMLElement | null>(null)
 const serverMatchedThreadIds = ref<string[] | null>(null)
 let threadSearchTimer: ReturnType<typeof setTimeout> | null = null
 let terminalKeyboardFocusFallbackTimer: ReturnType<typeof setTimeout> | null = null
+let ccSwitchStatusPollTimer: number | null = null
+let ccSwitchStatusPollInFlight = false
 let sidebarScrollTop = 0
 let sidebarScrollRestoreRequestId = 0
 let isRestoringSidebarScroll = false
@@ -2238,6 +2240,7 @@ onMounted(() => {
   void refreshDefaultProjectName()
   void loadFreeModeStatus()
   void loadCcSwitchStatus()
+  startCcSwitchStatusPolling()
   void refreshThreadTerminalStatus()
   void refreshTerminalQuickCommands()
 })
@@ -2266,6 +2269,7 @@ onUnmounted(() => {
     window.clearInterval(accountStatePollTimer)
     accountStatePollTimer = null
   }
+  stopCcSwitchStatusPolling()
   if (threadSearchTimer) {
     clearTimeout(threadSearchTimer)
     threadSearchTimer = null
@@ -3545,14 +3549,17 @@ function openSettings(section = 'general'): void {
 
 function onDocumentVisibilityChange(): void {
   if (typeof document === 'undefined') return
-  if (!isMobile.value) return
 
   if (document.visibilityState === 'hidden') {
+    stopCcSwitchStatusPolling()
+    if (!isMobile.value) return
     mobileHiddenAtMs.value = Date.now()
     mobileResumeReloadTriggered.value = false
     return
   }
 
+  startCcSwitchStatusPolling()
+  if (!isMobile.value) return
   maybeSyncAfterMobileResume()
 }
 
@@ -4676,6 +4683,39 @@ async function loadCcSwitchStatus(options: { silent?: boolean } = {}): Promise<v
   }
 }
 
+function stopCcSwitchStatusPolling(): void {
+  if (ccSwitchStatusPollTimer === null) return
+  window.clearInterval(ccSwitchStatusPollTimer)
+  ccSwitchStatusPollTimer = null
+}
+
+function startCcSwitchStatusPolling(): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (document.visibilityState === 'hidden' || ccSwitchStatusPollTimer !== null) return
+  ccSwitchStatusPollTimer = window.setInterval(() => {
+    if (ccSwitchStatusPollInFlight || ccSwitchLoading.value || document.visibilityState === 'hidden') return
+    ccSwitchStatusPollInFlight = true
+    const previousProviderId = ccSwitchCurrentProviderId.value
+    void getCcSwitchStatus()
+      .then(async (status) => {
+        ccSwitchStatus.value = status
+        ccSwitchCurrentProviderId.value = status.currentProviderId
+        if (previousProviderId && previousProviderId !== status.currentProviderId) {
+          await refreshAll({
+            includeSelectedThreadMessages: false,
+            forceThreadRefresh: true,
+            providerChanged: true,
+            awaitAncillaryRefreshes: true,
+          })
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        ccSwitchStatusPollInFlight = false
+      })
+  }, 2000)
+}
+
 async function onCcSwitchProviderChange(providerId: string): Promise<void> {
   const normalizedProviderId = providerId.trim()
   if (!normalizedProviderId || ccSwitchLoading.value) return
@@ -4685,7 +4725,7 @@ async function onCcSwitchProviderChange(providerId: string): Promise<void> {
   ccSwitchLoading.value = true
   ccSwitchProviderError.value = ''
   try {
-    const status = await switchCcSwitchProvider(normalizedProviderId)
+    const status = await switchCcSwitchProvider(normalizedProviderId, previousProviderId)
     ccSwitchStatus.value = status
     ccSwitchCurrentProviderId.value = status.currentProviderId
     await refreshAll({

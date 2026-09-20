@@ -7,6 +7,7 @@ import {
   projectCcSwitchCodexConfig,
   readCcSwitchStatus,
   switchCcSwitchProvider,
+  watchCcSwitchExternalChanges,
 } from './ccSwitch.js'
 
 type FixtureProvider = {
@@ -247,6 +248,59 @@ describe('CC Switch status and switching', () => {
     db.close()
     expect(currentRows).toEqual([{ id: 'third-party' }])
     expect(reloadRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a switch based on stale frontend provider state without writing files', async () => {
+    const fixture = await createFixture({
+      providers: [officialProvider, thirdPartyProvider],
+      currentProviderId: 'official',
+    })
+    const configBefore = await readFile(fixture.configPath, 'utf8')
+    const settingsBefore = await readFile(fixture.settingsPath, 'utf8')
+    const reloadRuntime = vi.fn(async () => undefined)
+
+    await expect(switchCcSwitchProvider('third-party', {
+      paths: fixture.paths,
+      reloadRuntime,
+      expectedCurrentProviderId: 'stale-deepseek',
+    })).rejects.toMatchObject({ code: 'PROVIDER_STATE_CHANGED', statusCode: 409 })
+
+    expect(await readFile(fixture.configPath, 'utf8')).toBe(configBefore)
+    expect(await readFile(fixture.settingsPath, 'utf8')).toBe(settingsBefore)
+    expect(reloadRuntime).not.toHaveBeenCalled()
+  })
+
+  it('retries an external provider change after runtime becomes idle', async () => {
+    const fixture = await createFixture({
+      providers: [officialProvider, thirdPartyProvider],
+      currentProviderId: 'official',
+    })
+    let blocked = true
+    const reloadRuntime = vi.fn(async () => undefined)
+    const watcher = watchCcSwitchExternalChanges({
+      paths: fixture.paths,
+      reloadRuntime,
+      isBlocked: () => blocked ? 'busy' : '',
+      debounceMs: 5,
+      retryMs: 10,
+    })
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      await writeFile(fixture.settingsPath, `${JSON.stringify({
+        preserveCodexOfficialAuthOnSwitch: true,
+        unifyCodexSessionHistory: true,
+        currentProviderCodex: 'third-party',
+      }, null, 2)}\n`, 'utf8')
+      await new Promise((resolve) => setTimeout(resolve, 35))
+      expect(reloadRuntime).not.toHaveBeenCalled()
+
+      blocked = false
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(reloadRuntime).toHaveBeenCalledTimes(1)
+    } finally {
+      watcher.close()
+    }
   })
 
   it('restores config and CC Switch state when runtime reload fails', async () => {

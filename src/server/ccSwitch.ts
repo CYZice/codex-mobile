@@ -92,6 +92,7 @@ type CcSwitchRouteContext = {
 type SwitchOptions = {
   reloadRuntime: () => Promise<void>
   paths?: CcSwitchPaths
+  expectedCurrentProviderId?: string
 }
 
 class CcSwitchIntegrationError extends Error {
@@ -117,6 +118,7 @@ type ExternalChangeWatcherOptions = {
   reloadRuntime: () => Promise<void>
   isBlocked: () => string
   debounceMs?: number
+  retryMs?: number
 }
 
 function getStatusSignature(status: CcSwitchStatus): string {
@@ -145,7 +147,8 @@ export function watchCcSwitchExternalChanges(
   const watchers: FSWatcher[] = []
   let timer: ReturnType<typeof setTimeout> | null = null
   let closed = false
-  let lastSignature = ''
+  let lastAppliedSignature = ''
+  let checkPromise: Promise<void> | null = null
 
   const schedule = (): void => {
     if (closed) return
@@ -158,26 +161,42 @@ export function watchCcSwitchExternalChanges(
 
   const checkAndReload = async (): Promise<void> => {
     if (closed) return
-    const status = await readCcSwitchStatus(paths)
-    const signature = getStatusSignature(status)
-    if (signature === lastSignature) return
-    lastSignature = signature
-    if (!status.available) return
-
-    const blockReason = options.isBlocked()
-    if (blockReason) {
-      if (!closed) {
-        timer = setTimeout(() => {
-          timer = null
-          void checkAndReload()
-        }, 1000)
+    if (checkPromise) return await checkPromise
+    checkPromise = (async () => {
+      const status = await readCcSwitchStatus(paths)
+      const signature = getStatusSignature(status)
+      if (signature === lastAppliedSignature) return
+      if (!status.available) {
+        lastAppliedSignature = signature
+        return
       }
-      return
-    }
 
-    try {
-      await options.reloadRuntime()
-    } catch { /* A later file event or retry can attempt the reload again. */ }
+      const blockReason = options.isBlocked()
+      if (blockReason) {
+        if (!closed) {
+          timer = setTimeout(() => {
+            timer = null
+            void checkAndReload()
+          }, options.retryMs ?? 1000)
+        }
+        return
+      }
+
+      try {
+        await options.reloadRuntime()
+        lastAppliedSignature = signature
+      } catch {
+        if (!closed) {
+          timer = setTimeout(() => {
+            timer = null
+            void checkAndReload()
+          }, options.retryMs ?? 1000)
+        }
+      }
+    })().finally(() => {
+      checkPromise = null
+    })
+    await checkPromise
   }
 
   const onChange = (filename: string | null): void => {
@@ -193,7 +212,7 @@ export function watchCcSwitchExternalChanges(
   }
 
   void readCcSwitchStatus(paths).then((status) => {
-    lastSignature = getStatusSignature(status)
+    lastAppliedSignature = getStatusSignature(status)
   })
 
   return {
@@ -719,6 +738,13 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
     throw new CcSwitchIntegrationError('UNSUPPORTED_PROVIDER', incompatibilityReason, 409)
   }
   if (state.currentProviderId === providerId) return await readCcSwitchStatus(state.paths)
+  if (options.expectedCurrentProviderId && options.expectedCurrentProviderId !== state.currentProviderId) {
+    throw new CcSwitchIntegrationError(
+      'PROVIDER_STATE_CHANGED',
+      `CC Switch provider changed from ${options.expectedCurrentProviderId} to ${state.currentProviderId}. Refresh provider state before switching.`,
+      409,
+    )
+  }
 
   const nextConfig = projectCcSwitchCodexConfig(provider, state)
   const previousConfig = await readOptionalText(state.paths.configPath)
@@ -823,11 +849,13 @@ export async function handleCcSwitchRoutes(
     try {
       const body = asRecord(await context.readJsonBody(req))
       const providerId = readString(body?.providerId)
+      const expectedCurrentProviderId = readString(body?.expectedCurrentProviderId)
       const blockReason = context.appServer.getRuntimeConfigurationChangeBlockReason()
       if (blockReason) throw new CcSwitchIntegrationError('RUNTIME_BUSY', blockReason, 409)
       releaseRuntimeChange = context.appServer.beginRuntimeConfigurationChange()
       const status = await switchCcSwitchProvider(providerId, {
         reloadRuntime: () => context.appServer.reload(),
+        expectedCurrentProviderId,
       })
       setJson(res, 200, status)
     } catch (error) {
