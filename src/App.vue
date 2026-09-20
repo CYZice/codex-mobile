@@ -1243,6 +1243,7 @@ import {
   getWorktreeBranchOptions,
   getAccounts,
   getCcSwitchStatus,
+  getCodexLoginStatus,
   getArchivedThreadGroupsPage,
   completeCodexLogin,
   createLocalDirectory,
@@ -1713,6 +1714,7 @@ const isCodexLoginModalOpen = ref(false)
 const codexLoginUrl = ref('')
 const codexLoginCallbackUrl = ref('')
 const codexLoginCallbackInputRef = ref<HTMLInputElement | null>(null)
+let codexLoginStatusTimer: number | null = null
 const removingAccountId = ref('')
 const confirmingRemoveAccountId = ref('')
 const hoveredAccountId = ref('')
@@ -2783,7 +2785,7 @@ async function onStartCodexLogin(): Promise<void> {
     const loginUrl = await startCodexLogin()
     codexLoginUrl.value = loginUrl
     isCodexLoginModalOpen.value = true
-    window.open(loginUrl, '_blank', 'noopener,noreferrer')
+    startCodexLoginStatusPolling()
     await nextTick()
     codexLoginCallbackInputRef.value?.focus()
   } catch (error) {
@@ -2795,6 +2797,7 @@ async function onStartCodexLogin(): Promise<void> {
 
 function onCancelCodexLoginModal(): void {
   if (isCompletingCodexLogin.value) return
+  stopCodexLoginStatusPolling()
   isCodexLoginModalOpen.value = false
   codexLoginCallbackUrl.value = ''
 }
@@ -2805,13 +2808,43 @@ async function onSubmitCodexLoginCallback(): Promise<void> {
   await completeCodexLoginFromCallback(callbackUrl)
 }
 
+function stopCodexLoginStatusPolling(): void {
+  if (codexLoginStatusTimer !== null) {
+    window.clearTimeout(codexLoginStatusTimer)
+    codexLoginStatusTimer = null
+  }
+}
+
+function startCodexLoginStatusPolling(): void {
+  stopCodexLoginStatusPolling()
+  const poll = async (): Promise<void> => {
+    if (!isCodexLoginModalOpen.value || isCompletingCodexLogin.value) return
+    try {
+      const status = await getCodexLoginStatus()
+      if (status.authFileUpdated) {
+        await completeCodexLoginFromCallback('')
+        return
+      }
+      if (status.running) {
+        codexLoginStatusTimer = window.setTimeout(() => { void poll() }, 500)
+        return
+      }
+    } catch {
+      // Keep the manual callback fallback available when status polling is unavailable.
+    }
+    codexLoginStatusTimer = window.setTimeout(() => { void poll() }, 1000)
+  }
+  void poll()
+}
+
 async function completeCodexLoginFromCallback(callbackUrl: string): Promise<void> {
-  if (isCompletingCodexLogin.value || callbackUrl.length === 0) return
+  if (isCompletingCodexLogin.value) return
   accountActionError.value = ''
   isCompletingCodexLogin.value = true
   try {
     const result = await completeCodexLogin(callbackUrl)
     accounts.value = result.accounts
+    stopCodexLoginStatusPolling()
     codexLoginUrl.value = ''
     codexLoginCallbackUrl.value = ''
     isCodexLoginModalOpen.value = false

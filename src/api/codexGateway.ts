@@ -1487,6 +1487,19 @@ export async function startCodexLogin(): Promise<string> {
   return loginUrl
 }
 
+export async function getCodexLoginStatus(): Promise<{ running: boolean; authFileUpdated: boolean }> {
+  const response = await fetch('/codex-api/accounts/login/status', { cache: 'no-store' })
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    throw new Error(getErrorMessageFromPayload(payload, 'Failed to read Codex login status'))
+  }
+  const data = asRecord(asRecord(payload)?.data)
+  return {
+    running: data?.running === true,
+    authFileUpdated: data?.authFileUpdated === true,
+  }
+}
+
 export async function completeCodexLogin(callbackUrl: string): Promise<AccountsListResult> {
   const response = await fetch('/codex-api/accounts/login/complete', {
     method: 'POST',

@@ -101,6 +101,7 @@ let backgroundRefreshPromise: Promise<void> | null = null
 let activeLogin: {
   proc: ChildProcessWithoutNullStreams
   loginUrl: string | null
+  previousAuthMtimeMs: number | null
   output: string
   exited: boolean
   exitCode: number | null
@@ -1041,6 +1042,7 @@ async function startCodexLogin(): Promise<string> {
   }
 
   const invocation = getSpawnInvocation(codexCommand, ['login'])
+  const previousAuthMtimeMs = await getActiveAuthMtimeMs()
   const proc = spawn(invocation.command, invocation.args, {
     env: process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1050,6 +1052,7 @@ async function startCodexLogin(): Promise<string> {
   activeLogin = {
     proc,
     loginUrl: null,
+    previousAuthMtimeMs,
     output: '',
     exited: false,
     exitCode: null,
@@ -1089,6 +1092,13 @@ async function startCodexLogin(): Promise<string> {
     activeLogin = null
     throw error
   }
+}
+
+async function hasLoginAuthFileUpdate(): Promise<boolean> {
+  if (!activeLogin) return false
+  const nextMtimeMs = await getActiveAuthMtimeMs()
+  return nextMtimeMs !== null
+    && (activeLogin.previousAuthMtimeMs === null || nextMtimeMs > activeLogin.previousAuthMtimeMs)
 }
 
 async function curlLoginCallback(callbackUrl: string): Promise<void> {
@@ -1248,26 +1258,31 @@ export async function handleAccountRoutes(
     return true
   }
 
+  if (req.method === 'GET' && url.pathname === '/codex-api/accounts/login/status') {
+    setJson(res, 200, {
+      data: {
+        running: Boolean(activeLogin && !activeLogin.exited),
+        authFileUpdated: await hasLoginAuthFileUpdate(),
+      },
+    })
+    return true
+  }
+
   if (req.method === 'POST' && url.pathname === '/codex-api/accounts/login/complete') {
     try {
       const payload = await readJsonBody(req)
       const callbackUrl = typeof payload?.callbackUrl === 'string' ? payload.callbackUrl.trim() : ''
-      if (!callbackUrl) {
-        setJson(res, 400, { error: 'missing_callback_url', message: 'Paste the localhost callback URL from the browser.' })
-        return true
-      }
-      if (!isLocalCallbackUrl(callbackUrl)) {
+      if (callbackUrl && !isLocalCallbackUrl(callbackUrl)) {
         setJson(res, 400, { error: 'invalid_callback_url', message: 'The callback URL must use http://localhost or http://127.0.0.1.' })
         return true
       }
-      if (!activeLogin || activeLogin.exited) {
+      if (!activeLogin || (activeLogin.exited && !(await hasLoginAuthFileUpdate()))) {
         setJson(res, 409, { error: 'login_not_running', message: 'Start Codex login before submitting the callback URL.' })
         return true
       }
 
-      const previousAuthMtimeMs = await getActiveAuthMtimeMs()
-      await curlLoginCallback(callbackUrl)
-      await waitForAuthFileUpdate(previousAuthMtimeMs)
+      if (callbackUrl) await curlLoginCallback(callbackUrl)
+      await waitForAuthFileUpdate(activeLogin.previousAuthMtimeMs)
 
       const imported = await importAccountFromAuthPath(getActiveAuthPath())
       stopActiveLogin()
