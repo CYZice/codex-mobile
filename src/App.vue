@@ -1055,7 +1055,6 @@
                     :branches="threadBranchOptions"
                     :branch-busy="isSwitchingThreadBranch"
                     :branch-error="threadBranchError"
-                    @close="setThreadSummaryOpen(false)"
                     @open-changes="onToggleContentHeaderReview"
                     @open-local="onOpenThreadSummaryLocal"
                     @open-git="onOpenThreadSummaryGit"

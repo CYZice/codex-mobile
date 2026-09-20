@@ -2,9 +2,6 @@
   <aside class="thread-summary-panel" aria-label="Thread summary">
     <header class="thread-summary-header">
       <span class="thread-summary-title">摘要</span>
-      <button class="thread-summary-icon-button" type="button" aria-label="隐藏摘要" title="隐藏摘要" @click="$emit('close')">
-        <IconTablerX aria-hidden="true" />
-      </button>
     </header>
 
     <section class="thread-summary-section">
@@ -124,7 +121,6 @@ import IconTablerGitFork from '../icons/IconTablerGitFork.vue'
 import IconTablerLink from '../icons/IconTablerLink.vue'
 import IconTablerPhoto from '../icons/IconTablerPhoto.vue'
 import IconTablerSearch from '../icons/IconTablerSearch.vue'
-import IconTablerX from '../icons/IconTablerX.vue'
 
 const props = defineProps<{
   cwd: string
@@ -144,7 +140,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
   openChanges: []
   openLocal: []
   openGit: []
@@ -213,11 +208,6 @@ function selectBranch(value: string): void {
   @apply truncate text-sm font-semibold text-zinc-800;
 }
 
-.thread-summary-icon-button {
-  @apply grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-300;
-}
-
-.thread-summary-icon-button :deep(svg),
 .thread-summary-action-icon,
 .thread-summary-row-chevron,
 .thread-summary-chevron,
