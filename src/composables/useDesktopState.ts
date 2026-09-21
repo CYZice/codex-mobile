@@ -72,6 +72,7 @@ import type {
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
 import { stripChatGptConversationReferenceBlocks } from '../composerReferences'
 import { readModelReroute, type ModelReroute } from '../modelReroute'
+import { readUpstreamModelReport, type UpstreamModelReport } from '../upstreamModelReport'
 import {
   DEFAULT_PERMISSION_PRESET,
   inferPermissionPresetFromSettings,
@@ -1477,6 +1478,7 @@ export function useDesktopState() {
   const turnErrorByThreadId = ref<Record<string, TurnErrorState>>({})
   const activeTurnIdByThreadId = ref<Record<string, string>>({})
   const modelRerouteByThreadId = ref<Record<string, ModelReroute>>({})
+  const upstreamModelByThreadId = ref<Record<string, UpstreamModelReport>>({})
   const interruptBlockedUntilPersistedByThreadId = ref<Record<string, boolean>>({})
   const threadListedByServerById = ref<Record<string, boolean>>({})
   const persistedUserMessageByThreadId = ref<Record<string, boolean>>({})
@@ -1798,6 +1800,9 @@ export function useDesktopState() {
     if (modelRerouteByThreadId.value[contextId] && readModelIdForThread(threadId) !== normalizedModelId) {
       modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, contextId)
     }
+    if (upstreamModelByThreadId.value[contextId] && readModelIdForThread(threadId) !== normalizedModelId) {
+      upstreamModelByThreadId.value = omitKey(upstreamModelByThreadId.value, contextId)
+    }
     const normalizedProviderId = normalizeProviderContextId(activeProviderId.value)
     const providerContextId = toProviderModelContextId(normalizedProviderId)
     const isNewThreadContext = contextId === NEW_THREAD_COLLABORATION_MODE_CONTEXT
@@ -1840,6 +1845,9 @@ export function useDesktopState() {
     const normalizedModelId = modelId.trim()
     if (modelRerouteByThreadId.value[normalizedThreadId] && readModelIdForThread(normalizedThreadId) !== normalizedModelId) {
       modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, normalizedThreadId)
+    }
+    if (upstreamModelByThreadId.value[normalizedThreadId] && readModelIdForThread(normalizedThreadId) !== normalizedModelId) {
+      upstreamModelByThreadId.value = omitKey(upstreamModelByThreadId.value, normalizedThreadId)
     }
     if (normalizedModelId) {
       const nextModelMap = cloneStringKeyedRecord(selectedModelIdByContext.value)
@@ -2466,6 +2474,7 @@ export function useDesktopState() {
     turnErrorByThreadId.value = pruneThreadStateMap(turnErrorByThreadId.value, activeThreadIds)
     activeTurnIdByThreadId.value = pruneThreadStateMap(activeTurnIdByThreadId.value, activeThreadIds)
     modelRerouteByThreadId.value = pruneThreadStateMap(modelRerouteByThreadId.value, activeThreadIds)
+    upstreamModelByThreadId.value = pruneThreadStateMap(upstreamModelByThreadId.value, activeThreadIds)
     interruptBlockedUntilPersistedByThreadId.value = pruneThreadStateMap(
       interruptBlockedUntilPersistedByThreadId.value,
       activeThreadIds,
@@ -4036,6 +4045,27 @@ export function useDesktopState() {
       return
     }
 
+    const upstreamReport = readUpstreamModelReport(notification)
+    if (upstreamReport) {
+      const currentTurnId = activeTurnIdByThreadId.value[upstreamReport.threadId]
+        || turnSummaryByThreadId.value[upstreamReport.threadId]?.turnId
+      if (currentTurnId === upstreamReport.turnId) {
+        const previous = upstreamModelByThreadId.value[upstreamReport.threadId]
+        const sameResponse = previous?.turnId === upstreamReport.turnId
+          && previous.responseId === upstreamReport.responseId
+        upstreamModelByThreadId.value = {
+          ...upstreamModelByThreadId.value,
+          [upstreamReport.threadId]: {
+            ...upstreamReport,
+            responseCount: sameResponse ? previous.responseCount : upstreamReport.responseId
+              ? (previous?.turnId === upstreamReport.turnId ? previous.responseCount : 0) + 1
+              : Math.max(1, previous?.turnId === upstreamReport.turnId ? previous.responseCount : 0),
+          },
+        }
+      }
+      return
+    }
+
     const modelReroute = readModelReroute(notification)
     if (modelReroute) {
       const currentTurnId = activeTurnIdByThreadId.value[modelReroute.threadId]
@@ -4112,6 +4142,7 @@ export function useDesktopState() {
     const startedTurn = readTurnStartedInfo(notification)
     if (startedTurn) {
       modelRerouteByThreadId.value = omitKey(modelRerouteByThreadId.value, startedTurn.threadId)
+      upstreamModelByThreadId.value = omitKey(upstreamModelByThreadId.value, startedTurn.threadId)
       pendingTurnStartsById.set(startedTurn.turnId, startedTurn)
       setTurnIndexForThread(startedTurn.threadId, startedTurn.turnId, inferNextTurnIndex(startedTurn.threadId))
       activeTurnIdByThreadId.value = {
@@ -6027,6 +6058,7 @@ export function useDesktopState() {
       if (notification.method === 'ready') {
         // Reconnection may have missed a turn/started event; discard stale reports.
         modelRerouteByThreadId.value = {}
+        upstreamModelByThreadId.value = {}
         clearAllTransientTurnErrors()
         const isReconnect = hasReceivedNotificationReady
         hasReceivedNotificationReady = true
@@ -6123,6 +6155,7 @@ export function useDesktopState() {
     turnErrorByThreadId.value = {}
     activeTurnIdByThreadId.value = {}
     modelRerouteByThreadId.value = {}
+    upstreamModelByThreadId.value = {}
     interruptBlockedUntilPersistedByThreadId.value = {}
     threadListedByServerById.value = {}
     persistedUserMessageByThreadId.value = {}
@@ -6215,6 +6248,7 @@ export function useDesktopState() {
     selectedPermissionPreset,
     selectedModelId,
     modelRerouteByThreadId,
+    upstreamModelByThreadId,
     selectedReasoningEffort,
     selectedSpeedMode,
     codexCliMissingError,

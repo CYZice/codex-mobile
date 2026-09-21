@@ -1067,6 +1067,7 @@
           class="conversation-model-reroute"
           :selected-model="composerSelectedModelId"
           :reroute="modelRerouteByThreadId[selectedThreadId] ?? null"
+          :report="upstreamModelByThreadId[selectedThreadId] ?? null"
         />
       </section>
     </template>
@@ -1458,6 +1459,7 @@ const {
   selectedPermissionPreset,
   selectedModelId,
   modelRerouteByThreadId,
+  upstreamModelByThreadId,
   selectedReasoningEffort,
   selectedSpeedMode,
   codexCliMissingError,
@@ -5423,7 +5425,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .conversation-model-reroute {
-  @apply absolute bottom-4 left-4 z-10 pointer-events-none;
+  @apply absolute bottom-4 right-4 z-10 pointer-events-none;
   max-width: min(14rem, calc(100% - 2rem));
 }
 

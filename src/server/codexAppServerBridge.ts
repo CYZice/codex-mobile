@@ -51,6 +51,7 @@ import {
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
 import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
 import { hashDiagnosticThreadId, redactDiagnosticText, runtimeDiagnostics } from './runtimeDiagnostics.js'
+import { UpstreamResponseTraceReader, uniqueTraceTurn, type UpstreamResponseModel } from './upstreamResponseTrace.js'
 import {
   addWorkspaceDependencyDynamicTool,
   handleWorkspaceDependencyToolCall,
@@ -6703,6 +6704,8 @@ class AppServerProcess {
   private readonly capturedItemsByThreadId = new Map<string, Map<string, CapturedItem>>()
   private readonly liveStateCache = new Map<string, { data: unknown; turnCount: number; sessionSize: number }>()
   private readonly activeTurnKeys = new Set<string>()
+  private readonly upstreamTraceReader = new UpstreamResponseTraceReader()
+  private readonly lastUpstreamReportByTurn = new Map<string, UpstreamResponseModel>()
   private chatgptAuthRefreshPromise: Promise<ChatgptAuthTokensRefreshResponse> | null = null
   private pendingTurnStarts = 0
   private runtimeConfigurationChangeActive = false
@@ -6751,10 +6754,15 @@ class AppServerProcess {
     const config = this.buildAppServerConfig()
     this.activeConfigSignature = this.getAppServerConfigSignature(config)
     const invocation = getSpawnInvocation(this.getCodexCommand(), config.args)
-    const spawnEnv = Object.keys(config.env).length > 0
-      ? { ...process.env, ...config.env }
-      : undefined
-    const proc = spawn(invocation.command, invocation.args, { stdio: ['pipe', 'pipe', 'pipe'], ...(spawnEnv ? { env: spawnEnv } : {}) })
+    // Scope verbose logging to the Codex SSE response module. Its raw events can
+    // contain private text, so stderr is filtered before diagnostics see it.
+    const spawnEnv = {
+      ...process.env,
+      ...config.env,
+      RUST_LOG: 'warn,codex_api::sse::responses=trace',
+    }
+    this.upstreamTraceReader.reset()
+    const proc = spawn(invocation.command, invocation.args, { stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv })
     this.process = proc
     const generation = runtimeDiagnostics.snapshot().appServer.generation + 1
     runtimeDiagnostics.setAppServerState({ lifecycle: 'starting', generation, pid: proc.pid ?? null, startedAtIso: new Date().toISOString(), initializedAtIso: null, command: basename(invocation.command), sandbox: invocation.args.find((value) => value.includes('sandbox_mode='))?.match(/sandbox_mode="([^"]+)/u)?.[1] ?? null, approval: invocation.args.find((value) => value.includes('approval_policy='))?.match(/approval_policy="([^"]+)/u)?.[1] ?? null, memories: invocation.args.find((value) => value.includes('features.memories='))?.match(/features\.memories=(true|false)/u)?.[1] === 'true' ? true : invocation.args.find((value) => value.includes('features.memories='))?.includes('false') ? false : null })
@@ -6779,8 +6787,10 @@ class AppServerProcess {
 
     proc.stderr.setEncoding('utf8')
     proc.stderr.on('data', (chunk: string) => {
-      runtimeDiagnostics.appendStderr(chunk)
-      runtimeDiagnostics.record('app-server.stderr', { tail: redactDiagnosticText(chunk, 400) })
+      const safeChunk = this.upstreamTraceReader.ingest(chunk, (report) => this.handleUpstreamTraceReport(report))
+      if (!safeChunk) return
+      runtimeDiagnostics.appendStderr(safeChunk)
+      runtimeDiagnostics.record('app-server.stderr', { tail: redactDiagnosticText(safeChunk, 400) })
     })
     proc.stdin.on('error', (error) => runtimeDiagnostics.record('app-server.stdin-error', { message: redactDiagnosticText(error) }))
     proc.on('error', (error) => {
@@ -6803,6 +6813,8 @@ class AppServerProcess {
 
       this.pending.clear()
       this.pendingServerRequests.clear()
+      this.lastUpstreamReportByTurn.clear()
+      this.upstreamTraceReader.reset()
       this.process = null
       this.initialized = false
       this.initializePromise = null
@@ -6880,15 +6892,36 @@ class AppServerProcess {
     const key = `${threadId}:${turnId || 'active'}`
     if (notification.method === 'turn/started') {
       this.activeTurnKeys.add(key)
+      this.lastUpstreamReportByTurn.delete(key)
       return
     }
     if (turnId) {
       this.activeTurnKeys.delete(key)
+      this.lastUpstreamReportByTurn.delete(key)
       return
     }
     for (const activeKey of this.activeTurnKeys) {
-      if (activeKey.startsWith(`${threadId}:`)) this.activeTurnKeys.delete(activeKey)
+      if (activeKey.startsWith(`${threadId}:`)) {
+        this.activeTurnKeys.delete(activeKey)
+        this.lastUpstreamReportByTurn.delete(activeKey)
+      }
     }
+  }
+
+  private handleUpstreamTraceReport(report: UpstreamResponseModel): void {
+    // Codex's TRACE SSE lines do not include a thread or turn identifier.
+    // Never attribute an upstream response when more than one turn is active.
+    const active = uniqueTraceTurn(this.activeTurnKeys)
+    if (!active) return
+    const { threadId, turnId } = active
+    const key = `${threadId}:${turnId}`
+    const previous = this.lastUpstreamReportByTurn.get(key)
+    if (previous && previous.responseId === report.responseId && previous.model === report.model) return
+    this.lastUpstreamReportByTurn.set(key, report)
+    this.emitNotification({
+      method: 'codexMobile/upstreamModelReported',
+      params: { threadId, turnId, model: report.model, responseId: report.responseId, phase: report.phase },
+    })
   }
 
   private extractThreadIdFromParams(params: unknown): string {

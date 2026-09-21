@@ -633,6 +633,46 @@ describe('startup request deduplication', () => {
 })
 
 describe('upstream model reroute notifications', () => {
+  it('shows only response.model from the matching turn and counts distinct responses', () => {
+    installTestWindow()
+    gatewayMocks.setThreadUnreadState.mockResolvedValue(undefined)
+    let notify: ((notification: { method: string; params: unknown; atIso: string }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notify = handler
+      return vi.fn()
+    })
+    const state = useDesktopState()
+    state.startPolling()
+    const send = (method: string, params: unknown) => notify!({ method, params, atIso: '2026-09-21T00:00:00Z' })
+    const report = (threadId: string, turnId: string, model: string, responseId: string, phase = 'created') =>
+      send('codexMobile/upstreamModelReported', { threadId, turnId, model, responseId, phase })
+
+    send('turn/started', { threadId: 'thread-a', turn: { id: 'turn-1' } })
+    report('thread-b', 'turn-1', 'other-thread-model', 'resp_other')
+    report('thread-a', 'old-turn', 'old-model', 'resp_old')
+    expect(state.upstreamModelByThreadId.value['thread-a']).toBeUndefined()
+    report('thread-a', 'turn-1', 'gpt-5.6-terra', 'resp_1')
+    expect(state.upstreamModelByThreadId.value['thread-a']).toMatchObject({
+      model: 'gpt-5.6-terra', turnId: 'turn-1', responseCount: 1,
+    })
+    report('thread-a', 'turn-1', 'gpt-5.6-terra', 'resp_1', 'completed')
+    expect(state.upstreamModelByThreadId.value['thread-a']?.responseCount).toBe(1)
+    report('thread-a', 'turn-1', 'gpt-5.6-sol', 'resp_2')
+    expect(state.upstreamModelByThreadId.value['thread-a']).toMatchObject({
+      model: 'gpt-5.6-sol', responseCount: 2,
+    })
+    send('turn/completed', { threadId: 'thread-a', turn: { id: 'turn-1', status: 'completed' } })
+    expect(state.upstreamModelByThreadId.value['thread-a']?.model).toBe('gpt-5.6-sol')
+    send('turn/started', { threadId: 'thread-a', turn: { id: 'turn-2' } })
+    expect(state.upstreamModelByThreadId.value['thread-a']).toBeUndefined()
+    report('thread-a', 'turn-1', 'stale-model', 'resp_3')
+    expect(state.upstreamModelByThreadId.value['thread-a']).toBeUndefined()
+    report('thread-a', 'turn-2', 'gpt-5.6-terra', 'resp_4')
+    send('ready', { ok: true })
+    expect(state.upstreamModelByThreadId.value['thread-a']).toBeUndefined()
+    expect(gatewayMocks.startThreadTurn).not.toHaveBeenCalled()
+  })
+
   it('keeps only explicit per-turn reports and never sends another model request', () => {
     installTestWindow()
     gatewayMocks.setThreadUnreadState.mockResolvedValue(undefined)

@@ -1,25 +1,28 @@
 <template>
   <div
     class="model-reroute-status"
-    :class="{ 'is-rerouted': reroute }"
+    :class="{ 'is-rerouted': reroute && !report, 'is-reported': report }"
     role="status"
     aria-live="polite"
-    :title="reroute ? t('Codex app-server reported a model reroute for this turn.') : t('No upstream model has been reported for this turn.')"
+    :title="report ? t('Latest server-declared Responses model attributed when only one turn was active. This does not verify the underlying weights.') : reroute ? t('Codex app-server reported a model reroute; response.model was not captured for this turn.') : t('No upstream response.model has been captured for this turn.')"
   >
     <span>{{ t('Selected') }} <strong>{{ reroute?.fromModel || selectedModel }}</strong></span>
     <span class="model-reroute-separator" aria-hidden="true">·</span>
-    <span v-if="reroute">↪ {{ t('Upstream reported') }} <strong>{{ reroute.toModel }}</strong></span>
-    <span v-else>{{ t('Upstream not reported') }}</span>
+    <span v-if="report">{{ t('Server response.model') }} <strong>{{ report.model }}</strong><span v-if="report.responseCount > 1"> ({{ t('latest of') }} {{ report.responseCount }})</span></span>
+    <span v-else-if="reroute">↪ {{ t('Rerouted to') }} <strong>{{ reroute.toModel }}</strong> ({{ t('response.model not captured') }})</span>
+    <span v-else>{{ t('response.model not captured') }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import type { ModelReroute } from '../../modelReroute'
+import type { UpstreamModelReport } from '../../upstreamModelReport'
 
 defineProps<{
   selectedModel: string
   reroute: ModelReroute | null
+  report: UpstreamModelReport | null
 }>()
 
 const { t } = useUiLanguage()
@@ -43,6 +46,10 @@ const { t } = useUiLanguage()
 
 .model-reroute-status.is-rerouted strong {
   @apply text-amber-800;
+}
+
+.model-reroute-status.is-reported strong {
+  @apply text-emerald-700;
 }
 
 .model-reroute-separator {
