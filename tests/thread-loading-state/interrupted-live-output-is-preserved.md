@@ -10,16 +10,16 @@
 1. Start a response and wait until visible assistant text has streamed into the conversation.
 2. Interrupt the turn through an input-request interruption or the runtime's interrupted-turn path.
 3. Confirm the streamed text remains visible instead of disappearing after the thread refreshes.
-4. Confirm the notice reads `任务在等待输入时中断，已保留当前输出。` and offers `继续`.
-5. Click `继续` and confirm a new follow-up turn starts with a request to complete the prior answer without repeating completed operations.
-6. Wait for the new final answer, then refresh the browser.
+4. Confirm a compact neutral status row reads `已中断，输出已保留。` and offers `继续输入`.
+5. Click `继续输入` and confirm no request is sent automatically; the composer receives focus for manual input.
+6. Type and send a follow-up message, then wait for the new final answer and refresh the browser.
 
 #### Expected Results
 
 - Interrupted live text remains visible until matching persisted history replaces it.
-- The interruption is explicit; it is not displayed as a normal completed response.
-- Continue does not resend the original user request or automatically replay commands.
-- After the follow-up final answer persists, refreshing keeps both the preserved output and final answer visible.
+- The interruption is explicit but uses a compact neutral status row instead of a large yellow banner.
+- Continue does not send a canned prompt, resend the original user request, or automatically replay commands.
+- After the manually entered follow-up final answer persists, refreshing keeps both the preserved output and final answer visible.
 
 #### Rollback/Cleanup
 

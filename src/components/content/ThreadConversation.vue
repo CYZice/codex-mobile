@@ -793,14 +793,13 @@
         <div class="message-row">
           <div class="message-stack">
             <article class="interrupted-turn-notice" role="status">
-              <p>任务在等待输入时中断，已保留当前输出。</p>
+              <p>已中断，输出已保留。</p>
               <button
                 type="button"
                 class="interrupted-turn-continue"
-                :disabled="isContinuingInterruptedTurn"
                 @click="emit('continueInterruptedTurn')"
               >
-                {{ isContinuingInterruptedTurn ? '继续中…' : '继续' }}
+                继续输入
               </button>
             </article>
           </div>
@@ -1414,7 +1413,6 @@ const props = defineProps<{
   isTurnInProgress?: boolean
   isStopPending?: boolean
   interruptedTurnId?: string
-  isContinuingInterruptedTurn?: boolean
   isLoading: boolean
   activeThreadId: string
   cwd: string
@@ -4772,15 +4770,19 @@ onBeforeUnmount(() => {
 }
 
 .interrupted-turn-notice {
-  @apply flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950;
+  @apply mx-auto flex items-center gap-2 px-2 py-1 text-xs text-zinc-500;
 }
 
 :global(.dark) .interrupted-turn-notice {
-  @apply border-amber-800 bg-amber-950/40 text-amber-100;
+  @apply text-zinc-400;
 }
 
 .interrupted-turn-continue {
-  @apply shrink-0 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60;
+  @apply shrink-0 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs font-medium text-zinc-600 underline-offset-2 hover:bg-zinc-100 hover:underline focus:outline-none focus:ring-2 focus:ring-zinc-300;
+}
+
+:global(.dark) .interrupted-turn-continue {
+  @apply text-zinc-300 hover:bg-zinc-800 focus:ring-zinc-600;
 }
 
 .message-row {

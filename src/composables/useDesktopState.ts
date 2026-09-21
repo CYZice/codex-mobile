@@ -1555,6 +1555,7 @@ export function useDesktopState() {
   let hasReceivedNotificationReady = false
   let eventSyncTimer: number | null = null
   let rateLimitRefreshTimer: number | null = null
+  let threadStatusPollTimer: number | null = null
   const delayedTurnSyncTimerByThreadId = new Map<string, number>()
   let loadThreadsPromise: Promise<void> | null = null
   const loadMessagePromiseByThreadId = new Map<string, Promise<void>>()
@@ -2802,6 +2803,10 @@ export function useDesktopState() {
     if (interruptedTurnIdByThreadId.value[threadId]) {
       interruptedTurnIdByThreadId.value = omitKey(interruptedTurnIdByThreadId.value, threadId)
     }
+  }
+
+  function clearInterruptedTurnNotice(threadId: string): void {
+    clearInterruptedTurnState(threadId)
   }
 
   function appendLiveSteerMessage(
@@ -5972,7 +5977,7 @@ export function useDesktopState() {
         (shouldRefreshThreads && loadedMessagesByThreadId.value[activeThreadId] !== true)
 
       if (shouldRefreshActiveThread) {
-        await loadMessages(activeThreadId, { silent: true })
+        await loadMessages(activeThreadId, { silent: true, force: isActiveDirty })
       }
     } catch {
       // Keep UI stable on transient event sync failures.
@@ -6032,6 +6037,15 @@ export function useDesktopState() {
       applyRealtimeUpdates(notification)
       queueEventDrivenSync(notification)
     })
+
+    if (typeof window.setInterval === 'function') {
+      threadStatusPollTimer = window.setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+        const threadId = selectedThreadId.value
+        if (!threadId || inProgressById.value[threadId] !== true) return
+        void syncThreadStatus()
+      }, 5000)
+    }
   }
 
   async function loadPendingServerRequestsFromBridge(): Promise<void> {
@@ -6077,6 +6091,10 @@ export function useDesktopState() {
     if (rateLimitRefreshTimer !== null && typeof window !== 'undefined') {
       window.clearTimeout(rateLimitRefreshTimer)
       rateLimitRefreshTimer = null
+    }
+    if (threadStatusPollTimer !== null && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
+      window.clearInterval(threadStatusPollTimer)
+      threadStatusPollTimer = null
     }
     if (threadListBackgroundTimer !== null && typeof window !== 'undefined') {
       window.clearTimeout(threadListBackgroundTimer)
@@ -6219,6 +6237,7 @@ export function useDesktopState() {
     selectThread,
     loadMessages,
     refreshSelectedThreadMessages,
+    clearInterruptedTurnNotice,
     loadOlderMessages,
     ensureThreadMessagesLoaded,
     setThreadTerminalOpen,

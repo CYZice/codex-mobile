@@ -946,16 +946,6 @@
                   <template v-else>
                     <div class="thread-workspace">
                       <div class="content-thread">
-                  <button
-                    class="thread-message-refresh"
-                    type="button"
-                    :disabled="isRefreshingThreadMessages"
-                    :aria-label="t('Refresh messages')"
-                    :title="t('Refresh messages')"
-                    @click="onRefreshSelectedThreadMessages"
-                  >
-                    <IconTablerRefresh :class="{ 'is-spinning': isRefreshingThreadMessages }" />
-                  </button>
                   <ThreadConversation ref="threadConversationRef" :messages="filteredMessages" :is-loading="isLoadingMessages"
                     :active-thread-id="composerThreadContextId" :cwd="composerCwd"
                     :live-overlay="liveOverlay"
@@ -963,7 +953,6 @@
                     :is-turn-in-progress="isSelectedThreadInProgress"
                     :is-stop-pending="isSelectedThreadInterruptPending"
                     :interrupted-turn-id="selectedInterruptedTurnId"
-                    :is-continuing-interrupted-turn="isContinuingInterruptedTurn"
                     :has-more-persisted-above="hasMoreOlderMessages"
                     :is-loading-persisted-above="isLoadingOlderMessages"
                     :load-earlier-messages="loadOlderMessages"
@@ -1219,7 +1208,6 @@ import IconTablerSearch from './components/icons/IconTablerSearch.vue'
 import IconTablerBell from './components/icons/IconTablerBell.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
-import IconTablerRefresh from './components/icons/IconTablerRefresh.vue'
 import IconTablerLayoutSidebar from './components/icons/IconTablerLayoutSidebar.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
 import { useDesktopState } from './composables/useDesktopState'
@@ -1491,6 +1479,7 @@ const {
   refreshSkills,
   selectThread,
   refreshSelectedThreadMessages,
+  clearInterruptedTurnNotice,
   ensureThreadMessagesLoaded,
   loadOlderMessages,
   setThreadTerminalOpen,
@@ -1610,8 +1599,8 @@ const projectZipExportStatus = ref<{ phase: 'idle' | 'exporting' | 'ready'; load
   error: '',
 })
 const contentActionFeedback = ref<{ text: string; kind: 'success' | 'error' } | null>(null)
-const isRefreshingThreadMessages = ref(false)
-const isContinuingInterruptedTurn = ref(false)
+const isForegroundThreadRefreshInFlight = ref(false)
+let lastForegroundThreadRefreshAt = 0
 let contentActionFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: string; message: string }>({
   phase: 'idle',
@@ -3248,14 +3237,11 @@ async function onForkThreadFromMessage(payload: {
   }
 }
 
-async function onContinueInterruptedTurn(): Promise<void> {
-  if (!selectedThreadId.value || isSelectedThreadInProgress.value || isContinuingInterruptedTurn.value) return
-  isContinuingInterruptedTurn.value = true
-  try {
-    await sendMessageToSelectedThread('请基于刚才已显示但任务中断前的输出继续并完成回答；不要重复已经完成的操作。', [], [], 'steer', [])
-  } finally {
-    isContinuingInterruptedTurn.value = false
-  }
+function onContinueInterruptedTurn(): void {
+  const threadId = selectedThreadId.value
+  if (!threadId) return
+  clearInterruptedTurnNotice(threadId)
+  threadComposerRef.value?.focusInput()
 }
 
 function setSidebarCollapsed(nextValue: boolean): void {
@@ -3558,12 +3544,14 @@ function onDocumentVisibilityChange(): void {
   }
 
   startCcSwitchStatusPolling()
+  void refreshSelectedThreadMessagesOnForeground()
   if (!isMobile.value) return
   maybeSyncAfterMobileResume()
 }
 
 function onWindowPageShow(event: PageTransitionEvent): void {
   if (!event.persisted) return
+  void refreshSelectedThreadMessagesOnForeground()
   maybeSyncAfterMobileResume()
 }
 
@@ -3573,7 +3561,25 @@ function onWindowFocus(): void {
     void refreshDefaultProjectName()
   }
   void loadCcSwitchStatus({ silent: true })
+  void refreshSelectedThreadMessagesOnForeground()
   maybeSyncAfterMobileResume()
+}
+
+async function refreshSelectedThreadMessagesOnForeground(): Promise<void> {
+  if (route.name !== 'thread' || !selectedThreadId.value) return
+  if (isForegroundThreadRefreshInFlight.value) return
+  const now = Date.now()
+  if (now - lastForegroundThreadRefreshAt < 1500) return
+
+  lastForegroundThreadRefreshAt = now
+  isForegroundThreadRefreshInFlight.value = true
+  try {
+    await refreshSelectedThreadMessages()
+  } catch {
+    showContentActionFeedback('同步失败', 'error')
+  } finally {
+    isForegroundThreadRefreshInFlight.value = false
+  }
 }
 
 function maybeSyncAfterMobileResume(): void {
@@ -3597,10 +3603,11 @@ async function syncAfterMobileResume(): Promise<void> {
 
   try {
     await refreshAll({
-      includeSelectedThreadMessages: true,
+      includeSelectedThreadMessages: false,
       awaitAncillaryRefreshes: true,
     })
     await syncThreadSelectionWithRoute()
+    await refreshSelectedThreadMessages().catch(() => {})
   } finally {
     mobileResumeSyncInProgress.value = false
   }
@@ -4517,26 +4524,6 @@ function showContentActionFeedback(text: string, kind: 'success' | 'error' = 'su
     contentActionFeedback.value = null
     contentActionFeedbackTimer = null
   }, 2600)
-}
-
-async function onRefreshSelectedThreadMessages(): Promise<void> {
-  if (isRefreshingThreadMessages.value || !selectedThreadId.value) return
-  isRefreshingThreadMessages.value = true
-  try {
-    const result = await refreshSelectedThreadMessages()
-    if (result.updated) {
-      showContentActionFeedback(t('Messages synced from server. The page had fallen behind.'))
-    } else if (result.inProgress) {
-      showContentActionFeedback(t('Server still reports this turn as running.'))
-    } else {
-      showContentActionFeedback(t('Messages are already up to date.'))
-    }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : t('Failed to refresh messages')
-    showContentActionFeedback(`${t('Failed to refresh messages')}: ${detail}`, 'error')
-  } finally {
-    isRefreshingThreadMessages.value = false
-  }
 }
 
 function buildThreadMarkdown(): string {
@@ -5615,24 +5602,6 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
   }
 }
 
-.thread-message-refresh {
-  @apply absolute right-3 top-2 z-20 grid h-8 w-8 place-items-center rounded-full border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100;
-}
-
-.thread-message-refresh svg {
-  @apply h-4 w-4;
-}
-
-.thread-message-refresh .is-spinning {
-  animation: thread-message-refresh-spin 0.8s linear infinite;
-}
-
-@keyframes thread-message-refresh-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .composer-with-queue {
   @apply w-full shrink-0 px-2 sm:px-6 flex flex-col gap-2;
 }
@@ -6606,7 +6575,7 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 }
 
 .content-action-feedback {
-  @apply mx-2 mt-1 w-fit rounded-full border px-3 py-1 text-xs font-medium shadow-sm sm:mx-6;
+  @apply mx-2 mt-1 max-w-[min(24rem,calc(100%-1rem))] truncate rounded-full border px-2 py-0.5 text-[11px] font-medium sm:mx-6;
 }
 
 .content-action-feedback[data-kind='success'] {

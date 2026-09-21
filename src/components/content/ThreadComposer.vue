@@ -627,6 +627,7 @@ export type ComposerCommandPayload = {
 export type ThreadComposerExposed = {
   hydrateDraft: (payload: ComposerDraftPayload) => void
   appendTextToDraft: (text: string) => void
+  focusInput: () => void
   hasUnsavedDraft: () => boolean
   completeSubmission: () => void
 }
@@ -2165,6 +2166,10 @@ function hydrateDraft(payload: ComposerDraftPayload): void {
   })
 }
 
+function focusInput(): void {
+  void nextTick(() => inputRef.value?.focus())
+}
+
 function appendTextToDraft(text: string): void {
   const nextText = text.trim()
   if (!nextText) return
@@ -2240,6 +2245,7 @@ onMounted(() => {
 defineExpose<ThreadComposerExposed>({
   hydrateDraft,
   appendTextToDraft,
+  focusInput,
   hasUnsavedDraft: () => hasUnsavedDraft.value,
   completeSubmission,
 })
