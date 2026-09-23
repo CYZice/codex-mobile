@@ -15,8 +15,10 @@ $ManagedPackagesDir = Join-Path $ManagedRoot 'packages'
 $ManifestPath = Join-Path $ManagedRoot 'component-manifest.json'
 $ComponentPackagePath = Join-Path $ComponentDir 'package.json'
 $ComponentLockPath = Join-Path $ComponentDir 'package-lock.json'
+$InstalledModulePath = Join-Path $ComponentDir 'node_modules\codexapp'
 $InstalledPackagePath = Join-Path $ComponentDir 'node_modules\codexapp\package.json'
 $BackupDir = Join-Path $ManagedPackagesDir "deploy-backups\mobile-$Timestamp"
+$InstalledModuleBackupPath = Join-Path $BackupDir 'codexapp'
 $LogPath = Join-Path $ManagedRoot "logs\mobile-deploy-$Timestamp.log"
 $StatePath = Join-Path $ManagedRoot 'data\desktop\last-mobile-deploy.json'
 $ManagedPackagePath = Join-Path $ManagedPackagesDir "codexapp-$ExpectedVersion.tgz"
@@ -109,14 +111,19 @@ function Update-ManifestVersion([string]$Version) {
   $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $ManifestPath -Encoding utf8
 }
 
-function Restart-ManagedMobile() {
-  $oldProcessId = Get-MobileListenerPid
-  Assert-MobileProcess $oldProcessId
-  Write-DeployLog "Stopping managed Codex Mobile PID $oldProcessId."
-  Stop-Process -Id $oldProcessId -Force -ErrorAction Stop
-  $newProcessId = Wait-ForHealthyMobile -PreviousPid $oldProcessId
-  Write-DeployLog "Codex Mobile restarted healthy as PID $newProcessId."
-  return $newProcessId
+function Stop-ManagedMobile() {
+  $processId = Get-MobileListenerPid
+  Assert-MobileProcess $processId
+  Write-DeployLog "Stopping managed Codex Mobile PID $processId."
+  Stop-Process -Id $processId -Force -ErrorAction Stop
+  $deadline = (Get-Date).AddSeconds(10)
+  do {
+    if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
+      return $processId
+    }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+  throw "Codex Mobile PID $processId did not exit within 10 seconds."
 }
 
 foreach ($requiredPath in @($ComponentDir, $ManagedPackagesDir, $ManifestPath, $ComponentPackagePath, $InstalledPackagePath)) {
@@ -143,6 +150,10 @@ if ($DryRun) {
   exit 0
 }
 
+$mobileWasStopped = $false
+$installedModuleWasMoved = $false
+$stoppedProcessId = 0
+
 try {
   Write-DeployState 'backing-up'
   New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
@@ -152,8 +163,15 @@ try {
   }
   Copy-Item -LiteralPath $ManifestPath -Destination (Join-Path $BackupDir 'component-manifest.json') -Force
 
-  Write-DeployState 'installing'
   Copy-Item -LiteralPath $PackagePath -Destination $ManagedPackagePath -Force
+
+  Write-DeployState 'stopping'
+  $stoppedProcessId = Stop-ManagedMobile
+  $mobileWasStopped = $true
+  Move-Item -LiteralPath $InstalledModulePath -Destination $InstalledModuleBackupPath
+  $installedModuleWasMoved = $true
+
+  Write-DeployState 'installing'
   Install-ManagedPackage $ManagedPackagePath
   $installedVersion = [string](Get-Content -Raw -LiteralPath $InstalledPackagePath | ConvertFrom-Json).version
   if ($installedVersion -ne $ExpectedVersion) {
@@ -162,7 +180,8 @@ try {
   Update-ManifestVersion $ExpectedVersion
 
   Write-DeployState 'restarting'
-  Restart-ManagedMobile | Out-Null
+  $newProcessId = Wait-ForHealthyMobile -PreviousPid $stoppedProcessId -TimeoutSeconds 60
+  Write-DeployLog "Codex Mobile restarted healthy as PID $newProcessId."
 
   $finalVersion = [string](Get-Content -Raw -LiteralPath $InstalledPackagePath | ConvertFrom-Json).version
   if ($finalVersion -ne $ExpectedVersion) {
@@ -175,27 +194,38 @@ try {
   Write-DeployLog "Deployment failed: $failure"
   Write-DeployState 'rolling-back' '' $failure
   try {
+    if ($installedModuleWasMoved) {
+      $rollbackListenerPid = Get-MobileListenerPid
+      if ($rollbackListenerPid -gt 0) {
+        try {
+          Assert-MobileProcess $rollbackListenerPid
+          Write-DeployLog "Stopping replacement Codex Mobile PID $rollbackListenerPid for rollback."
+          Stop-Process -Id $rollbackListenerPid -Force -ErrorAction Stop
+          Start-Sleep -Milliseconds 500
+        } catch {
+          Write-DeployLog "Rollback listener stop warning: $($_.Exception.Message)"
+        }
+      }
+      if (Test-Path -LiteralPath $InstalledModulePath) {
+        Remove-Item -LiteralPath $InstalledModulePath -Recurse -Force
+      }
+      if (-not (Test-Path -LiteralPath $InstalledModuleBackupPath)) {
+        throw "Rollback module backup is missing: $InstalledModuleBackupPath"
+      }
+      Move-Item -LiteralPath $InstalledModuleBackupPath -Destination $InstalledModulePath
+    }
+
     Copy-Item -LiteralPath (Join-Path $BackupDir 'package.json') -Destination $ComponentPackagePath -Force
     $backupLock = Join-Path $BackupDir 'package-lock.json'
     if (Test-Path -LiteralPath $backupLock) {
       Copy-Item -LiteralPath $backupLock -Destination $ComponentLockPath -Force
     }
     Copy-Item -LiteralPath (Join-Path $BackupDir 'component-manifest.json') -Destination $ManifestPath -Force
-    Push-Location $ComponentDir
-    try {
-      $previousPreference = $ErrorActionPreference
-      try {
-        $ErrorActionPreference = 'Continue'
-        & npm.cmd install *>> $LogPath
-        $rollbackExitCode = $LASTEXITCODE
-      } finally {
-        $ErrorActionPreference = $previousPreference
-      }
-      if ($rollbackExitCode -ne 0) { throw "Rollback npm install failed with exit code $rollbackExitCode." }
-    } finally {
-      Pop-Location
+
+    if ($mobileWasStopped) {
+      $rollbackProcessId = Wait-ForHealthyMobile -PreviousPid $stoppedProcessId -TimeoutSeconds 60
+      Write-DeployLog "Rollback Codex Mobile restarted healthy as PID $rollbackProcessId."
     }
-    Restart-ManagedMobile | Out-Null
     Write-DeployLog "Rollback succeeded; restored Codex Mobile $PreviousVersion."
     Write-DeployState 'failed' 'rolled-back' $failure
   } catch {
