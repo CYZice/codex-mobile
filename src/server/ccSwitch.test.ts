@@ -363,6 +363,13 @@ describe('CC Switch status and switching', () => {
       apply_patch_tool_type: 'freeform',
     })
     expect(reloadRuntime).toHaveBeenCalledTimes(1)
+
+    const configAfterRepair = await readFile(fixture.configPath, 'utf8')
+    const catalogAfterRepair = await readFile(catalogPath, 'utf8')
+    await switchCcSwitchProvider('deepseek-current', { paths: fixture.paths, reloadRuntime })
+    expect(await readFile(fixture.configPath, 'utf8')).toBe(configAfterRepair)
+    expect(await readFile(catalogPath, 'utf8')).toBe(catalogAfterRepair)
+    expect(reloadRuntime).toHaveBeenCalledTimes(1)
   })
 
   it('switches config and current markers without changing auth.json', async () => {

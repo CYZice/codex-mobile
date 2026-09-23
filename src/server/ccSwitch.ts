@@ -987,10 +987,26 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
     )
   }
 
-  const projectedConfig = projectCcSwitchCodexConfig(provider, state)
-  const catalogRepair = await prepareThirdPartyModelCatalogRepair(provider, projectedConfig, state.paths)
-  const nextConfig = catalogRepair.config
   const previousConfig = await readOptionalText(state.paths.configPath)
+  const projectedConfig = projectCcSwitchCodexConfig(provider, state)
+  let repairBaseConfig = projectedConfig
+  if (state.currentProviderId === providerId && previousConfig) {
+    try {
+      const currentParsed = parseConfig(previousConfig)
+      const projectedParsed = parseConfig(projectedConfig)
+      const currentModel = readString(currentParsed.model)
+      const projectedModel = readString(projectedParsed.model)
+      const currentProvider = readString(currentParsed.model_provider)
+      const projectedProvider = readString(projectedParsed.model_provider)
+      if (currentModel === projectedModel && currentProvider === projectedProvider) {
+        repairBaseConfig = previousConfig
+      }
+    } catch {
+      // A malformed/stale current config is repaired from the provider projection.
+    }
+  }
+  const catalogRepair = await prepareThirdPartyModelCatalogRepair(provider, repairBaseConfig, state.paths)
+  const nextConfig = catalogRepair.config
   if (state.currentProviderId === providerId && !catalogRepair.changed && previousConfig === nextConfig) {
     return await readCcSwitchStatus(state.paths)
   }
