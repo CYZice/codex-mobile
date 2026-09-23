@@ -57,5 +57,9 @@ export function toProjectName(value: string): string {
 export function isProjectlessChatPath(value: string): boolean {
   const normalized = normalizePathForUi(value).replace(/[\\/]+/gu, '/')
   if (!normalized) return false
-  return /(?:^|\/)Documents\/Codex\/\d{4}-\d{2}-\d{2}\/[^/]+$/u.test(normalized)
+  return /(?:^|\/)Documents\/Codex\/\d{4}-\d{2}-\d{2}\/[^/]+$/iu.test(normalized)
+}
+
+export function isProjectlessThreadCwd(value: string): boolean {
+  return !value.trim() || isProjectlessChatPath(value)
 }

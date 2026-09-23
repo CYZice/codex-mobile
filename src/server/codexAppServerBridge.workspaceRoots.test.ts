@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -327,6 +327,55 @@ describe('workspace roots Desktop state compatibility', () => {
         { cwd: completedRoot, status: { type: 'completed' } },
       ])).toBe(true)
       expect((await readWorkspaceRootsState()).order).toEqual([runningRoot])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('does not register generated chat directories as projects while recovering running threads', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-projectless-recovery-'))
+    const chatCwd = join(codexHome, 'Documents', 'Codex', '2026-09-23', 'new-chat')
+    const projectCwd = join(codexHome, 'real-project')
+    process.env.CODEX_HOME = codexHome
+    try {
+      await mkdir(chatCwd, { recursive: true })
+      await mkdir(projectCwd)
+      expect(await recoverWorkspaceRootsForRunningThreads([
+        { cwd: chatCwd, status: { type: 'inProgress' } },
+        { cwd: projectCwd, status: { type: 'inProgress' } },
+      ])).toBe(true)
+      expect((await readWorkspaceRootsState()).order).toEqual([projectCwd])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('excludes legacy generated chat roots without deleting their directory or chat history', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-projectless-legacy-'))
+    const chatCwd = join(codexHome, 'Documents', 'Codex', '2026-09-23', 'new-chat')
+    const projectCwd = join(codexHome, 'real-project')
+    process.env.CODEX_HOME = codexHome
+    try {
+      await mkdir(chatCwd, { recursive: true })
+      await mkdir(projectCwd)
+      const statePath = join(codexHome, '.codex-global-state.json')
+      await writeFile(statePath, JSON.stringify({
+        'electron-saved-workspace-roots': [chatCwd, projectCwd],
+        'active-workspace-roots': [chatCwd],
+        'project-order': ['local-chat', chatCwd, projectCwd],
+        'local-projects': {
+          'local-chat': { id: 'local-chat', name: 'new-chat', rootPaths: [chatCwd] },
+        },
+      }))
+      const filtered = await readWorkspaceRootsState()
+      expect(filtered.order).toEqual([projectCwd])
+      expect(filtered.projectOrder).toEqual([projectCwd])
+      expect(filtered.active).toEqual([])
+      await writeWorkspaceRootsState(filtered)
+      expect((await readWorkspaceRootsState()).order).toEqual([projectCwd])
+      const saved = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, unknown>
+      expect(JSON.stringify(saved['local-projects'])).not.toContain(chatCwd)
+      expect((await stat(chatCwd)).isDirectory()).toBe(true)
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }

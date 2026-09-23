@@ -5959,6 +5959,19 @@ function mergeLocalProjectsIntoWorkspaceRootsState(
   }
 }
 
+// Codex's generated chat working directories are not Desktop projects. This is
+// a presentation/registration cleanup only: never remove the directories or chats.
+function withoutGeneratedChatProjectRoots(state: WorkspaceRootsState): WorkspaceRootsState {
+  const keepRoot = (root: string): boolean => !isProjectlessChatPath(root)
+  return {
+    ...state,
+    order: state.order.filter(keepRoot),
+    active: state.active.filter(keepRoot),
+    projectOrder: state.projectOrder.filter(keepRoot),
+    labels: Object.fromEntries(Object.entries(state.labels).filter(([root]) => keepRoot(root))),
+  }
+}
+
 function reconcileLocalProjectsForWorkspaceState(
   existingValue: unknown,
   existingProjects: LocalProjectState[],
@@ -6154,11 +6167,11 @@ export async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
     }),
     canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects'])),
   ])
-  return mergeLocalProjectsIntoWorkspaceRootsState(state, localProjects)
+  return withoutGeneratedChatProjectRoots(mergeLocalProjectsIntoWorkspaceRootsState(state, localProjects))
 }
 
 export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): Promise<void> {
-  const state = await canonicalizeWorkspaceRootsState(nextState)
+  const state = withoutGeneratedChatProjectRoots(await canonicalizeWorkspaceRootsState(nextState))
   await withCodexGlobalStateUpdate(async (payload) => {
     const existingProjects = await canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects']))
     const reconciled = reconcileLocalProjectsForWorkspaceState(
@@ -6276,7 +6289,7 @@ export async function recoverWorkspaceRootsForRunningThreads(threadSummaries: un
   const candidates = Array.from(new Set(threadSummaries
     .filter(isRunningThreadSummary)
     .map((summary) => readNonEmptyString(asRecord(summary)?.cwd))
-    .filter((cwd) => cwd && isAbsolute(cwd))))
+    .filter((cwd) => cwd && isAbsolute(cwd) && !isProjectlessChatPath(cwd))))
   const existingDirectories = (await Promise.all(candidates.map(async (cwd) => {
     try {
       return (await stat(cwd)).isDirectory() ? cwd : ''

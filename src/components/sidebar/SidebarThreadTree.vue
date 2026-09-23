@@ -231,7 +231,7 @@
 
       <ul v-else-if="isChronologicalView" class="thread-list thread-list-global">
       <li
-        v-for="thread in globalThreads"
+        v-for="thread in chronologicalProjectThreads"
         :key="thread.id"
         class="thread-row-item"
         :data-menu-open="isThreadMenuOpen(thread.id) ? 'true' : 'false'"
@@ -919,7 +919,7 @@ import IconTablerArchive from '../icons/IconTablerArchive.vue'
 import IconTablerCopy from '../icons/IconTablerCopy.vue'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
-import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPath } from '../../pathUtils.js'
+import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPath, isProjectlessThreadCwd } from '../../pathUtils.js'
 import ComposerDropdown from '../content/ComposerDropdown.vue'
 import SidebarMenuRow from './SidebarMenuRow.vue'
 import { reconcilePinnedThreadIds } from './pinnedThreadUtils'
@@ -1278,15 +1278,20 @@ function threadMatchesSearch(thread: UiThread): boolean {
 
 const filteredGroups = computed<UiProjectGroup[]>(() => {
   return props.groups.flatMap((group) => {
-    const threads = group.threads.filter((thread) => !isProjectlessChatPath(thread.cwd) && threadMatchesSearch(thread))
+    const threads = group.threads.filter((thread) => !isChatThread(thread) && threadMatchesSearch(thread))
     if (threads.length > 0) return [{ ...group, threads }]
     // Keep registered workspace placeholders so their "new thread" action remains available,
     // but drop orphaned empty groups that cannot resolve to a workspace root.
-    return !isSearchActive.value && group.threads.length === 0 && Boolean(props.projectCwdByName[group.projectName]?.trim())
+    const root = props.projectCwdByName[group.projectName]?.trim() || group.projectName
+    return !isSearchActive.value && group.threads.length === 0 && !isProjectlessChatPath(root) && Boolean(props.projectCwdByName[group.projectName]?.trim())
       ? [{ ...group, threads }]
       : []
   })
 })
+
+function isChatThread(thread: UiThread): boolean {
+  return isProjectlessThreadCwd(thread.cwd)
+}
 
 const isChronologicalView = computed(() => threadViewMode.value === 'chronological')
 
@@ -1308,8 +1313,11 @@ const globalThreads = computed<UiThread[]>(() => {
   })
 })
 
+// The chronological Projects view must not reuse the all-thread feed unfiltered.
+const chronologicalProjectThreads = computed(() => globalThreads.value.filter((thread) => !isChatThread(thread)))
+
 const chatThreads = computed(() => {
-  const rows = globalThreads.value.filter((thread) => isProjectlessChatPath(thread.cwd))
+  const rows = globalThreads.value.filter(isChatThread)
   const timestampKey = chatSortMode.value === 'created' ? 'createdAtIso' : 'updatedAtIso'
   return rows
     .sort((first, second) => {
