@@ -86,7 +86,7 @@ function Wait-ForHealthyMobile([int]$PreviousPid, [int]$TimeoutSeconds = 45) {
 }
 
 function Install-ManagedPackage([string]$TarballPath) {
-  $relativeSpec = [IO.Path]::GetRelativePath($ComponentDir, $TarballPath).Replace('\', '/')
+  $relativeSpec = "../../packages/$(Split-Path -Leaf $TarballPath)"
   Push-Location $ComponentDir
   try {
     $previousPreference = $ErrorActionPreference
