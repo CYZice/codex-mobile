@@ -1,6 +1,5 @@
 param(
-  [string]$DeployRoot = "$env:USERPROFILE\CodexRemote",
-  [string]$TaskName = 'CodexApp Remote',
+  [string]$ManagedRoot = 'D:\DevCodex Desktop',
   [int]$Port = 5900,
   [switch]$SkipTests,
   [switch]$DryRun
@@ -79,8 +78,7 @@ try {
     '-File', $DeployScriptPath,
     '-PackagePath', $PackagePath,
     '-ExpectedVersion', $Version,
-    '-DeployRoot', $DeployRoot,
-    '-TaskName', $TaskName,
+    '-ManagedRoot', $ManagedRoot,
     '-Port', [string]$Port
   )
   if ($DryRun) {
