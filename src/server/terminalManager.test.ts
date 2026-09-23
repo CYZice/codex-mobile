@@ -108,6 +108,28 @@ describe('ThreadTerminalManager edge cases', () => {
     expect(() => manager.attach({ threadId: 'thread-1', cwd: '/repo' })).toThrow('Integrated terminal is unavailable')
   })
 
+  it('uses PowerShell instead of cmd as the Windows default shell', () => {
+    const ptys: FakePty[] = []
+    const spawnCalls: Array<{ file: string }> = []
+    const manager = new ThreadTerminalManager({
+      spawn: (file) => {
+        const pty = new FakePty()
+        ptys.push(pty)
+        spawnCalls.push({ file })
+        return pty
+      },
+      exists: (value) => value === 'C:\\repo' || value === 'C:\\Users\\tester',
+      homeDir: () => 'C:\\Users\\tester',
+      platform: 'win32',
+      ensureSpawnHelperExecutable: () => {},
+    })
+
+    manager.attach({ threadId: 'thread-1', cwd: 'C:\\repo' })
+
+    expect(spawnCalls[0]?.file).toBe('powershell.exe')
+    expect(ptys).toHaveLength(1)
+  })
+
   it('falls back from invalid cwd to home, then process cwd', () => {
     const homeHarness = createHarness({
       exists: (value) => value === '/home/tester',

@@ -336,7 +336,7 @@ export class ThreadTerminalManager {
   private resolveShell(): string {
     if (this.shell) return this.shell
     if (this.platform === 'win32') {
-      return process.env.COMSPEC || 'cmd.exe'
+      return process.env.PWSH || 'powershell.exe'
     }
     return process.env.SHELL || '/bin/zsh'
   }
