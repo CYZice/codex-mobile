@@ -57,7 +57,9 @@
     "preview": "vite preview",
     "prepublishOnly": "pnpm run build",
     "profile:browser": "node scripts/profile-browser-runtime.cjs",
-    "profile:thread": "PROFILE_ROUTE='#/thread/019da7c0-4e12-7a91-837c-f7c11cc8ab6c' node scripts/profile-browser-runtime.cjs"
+    "profile:thread": "PROFILE_ROUTE='#/thread/019da7c0-4e12-7a91-837c-f7c11cc8ab6c' node scripts/profile-browser-runtime.cjs",
+    "deploy:local": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-pack-deploy.ps1",
+    "deploy:local:dry-run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-pack-deploy.ps1 -DryRun"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
