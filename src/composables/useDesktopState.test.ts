@@ -553,7 +553,7 @@ describe('startup request deduplication', () => {
       await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
 
       expect(gatewayMocks.getSkillsList).toHaveBeenCalledTimes(1)
-      expect(gatewayMocks.getSkillsList).toHaveBeenCalledWith(['/tmp/project'])
+      expect(gatewayMocks.getSkillsList).toHaveBeenCalledWith(['/tmp/project'], { forceReload: false })
     } finally {
       nowSpy.mockRestore()
     }
