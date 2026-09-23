@@ -349,8 +349,11 @@
                   </ol>
                   <div v-else class="plan-card-markdown" v-html="renderMarkdownBlocksAsHtml(message.text)" />
                   <div v-if="showPlanActions(message)" class="plan-card-actions">
-                    <button type="button" class="plan-card-implement-button" @click="implementPlan(message)">
-                      执行计划
+                    <button type="button" class="plan-card-implement-button" @click="implementPlan(message, false)">
+                      执行计划（保留上下文）
+                    </button>
+                    <button type="button" class="plan-card-implement-button" @click="implementPlan(message, true)">
+                      在新对话中执行（清空上下文）
                     </button>
                     <form class="plan-revision-form" @submit.prevent="revisePlan(message)">
                       <input
@@ -1126,11 +1129,14 @@ function showPlanActions(message: UiMessage): boolean {
   ))
 }
 
-function implementPlan(message: UiMessage): void {
+function implementPlan(message: UiMessage, clearContext: boolean): void {
   const turnId = message.turnId?.trim() ?? ''
   if (!turnId) return
+  const plan = readPlanData(message)
+  const planText = message.text.trim() || (plan ? buildPlanMessageText(plan.explanation, plan.steps) : '')
+  if (clearContext && !planText) return
   planRevisionDraft.value = ''
-  emit('implementPlan', { turnId })
+  emit('implementPlan', { turnId, clearContext, planText })
 }
 
 function revisePlan(message: UiMessage): void {
@@ -1464,7 +1470,7 @@ const emit = defineEmits<{
     text: string
     onComplete: (success: boolean, errorMessage?: string) => void
   }]
-  implementPlan: [payload: { turnId: string }]
+  implementPlan: [payload: { turnId: string; clearContext: boolean; planText: string }]
   revisePlan: [payload: { turnId: string; text: string }]
   respondServerRequest: [payload: { id: number; result?: unknown; error?: { code?: number; message: string } }]
   continueInterruptedTurn: []

@@ -7,9 +7,25 @@ describe('composer commands', () => {
     expect(parseComposerCommand('/PLAN inspect this bug')).toEqual({ name: 'plan', argument: 'inspect this bug' })
   })
 
-  it('only accepts review without arguments', () => {
+  it('accepts semantic review scopes and never sends an unknown review argument as a prompt', () => {
     expect(parseComposerCommand('/review')).toEqual({ name: 'review' })
-    expect(parseComposerCommand('/review staged files')).toBe(null)
+    expect(parseComposerCommand('/review uncommitted')).toEqual({ name: 'review', target: { type: 'uncommittedChanges' } })
+    expect(parseComposerCommand('/review branch origin/main')).toEqual({ name: 'review', target: { type: 'baseBranch', branch: 'origin/main' } })
+    expect(parseComposerCommand('/review commit abcd1234')).toEqual({ name: 'review', target: { type: 'commit', sha: 'abcd1234' } })
+    expect(parseComposerCommand('/review staged files')).toEqual({ name: 'review' })
+  })
+
+  it('recognizes supported action commands without swallowing ordinary prompts', () => {
+    for (const name of ['compact', 'fork', 'status', 'fast'] as const) {
+      expect(parseComposerCommand(`/${name}`)).toEqual({ name })
+      expect(parseComposerCommand(`/${name} something else`)).toBe(null)
+    }
+  })
+
+  it('reads persistent goals without accepting unrelated slash prompts', () => {
+    expect(parseComposerCommand('/goal')).toEqual({ name: 'goal', argument: '' })
+    expect(parseComposerCommand('/GOAL ship the release')).toEqual({ name: 'goal', argument: 'ship the release' })
+    expect(parseComposerCommand('/goal clear')).toEqual({ name: 'goal', argument: 'clear' })
   })
 
   it('does not intercept ordinary slash text', () => {

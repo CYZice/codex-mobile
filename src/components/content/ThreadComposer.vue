@@ -128,6 +128,26 @@
             <span class="thread-composer-slash-command-description">{{ command.description }}</span>
           </button>
         </div>
+        <div v-if="isReviewChoiceOpen" class="thread-composer-review-choices" role="group" aria-label="Review scope">
+          <div class="thread-composer-review-heading">
+            <strong>{{ t('Choose review scope') }}</strong>
+            <button type="button" :aria-label="t('Cancel review')" @click="closeReviewChoices">×</button>
+          </div>
+          <button type="button" class="thread-composer-review-choice" :disabled="isInteractionDisabled || isTurnInProgress" @click="submitReviewTarget({ type: 'uncommittedChanges' })">
+            {{ t('Uncommitted changes') }}
+          </button>
+          <div class="thread-composer-review-choice">
+            <label for="composer-review-branch">{{ t('Compare against branch') }}</label>
+            <input id="composer-review-branch" v-model="reviewBranch" :list="reviewBranchListId" :placeholder="t('Branch name')" autocomplete="off" :disabled="isInteractionDisabled || isTurnInProgress" @keydown.enter.prevent="reviewBranch.trim() && submitReviewTarget({ type: 'baseBranch', branch: reviewBranch })" />
+            <datalist :id="reviewBranchListId"><option v-for="branch in (reviewBranches ?? [])" :key="branch.value" :value="branch.value" /></datalist>
+            <button type="button" :disabled="isInteractionDisabled || isTurnInProgress || !reviewBranch.trim()" @click="submitReviewTarget({ type: 'baseBranch', branch: reviewBranch })">{{ t('Review branch') }}</button>
+          </div>
+          <div class="thread-composer-review-choice">
+            <label for="composer-review-commit">{{ t('Review a commit') }}</label>
+            <input id="composer-review-commit" v-model="reviewCommit" :placeholder="t('Commit SHA')" autocomplete="off" :disabled="isInteractionDisabled || isTurnInProgress" @keydown.enter.prevent="/^[a-f0-9]{7,64}$/i.test(reviewCommit.trim()) && submitReviewTarget({ type: 'commit', sha: reviewCommit })" />
+            <button type="button" :disabled="isInteractionDisabled || isTurnInProgress || !/^[a-f0-9]{7,64}$/i.test(reviewCommit.trim())" @click="submitReviewTarget({ type: 'commit', sha: reviewCommit })">{{ t('Review commit') }}</button>
+          </div>
+        </div>
         <div v-if="isFileMentionOpen && !isAttachMenuOpen" class="thread-composer-file-mentions">
           <template v-if="fileMentionSuggestions.length > 0">
             <button
@@ -539,7 +559,7 @@ import { useDictation } from '../../composables/useDictation'
 import { useMobile } from '../../composables/useMobile'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import type { PermissionPreset } from '../../permissions'
-import { getComposerCommandQuery, parseComposerCommand, type ComposerCommand } from '../../composerCommands'
+import { getComposerCommandQuery, parseComposerCommand, type ComposerCommand, type ComposerCommandName, type ReviewCommandTarget } from '../../composerCommands'
 import {
   getChatGptConversationPreview,
   listChatGptConversations,
@@ -577,6 +597,7 @@ type SkillItem = { name: string; displayName?: string; description: string; path
 const props = defineProps<{
   activeThreadId: string
   cwd?: string
+  reviewBranches?: Array<{ value: string; label: string; isCurrent?: boolean }>
   collaborationModes?: CollaborationModeOption[]
   selectedCollaborationMode: CollaborationModeKind
   selectedPermissionPreset: PermissionPreset
@@ -742,6 +763,10 @@ const skillQuery = ref('')
 const isSkillPickerOpen = ref(false)
 const skillHighlightedIndex = ref(0)
 const slashCommandHighlightedIndex = ref(0)
+const isReviewChoiceOpen = ref(false)
+const reviewBranch = ref('')
+const reviewCommit = ref('')
+const reviewBranchListId = `composer-review-branches-${Math.random().toString(36).slice(2, 10)}`
 const isComposerExpanded = ref(false)
 const isDraftOverflowing = ref(false)
 let composerOverflowMeasurementQueued = false
@@ -846,8 +871,13 @@ const hasDraftContext = computed(() =>
 const isInteractionDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
 const slashCommands = [
   { name: 'plan' as const, description: 'Switch to Plan mode; add text after the command to send it' },
-  { name: 'review' as const, description: 'Review the current workspace changes in this thread' },
-]
+  { name: 'review' as const, description: 'Review uncommitted changes, a branch, or a commit' },
+  { name: 'compact' as const, description: 'Compress context while retaining important work state' },
+  { name: 'fork' as const, description: 'Fork this conversation into a new thread' },
+  { name: 'status' as const, description: 'Show thread, model, and context status' },
+  { name: 'fast' as const, description: 'Toggle faster inference, when supported' },
+  { name: 'goal' as const, description: 'View or set a lasting goal; /goal clear removes it' },
+] satisfies Array<{ name: ComposerCommandName; description: string }>
 const slashCommandQuery = computed(() => getComposerCommandQuery(draft.value))
 const slashCommandSuggestions = computed(() => {
   const query = slashCommandQuery.value
@@ -855,7 +885,7 @@ const slashCommandSuggestions = computed(() => {
   return slashCommands.filter((command) => command.name.startsWith(query))
 })
 const isSlashCommandOpen = computed(() =>
-  !isInteractionDisabled.value && slashCommandSuggestions.value.length > 0,
+  !isInteractionDisabled.value && !isReviewChoiceOpen.value && slashCommandSuggestions.value.length > 0,
 )
 const isComposerConfigDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
 const isFastModeSupported = computed(() => /^gpt-5\.(?:4|5)(?:$|-)/.test(props.selectedModel.trim()))
@@ -1113,6 +1143,7 @@ function buildContextUsageView(
 }
 
 function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
+  if (isReviewChoiceOpen.value) return
   const text = buildSubmissionText()
   if (!canSubmit.value) return
   const command = parseComposerCommand(text)
@@ -1124,16 +1155,36 @@ function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
     mode,
   }
   if (command) {
+    if (command.name === 'review' && !command.target) {
+      reviewBranch.value = props.reviewBranches?.find((branch) => !branch.isCurrent)?.value ?? ''
+      reviewCommit.value = ''
+      isReviewChoiceOpen.value = true
+      return
+    }
     emit('execute-command', { command, submission })
     return
   }
   emit('submit', submission)
 }
 
-function executeSuggestedCommand(name: 'plan' | 'review'): void {
+function executeSuggestedCommand(name: ComposerCommandName): void {
   draft.value = `/${name}`
   slashCommandHighlightedIndex.value = 0
   onSubmit(props.isTurnInProgress ? activeInProgressMode.value : 'steer')
+}
+
+function closeReviewChoices(): void {
+  isReviewChoiceOpen.value = false
+  draft.value = ''
+  nextTick(() => inputRef.value?.focus())
+}
+
+function submitReviewTarget(target: ReviewCommandTarget): void {
+  if (isInteractionDisabled.value || props.isTurnInProgress) return
+  const submission: SubmitPayload = {
+    text: '', imageUrls: [], fileAttachments: [], skills: [], mode: 'steer',
+  }
+  emit('execute-command', { command: { name: 'review', target }, submission })
 }
 
 function setActiveInProgressMode(mode: 'steer' | 'queue'): void {
@@ -1166,6 +1217,7 @@ function replaceDraftState(payload: ComposerDraftPayload): void {
 }
 
 function clearDraftState(): void {
+  isReviewChoiceOpen.value = false
   replaceDraftState({
     text: '',
     imageUrls: [],
@@ -1930,6 +1982,11 @@ function onInputChange(context?: ComposerSelectionContext): void {
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
+  if (isReviewChoiceOpen.value && event.key === 'Escape') {
+    event.preventDefault()
+    closeReviewChoices()
+    return
+  }
   if (isSlashCommandOpen.value) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -2477,7 +2534,7 @@ watch(
 }
 
 .thread-composer-slash-commands {
-  @apply absolute left-0 right-0 bottom-[calc(100%+8px)] z-40 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-lg;
+  @apply absolute left-0 right-0 bottom-[calc(100%+8px)] z-40 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900;
 }
 
 .thread-composer--expanded .thread-composer-slash-commands {
@@ -2485,20 +2542,33 @@ watch(
 }
 
 .thread-composer-slash-command-row {
-  @apply flex w-full items-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left transition hover:bg-zinc-100;
+  @apply flex w-full items-start gap-3 rounded-lg border-0 bg-transparent px-3 py-2 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800;
 }
 
 .thread-composer-slash-command-row.is-active {
-  @apply bg-zinc-100;
+  @apply bg-zinc-100 dark:bg-zinc-800;
 }
 
 .thread-composer-slash-command-name {
-  @apply min-w-16 font-mono text-sm font-semibold text-zinc-900;
+  @apply min-w-16 font-mono text-sm font-semibold text-zinc-900 dark:text-zinc-100;
 }
 
 .thread-composer-slash-command-description {
-  @apply min-w-0 flex-1 text-xs leading-5 text-zinc-500;
+  @apply min-w-0 flex-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400;
 }
+
+.thread-composer-review-choices {
+  @apply absolute left-0 right-0 bottom-[calc(100%+8px)] z-40 flex max-h-[60vh] flex-col gap-2 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-3 text-sm text-zinc-800 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100;
+}
+
+.thread-composer--expanded .thread-composer-review-choices { @apply bottom-auto top-0; }
+.thread-composer-review-heading { @apply flex items-center justify-between; }
+.thread-composer-review-heading button { @apply rounded px-2 py-1 text-lg hover:bg-zinc-100 dark:hover:bg-zinc-800; }
+.thread-composer-review-choice { @apply flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 p-2 text-left dark:border-zinc-700; }
+button.thread-composer-review-choice { @apply hover:bg-zinc-100 disabled:opacity-40 dark:hover:bg-zinc-800; }
+.thread-composer-review-choice label { @apply w-full text-xs text-zinc-500 dark:text-zinc-400; }
+.thread-composer-review-choice input { @apply min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-600 dark:bg-zinc-800; }
+.thread-composer-review-choice button { @apply rounded-md bg-zinc-900 px-2 py-1 text-xs text-white disabled:opacity-40 dark:bg-zinc-200 dark:text-zinc-900; }
 
 .thread-composer-file-mention-row {
   @apply flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-xs text-zinc-700 transition hover:bg-zinc-100;

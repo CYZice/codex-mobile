@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { compactThread, getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadReview, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -27,6 +27,32 @@ function mockRpcFetch(): { requests: Array<{ method: string, params: Record<stri
 
   return { requests }
 }
+
+describe('native review and context commands', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends the selected semantic review target without silently falling back to uncommitted', async () => {
+    const { requests } = mockRpcFetch()
+    await startThreadReview('thread-a', { type: 'uncommittedChanges' })
+    await startThreadReview('thread-a', { type: 'baseBranch', branch: ' origin/main ' })
+    await startThreadReview('thread-a', { type: 'commit', sha: '123abc45' })
+    expect(requests.map((request) => request.params.target)).toEqual([
+      { type: 'uncommittedChanges' },
+      { type: 'baseBranch', branch: 'origin/main' },
+      { type: 'commit', sha: '123abc45' },
+    ])
+    expect(requests.every((request) => request.method === 'review/start' && request.params.delivery === 'inline')).toBe(true)
+    await expect(startThreadReview('thread-a', { type: 'baseBranch', branch: '' })).rejects.toThrow('Base branch')
+    await expect(startThreadReview('thread-a', { type: 'commit', sha: 'not a sha' })).rejects.toThrow('commit SHA')
+    expect(requests).toHaveLength(3)
+  })
+
+  it('starts native compaction without pretending to clear the entire conversation', async () => {
+    const { requests } = mockRpcFetch()
+    await compactThread('thread-a')
+    expect(requests).toEqual([{ method: 'thread/compact/start', params: { threadId: 'thread-a' } }])
+  })
+})
 
 describe('Codex app-server runtime reload', () => {
   afterEach(() => {

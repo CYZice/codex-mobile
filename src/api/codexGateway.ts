@@ -3286,21 +3286,42 @@ export async function initializeReviewGit(cwd: string): Promise<void> {
 
 export async function startThreadReview(
   threadId: string,
-  scope: UiReviewScope,
-  workspaceView: UiReviewWorkspaceView,
-  baseBranch?: string | null,
+  target: { type: 'uncommittedChanges' } | { type: 'baseBranch'; branch: string } | { type: 'commit'; sha: string },
 ): Promise<void> {
-  const target = scope === 'baseBranch'
-    ? { type: 'baseBranch' as const, branch: (baseBranch ?? '').trim() }
-    : { type: 'uncommittedChanges' as const }
-  if (target.type === 'baseBranch' && !target.branch) {
+  if (target.type === 'baseBranch' && !target.branch.trim()) {
     throw new Error('Base branch is unavailable')
+  }
+  if (target.type === 'commit' && !/^[a-f0-9]{7,64}$/iu.test(target.sha.trim())) {
+    throw new Error('Enter a valid commit SHA')
   }
   await callRpc('review/start', {
     threadId,
-    target,
+    target: target.type === 'baseBranch' ? { type: 'baseBranch', branch: target.branch.trim() }
+      : target.type === 'commit' ? { type: 'commit', sha: target.sha.trim() }
+        : { type: 'uncommittedChanges' },
     delivery: 'inline',
   })
+}
+
+export async function compactThread(threadId: string): Promise<void> {
+  await callRpc('thread/compact/start', { threadId })
+}
+
+export async function getThreadGoal(threadId: string): Promise<{ objective: string; status: string } | null> {
+  const payload = await callRpc<{ goal?: { objective?: string; status?: string } | null }>('thread/goal/get', { threadId })
+  const goal = payload?.goal
+  return typeof goal?.objective === 'string' && goal.objective.trim()
+    ? { objective: goal.objective.trim(), status: goal.status ?? 'active' }
+    : null
+}
+
+export async function setThreadGoal(threadId: string, objective: string): Promise<void> {
+  if (!objective.trim()) throw new Error('Goal cannot be empty')
+  await callRpc('thread/goal/set', { threadId, objective: objective.trim(), status: 'active' })
+}
+
+export async function clearThreadGoal(threadId: string): Promise<void> {
+  await callRpc('thread/goal/clear', { threadId })
 }
 
 export async function getHomeDirectory(): Promise<string> {

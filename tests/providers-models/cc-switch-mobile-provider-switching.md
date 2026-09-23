@@ -74,6 +74,26 @@ Expected results:
 - Endpoint/model metadata stays inside the settings panel.
 - Dropdown, switching state, and error surfaces have readable contrast in both themes.
 
+## Settings quick menu, message refresh, and response.model
+
+1. Open a thread, open the Settings quick menu, navigate to the Settings route, then click the Settings button again.
+2. Confirm the quick menu still opens on the Settings route.
+3. Use the Provider control in the quick menu to select another compatible CC Switch provider, then wait for switching to finish.
+4. Return to the thread and use Refresh messages from the quick menu.
+5. Run a Responses turn and inspect the status row below the composer.
+
+Expected results:
+
+- The right-side Summary panel and its show-summary button are not displayed.
+- The Settings quick menu can be opened both on a thread route and on the Settings route.
+- The quick menu Provider control uses the same CC Switch provider list and switch behavior as the Account settings control.
+- Refresh messages reloads only the selected thread's messages and shows a busy state while the request is active.
+- When the bridge receives an explicit upstream `response.model`, the status row displays `Server response.model <model>`; it does not substitute the selected/requested model.
+
+Cleanup:
+
+Restore the original provider after the check and leave the thread idle.
+
 ## Cleanup
 
 Switch back to the recorded original provider and confirm the original auth hash remains unchanged. Disable any proxy takeover enabled for the refusal test.

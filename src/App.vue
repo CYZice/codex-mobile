@@ -467,10 +467,34 @@
             </div>
           </Teleport>
           <Transition name="settings-panel">
-            <div v-if="isSettingsOpen && !isSettingsRoute" ref="settingsPanelRef" class="sidebar-quick-settings" @click.stop>
+            <div v-if="isSettingsOpen" ref="settingsPanelRef" class="sidebar-quick-settings" @click.stop>
               <div class="sidebar-quick-settings-heading"><div><strong>{{ accounts.find(account => account.isActive)?.email || t('Account') }}</strong><span>{{ accounts.find(account => account.isActive)?.planType || 'Codex' }}</span></div></div>
               <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
               <button type="button" class="sidebar-quick-settings-row" :disabled="isReloadingCodexConfiguration" @click="onReloadCodexConfiguration"><span>{{ t('Reload app-server') }}</span><span>{{ isReloadingCodexConfiguration ? t('Reloading…') : '↻' }}</span></button>
+              <div class="sidebar-quick-settings-row sidebar-quick-settings-row--select">
+                <span>{{ t('Provider') }}</span>
+                <ComposerDropdown
+                  class="sidebar-quick-settings-provider-dropdown"
+                  :model-value="ccSwitchCurrentProviderId"
+                  :options="ccSwitchProviderOptions"
+                  :placeholder="ccSwitchLoading ? t('Loading…') : t('Provider')"
+                  :disabled="ccSwitchLoading || !ccSwitchStatus?.available || ccSwitchStatus.proxyTakeoverActive || ccSwitchProviderOptions.length === 0"
+                  menu-align="end"
+                  :enable-search="ccSwitchProviderOptions.length > 6"
+                  :search-placeholder="t('Search providers...')"
+                  @update:model-value="onCcSwitchProviderChange"
+                />
+              </div>
+              <button
+                v-if="route.name === 'thread' && selectedThreadId"
+                type="button"
+                class="sidebar-quick-settings-row"
+                :disabled="isRefreshingMessages || isLoadingMessages"
+                @click="onRefreshMessages"
+              >
+                <span>{{ t('Refresh messages') }}</span>
+                <span>{{ isRefreshingMessages ? t('Refreshing…') : '↻' }}</span>
+              </button>
               <button type="button" class="sidebar-quick-settings-row" @click="openSettings('general')"><span>{{ t('Settings') }}</span><span>›</span></button>
               <p v-if="codexConfigurationReloadError" class="sidebar-quick-settings-error">{{ codexConfigurationReloadError }}</p>
             </div>
@@ -904,6 +928,7 @@
                 />
                 <ThreadComposer ref="homeThreadComposerRef" :active-thread-id="composerThreadContextId"
                   :cwd="composerCwd"
+                  :review-branches="threadBranchOptions"
                   :collaboration-modes="availableCollaborationModes"
                   :selected-collaboration-mode="selectedCollaborationMode"
                   :selected-permission-preset="selectedPermissionPreset"
@@ -932,7 +957,7 @@
             </div>
           </template>
           <template v-else>
-                <div class="content-grid" :class="{ 'content-grid-with-summary': isThreadSummaryAvailable && isThreadSummaryOpen }">
+                <div class="content-grid">
                   <ReviewPane
                     v-if="isReviewPaneOpen && selectedThreadId && composerCwd"
                     :thread-id="selectedThreadId"
@@ -997,6 +1022,7 @@
                     ref="threadComposerRef"
                     :active-thread-id="composerThreadContextId"
                     :cwd="composerCwd"
+                    :review-branches="threadBranchOptions"
                     :collaboration-modes="availableCollaborationModes"
                     :selected-collaboration-mode="selectedCollaborationMode"
                     :selected-permission-preset="selectedPermissionPreset"
@@ -1028,37 +1054,6 @@
                     </div>
                   </template>
 
-                  <ThreadSummaryPanel
-                    v-if="isThreadSummaryAvailable && isThreadSummaryOpen"
-                    :cwd="composerCwd"
-                    :branch="currentThreadBranch"
-                    :head-sha="currentThreadHeadSha"
-                    :head-subject="currentThreadHeadSubject"
-                    :dirty="isThreadWorktreeDirty"
-                    :added-line-count="threadWorktreeChangeSummary.addedLineCount"
-                    :removed-line-count="threadWorktreeChangeSummary.removedLineCount"
-                    :plan-explanation="threadSummaryPlan.explanation"
-                    :plan-step="threadSummaryPlan.step"
-                    :plan-step-count="threadSummaryPlan.stepCount"
-                    :sources="threadSummarySources"
-                    :branches="threadBranchOptions"
-                    :branch-busy="isSwitchingThreadBranch"
-                    :branch-error="threadBranchError"
-                    @open-changes="onToggleContentHeaderReview"
-                    @open-local="onOpenThreadSummaryLocal"
-                    @open-git="onOpenThreadSummaryGit"
-                    @checkout-branch="onCheckoutContentHeaderBranch"
-                  />
-                  <button
-                    v-else-if="isThreadSummaryAvailable"
-                    class="thread-summary-open-button"
-                    type="button"
-                    aria-label="显示摘要"
-                    title="显示摘要"
-                    @click="setThreadSummaryOpen(true)"
-                  >
-                    <IconTablerLayoutSidebar aria-hidden="true" />
-                  </button>
                 </div>
           </template>
         </section>
@@ -1192,7 +1187,6 @@ import SidebarThreadTree from './components/sidebar/SidebarThreadTree.vue'
 import ContentHeader from './components/content/ContentHeader.vue'
 import ThreadComposer from './components/content/ThreadComposer.vue'
 import ModelRerouteStatus from './components/content/ModelRerouteStatus.vue'
-import ThreadSummaryPanel from './components/content/ThreadSummaryPanel.vue'
 import ThreadPendingRequestPanel from './components/content/ThreadPendingRequestPanel.vue'
 import QueuedMessages from './components/content/QueuedMessages.vue'
 import RateLimitStatus from './components/content/RateLimitStatus.vue'
@@ -1234,6 +1228,10 @@ import {
   getCodexLoginStatus,
   getArchivedThreadGroupsPage,
   completeCodexLogin,
+  compactThread,
+  getThreadGoal,
+  setThreadGoal,
+  clearThreadGoal,
   createLocalDirectory,
   getHomeDirectory,
   getTelegramConfig,
@@ -1262,7 +1260,6 @@ import type { PermissionPreset } from './permissions'
 import type { CcSwitchStatus, GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
-import { buildThreadSummarySources } from './threadSummarySources'
 import { copyTextToClipboard } from './utils/clipboard'
 import { isAttentionThread } from './components/sidebar/activityThreadGroups'
 
@@ -1518,14 +1515,6 @@ const {
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useMobile()
-const THREAD_SUMMARY_OPEN_KEY = 'codex-web-local.thread-summary-open.v1'
-const isThreadSummaryOpen = ref(loadBoolPref(THREAD_SUMMARY_OPEN_KEY, true))
-const isThreadSummaryAvailable = computed(() => route.name === 'thread' && Boolean(selectedThreadId.value) && !isMobile.value)
-
-function setThreadSummaryOpen(open: boolean): void {
-  isThreadSummaryOpen.value = open
-  window.localStorage.setItem(THREAD_SUMMARY_OPEN_KEY, open ? '1' : '0')
-}
 type HeaderGitBranchDropdownExposed = {
   openMenu: () => void
 }
@@ -1633,6 +1622,7 @@ let threadWorktreeSummaryRequestId = 0
 const defaultNewProjectName = ref('New Project (1)')
 const homeDirectory = ref('')
 const isSettingsOpen = ref(false)
+const isRefreshingMessages = ref(false)
 const isArchivedChatsOpen = ref(false)
 const archivedThreads = ref<Array<{ id: string; title: string; preview: string; updatedAtIso: string }>>([])
 const archivedThreadCursor = ref<string | null>(null)
@@ -1898,20 +1888,6 @@ const filteredMessages = computed(() =>
     return true
   }),
 )
-const threadSummaryPlan = computed(() => {
-  for (let index = filteredMessages.value.length - 1; index >= 0; index -= 1) {
-    const plan = filteredMessages.value[index]?.plan
-    if (!plan) continue
-    const active = plan.steps.find((step) => step.status === 'inProgress') ?? plan.steps.find((step) => step.status === 'pending') ?? plan.steps[plan.steps.length - 1]
-    return {
-      explanation: plan.explanation?.trim() ?? '',
-      step: active?.step?.trim() ?? '',
-      stepCount: plan.steps.length,
-    }
-  }
-  return { explanation: '', step: '', stepCount: 0 }
-})
-const threadSummarySources = computed(() => buildThreadSummarySources(filteredMessages.value, composerCwd.value))
 const latestUserTurnId = computed(() => {
   for (let index = messages.value.length - 1; index >= 0; index -= 1) {
     const message = messages.value[index]
@@ -2737,6 +2713,18 @@ async function onReloadCodexConfiguration(): Promise<void> {
       : t('Failed to reload Codex configuration')
   } finally {
     isReloadingCodexConfiguration.value = false
+  }
+}
+
+async function onRefreshMessages(): Promise<void> {
+  if (isRefreshingMessages.value || isLoadingMessages.value || route.name !== 'thread' || !selectedThreadId.value) return
+  isRefreshingMessages.value = true
+  try {
+    await refreshSelectedThreadMessages()
+  } catch (error) {
+    showContentActionFeedback(error instanceof Error ? error.message : t('Failed to refresh messages'), 'error')
+  } finally {
+    isRefreshingMessages.value = false
   }
 }
 
@@ -3671,6 +3659,7 @@ async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[
 }
 
 async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promise<void> {
+  const composer = isHomeRoute.value ? homeThreadComposerRef.value : threadComposerRef.value
   if (payload.command.name === 'plan') {
     setSelectedCollaborationMode('plan')
     const hasSubmissionContent = payload.submission.text.trim().length > 0
@@ -3678,7 +3667,6 @@ async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promis
       || payload.submission.fileAttachments.length > 0
       || payload.submission.skills.length > 0
     if (!hasSubmissionContent) {
-      const composer = isHomeRoute.value ? homeThreadComposerRef.value : threadComposerRef.value
       composer?.completeSubmission()
       return
     }
@@ -3686,21 +3674,80 @@ async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promis
     return
   }
 
+  if (payload.command.name === 'status') {
+    const usage = selectedThreadTokenUsage.value
+    window.alert([
+      `Thread: ${selectedThreadId.value || 'New chat'}`,
+      `Workspace: ${composerCwd.value || 'Chat without project'}`,
+      `Selected model: ${composerSelectedModelId.value || 'Not selected'}`,
+      `Context remaining: ${usage?.remainingContextPercent == null ? 'Unknown' : `${usage.remainingContextPercent}%`}`,
+    ].join('\n'))
+    composer?.completeSubmission()
+    return
+  }
+
+  if (payload.command.name === 'fast') {
+    if (!/^gpt-5\.(?:4|5)(?:$|-)/u.test(composerSelectedModelId.value.trim())) {
+      showContentActionFeedback('当前所选模型尚未启用 Fast 模式。', 'error')
+      return
+    }
+    onSelectSpeedMode(selectedSpeedMode.value === 'fast' ? 'standard' : 'fast')
+    composer?.completeSubmission()
+    return
+  }
+
   if (isHomeRoute.value || !selectedThreadId.value) {
-    desktopError.value = 'Open an existing thread before running /review.'
+    desktopError.value = 'Open an existing thread before running this command.'
     return
   }
   if (isSelectedThreadInProgress.value) {
-    desktopError.value = 'Wait for the current turn to finish before running /review.'
+    desktopError.value = 'Wait for the current turn to finish before running this command.'
     return
   }
 
   desktopError.value = ''
   try {
-    await startThreadReview(selectedThreadId.value, 'workspace', 'unstaged')
+    if (payload.command.name === 'goal') {
+      const objective = payload.command.argument.trim()
+      if (!objective) {
+        const goal = await getThreadGoal(selectedThreadId.value)
+        showContentActionFeedback(goal ? `目标（${goal.status}）：${goal.objective}` : '当前会话尚未设置目标。')
+      } else if (objective.toLowerCase() === 'clear') {
+        if (!window.confirm('清除当前会话的持续目标？')) return
+        await clearThreadGoal(selectedThreadId.value)
+        showContentActionFeedback('已清除当前会话的持续目标。')
+      } else {
+        await setThreadGoal(selectedThreadId.value, objective)
+        showContentActionFeedback('已设置当前会话的持续目标。')
+      }
+      composer?.completeSubmission()
+      return
+    }
+    if (payload.command.name === 'fork') {
+      const previousThreadId = selectedThreadId.value
+      composer?.completeSubmission()
+      await onForkThread(previousThreadId)
+      return
+    }
+    if (payload.command.name === 'compact') {
+      await compactThread(selectedThreadId.value)
+      showContentActionFeedback('上下文压缩已启动，完成后可继续对话。')
+      composer?.completeSubmission()
+      return
+    }
+    if (payload.command.name === 'review') {
+      if (!payload.command.target) throw new Error('Choose a review scope first')
+      if (isThreadComposerSubmitting.value) return
+      isThreadComposerSubmitting.value = true
+      try {
+        await startThreadReview(selectedThreadId.value, payload.command.target)
+      } finally {
+        isThreadComposerSubmitting.value = false
+      }
+    }
     threadComposerRef.value?.completeSubmission()
-  } catch (reviewError) {
-    desktopError.value = reviewError instanceof Error ? reviewError.message : 'Failed to start review'
+  } catch (commandError) {
+    desktopError.value = commandError instanceof Error ? commandError.message : 'Failed to run command'
   }
 }
 
@@ -4490,11 +4537,31 @@ async function onEditMessage(payload: {
   }
 }
 
-function onImplementPlan(payload: { turnId: string }): void {
-  if (isHomeRoute.value || !selectedThreadId.value) return
+async function onImplementPlan(payload: { turnId: string; clearContext: boolean; planText: string }): Promise<void> {
+  if (isHomeRoute.value || !selectedThreadId.value || isSelectedThreadInProgress.value || !payload.turnId.trim()) return
+  const sourceThreadId = selectedThreadId.value
+  if (payload.clearContext) {
+    const plan = payload.planText.trim()
+    if (!plan) return
+    const prompt = `A previous agent produced the plan below. Implement it in a fresh context. Treat the plan as the source of user intent; re-read files as needed and verify the result.\n\n${plan}`
+    setSelectedCollaborationMode('default')
+    try {
+      const nextThreadId = await sendMessageToNewThread(prompt, composerCwd.value, [], [], [])
+      if (nextThreadId) {
+        await router.push({ name: 'thread', params: { threadId: nextThreadId } })
+        scheduleMobileConversationJumpToLatest()
+      } else if (selectedThreadId.value === sourceThreadId) {
+        setSelectedCollaborationMode('plan')
+      }
+    } catch (error) {
+      if (selectedThreadId.value === sourceThreadId) setSelectedCollaborationMode('plan')
+      showContentActionFeedback(error instanceof Error ? error.message : 'Failed to start a fresh implementation thread', 'error')
+    }
+    return
+  }
   setSelectedCollaborationMode('default')
   scheduleMobileConversationJumpToLatest()
-  void sendMessageToSelectedThread('Implement', [], [], 'steer', [], undefined, 'default')
+  void sendMessageToSelectedThread('Implement the plan.', [], [], 'steer', [], undefined, 'default')
 }
 
 function onRevisePlan(payload: { turnId: string; text: string }): void {
@@ -5582,28 +5649,6 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
   @apply flex min-h-0 min-w-0 flex-1 flex-col;
 }
 
-.content-grid-with-summary {
-  @apply grid grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)] gap-3;
-}
-
-.content-grid-with-summary .thread-summary-panel {
-  @apply static row-span-1 h-fit max-h-full w-full overflow-y-auto rounded-lg shadow-sm;
-}
-
-.thread-summary-open-button {
-  @apply absolute right-14 top-3 z-20 grid h-8 w-8 place-items-center rounded-md border border-zinc-200 bg-white/90 text-zinc-500 shadow-sm backdrop-blur transition hover:bg-zinc-100 hover:text-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:focus:ring-zinc-600;
-}
-
-.thread-summary-open-button svg {
-  @apply h-4 w-4;
-}
-
-@media (max-width: 1100px) {
-  .content-grid-with-summary {
-    grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem);
-  }
-}
-
 .composer-with-queue {
   @apply w-full shrink-0 px-2 sm:px-6 flex flex-col gap-2;
 }
@@ -6026,6 +6071,14 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-quick-settings-row {
   @apply flex w-full items-center justify-between rounded-xl border-0 bg-transparent px-3 py-2.5 text-left text-sm hover:bg-zinc-100 disabled:opacity-60;
+}
+
+.sidebar-quick-settings-row--select {
+  @apply cursor-default gap-2;
+}
+
+.sidebar-quick-settings-row--select :deep(.composer-dropdown) {
+  @apply min-w-0 flex-1;
 }
 
 .sidebar-quick-settings-error {
