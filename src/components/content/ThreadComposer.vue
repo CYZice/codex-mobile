@@ -434,7 +434,6 @@
             :placeholder="t('Model')"
             :model-label="t('Model')"
             :thinking-label="t('Thinking')"
-            :other-models-label="t('Other models')"
             :disabled="isComposerConfigDisabled || models.length === 0"
             @update:model-value="onModelSelect"
             @update:reasoning-value="onReasoningEffortSelect"
@@ -602,6 +601,7 @@ const props = defineProps<{
   selectedCollaborationMode: CollaborationModeKind
   selectedPermissionPreset: PermissionPreset
   models: string[]
+  modelLabels?: Record<string, string>
   modelReasoningEfforts?: Record<string, ReasoningEffort[]>
   selectedModel: string
   selectedReasoningEffort: ReasoningEffort | ''
@@ -801,7 +801,10 @@ function formatModelLabel(modelId: string): string {
 }
 
 const modelOptions = computed(() =>
-  props.models.map((modelId) => ({ value: modelId, label: formatModelLabel(modelId) })),
+  props.models.map((modelId) => ({
+    value: modelId,
+    label: props.modelLabels?.[modelId]?.trim() || formatModelLabel(modelId),
+  })),
 )
 const isPlanModeSelected = computed(() => props.selectedCollaborationMode === 'plan')
 

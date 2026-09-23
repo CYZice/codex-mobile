@@ -17,11 +17,11 @@ import { useUiLanguage } from '../../composables/useUiLanguage'
 import type { ReasoningEffort } from '../../types/codex'
 type Option={value:string;label:string}; type EditableKey='model'|'reasoningEffort'|'approvalPolicy'|'sandboxMode'|'networkAccess'|'webSearch'|'verbosity'|'reasoningSummary'
 const USER_TARGET='__user__'
-const props=defineProps<{cwd:string;models:string[];modelReasoningEfforts:Record<string,ReasoningEffort[]>;projectOptions:Option[]}>()
+const props=defineProps<{cwd:string;models:string[];modelLabels?:Record<string,string>;modelReasoningEfforts:Record<string,ReasoningEffort[]>;projectOptions:Option[]}>()
 const {t}=useUiLanguage(); const target=ref(props.cwd||USER_TARGET); const draft=ref<CodexNativeSettings|null>(null); const loading=ref(false),saving=ref(false),error=ref(''),saved=ref(false); let loadToken=0
 const targetOptions=computed<Option[]>(()=>[{value:USER_TARGET,label:t('User defaults')},...props.projectOptions])
 const options=(values:string[],labels:Record<string,string>={})=>[{value:'',label:t('Inherit / model default')},...values.map(value=>({value,label:labels[value]?t(labels[value]):value}))]
-const modelOptions=computed(()=>{const values=[...props.models];const configured=draft.value?.model.trim()||'';if(configured&&!values.includes(configured))values.unshift(configured);return options(values).map(option=>option.value?{...option,label:option.value.replace(/^gpt/i,'GPT')}:option)})
+const modelOptions=computed(()=>{const values=[...props.models];const configured=draft.value?.model.trim()||'';if(configured&&!values.includes(configured))values.unshift(configured);return options(values).map(option=>option.value?{...option,label:props.modelLabels?.[option.value]?.trim()||option.value.replace(/^gpt/i,'GPT')}:option)})
 const reasoningOptions=computed(()=>options(props.modelReasoningEfforts[draft.value?.model||'']??['minimal','low','medium','high','xhigh'],{minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max',ultra:'Ultra'}))
 const rows=computed<Array<{key:EditableKey;title:string;description:string;options:Option[]}>>(()=>[
  {key:'model',title:t('Default model'),description:t('Model used when a new chat does not choose another model.'),options:modelOptions.value},

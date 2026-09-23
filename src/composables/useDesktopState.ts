@@ -1435,6 +1435,7 @@ export function useDesktopState() {
   const unreadThreadIdSet = ref<Set<string>>(new Set())
   let hasLoadedThreadUnreadState = false
   const availableModelIds = ref<string[]>([])
+  const availableModelLabels = ref<Record<string, string>>({})
   const availableModelReasoningEfforts = ref<Record<string, ReasoningEffort[]>>({})
   const availableModelDefaultReasoningEfforts = ref<Record<string, ReasoningEffort>>({})
   const availableCollaborationModes = ref<CollaborationModeOption[]>([
@@ -1736,9 +1737,11 @@ export function useDesktopState() {
   }
 
   function setAvailableModelMetadata(models: AvailableModel[]): void {
+    const labels: Record<string, string> = {}
     const reasoningEfforts: Record<string, ReasoningEffort[]> = {}
     const defaultReasoningEfforts: Record<string, ReasoningEffort> = {}
     for (const model of models) {
+      labels[model.id] = model.displayName || model.id
       if (model.supportedReasoningEfforts !== null) {
         reasoningEfforts[model.id] = [...model.supportedReasoningEfforts]
       }
@@ -1746,6 +1749,7 @@ export function useDesktopState() {
         defaultReasoningEfforts[model.id] = model.defaultReasoningEffort
       }
     }
+    availableModelLabels.value = labels
     availableModelReasoningEfforts.value = reasoningEfforts
     availableModelDefaultReasoningEfforts.value = defaultReasoningEfforts
   }
@@ -2196,13 +2200,20 @@ export function useDesktopState() {
         requireProviderModels: isProviderBacked,
         providerId: isProviderBacked ? targetProviderId : undefined,
       })
-      const modelIds = models.map((model) => model.id)
+      const catalogModelIds = models.map((model) => model.id)
+      const modelIds = models.filter((model) => !model.upgrade).map((model) => model.id)
+      const defaultModelId = models.find((model) => !model.upgrade && model.isDefault)?.id ?? modelIds[0] ?? ''
       setAvailableModelMetadata(models)
       const providerModelContextId = toProviderModelContextId(targetProviderId)
       const providerScopedModelId = providerModelContextId
         ? normalizeStoredModelId(selectedModelIdByContext.value[providerModelContextId])
         : ''
       const nextModelIds = [...modelIds]
+      for (const retainedModelId of [normalizedSelectedModelId, normalizedConfiguredModelId]) {
+        if (retainedModelId && catalogModelIds.includes(retainedModelId) && !nextModelIds.includes(retainedModelId)) {
+          nextModelIds.push(retainedModelId)
+        }
+      }
       if (
         !options?.providerChanged
         && isProviderBacked
@@ -2214,20 +2225,20 @@ export function useDesktopState() {
       }
       availableModelIds.value = nextModelIds
 
-      const currentModelInNewList = normalizedSelectedModelId && modelIds.includes(normalizedSelectedModelId)
+      const currentModelInNewList = normalizedSelectedModelId && nextModelIds.includes(normalizedSelectedModelId)
       if (!normalizedSelectedModelId || !currentModelInNewList || options?.providerChanged) {
         if (options?.providerChanged && nextModelIds.length > 0) {
-          if (providerScopedModelId && modelIds.includes(providerScopedModelId)) {
+          if (providerScopedModelId && nextModelIds.includes(providerScopedModelId)) {
             setSelectedModelId(providerScopedModelId)
           } else if (targetProviderId === normalizedProviderId && normalizedConfiguredModelId && nextModelIds.includes(normalizedConfiguredModelId)) {
             setSelectedModelId(normalizedConfiguredModelId)
           } else {
-            setSelectedModelId(nextModelIds[0])
+            setSelectedModelId(defaultModelId || nextModelIds[0])
           }
         } else if (targetProviderId === normalizedProviderId && normalizedConfiguredModelId && nextModelIds.includes(normalizedConfiguredModelId)) {
           setSelectedModelId(currentConfig.model)
         } else if (nextModelIds.length > 0) {
-          setSelectedModelId(nextModelIds[0])
+          setSelectedModelId(defaultModelId || nextModelIds[0])
         } else {
           setSelectedModelId('')
         }
@@ -6243,6 +6254,7 @@ export function useDesktopState() {
     selectedThreadId,
     availableCollaborationModes,
     availableModelIds,
+    availableModelLabels,
     availableModelReasoningEfforts,
     selectedCollaborationMode,
     selectedPermissionPreset,

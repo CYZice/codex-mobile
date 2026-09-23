@@ -73,6 +73,10 @@ function thread(id: string, cwd: string, options: { hasWorktree?: boolean } = {}
 function modelsWithoutReasoning(...ids: string[]): AvailableModel[] {
   return ids.map((id) => ({
     id,
+    displayName: id.replace(/^gpt/i, 'GPT'),
+    hidden: false,
+    isDefault: false,
+    upgrade: null,
     supportedReasoningEfforts: null,
     defaultReasoningEffort: null,
   }))
@@ -1045,6 +1049,59 @@ describe('provider model selection', () => {
     expect(state.selectedModelId.value).toBe('gpt-5.6-terra')
   })
 
+  it('hides superseded official models from the picker when they are not in use', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-6-luna',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue([
+      { ...modelsWithoutReasoning('gpt-6-astra')[0], displayName: 'GPT-6-Astra', isDefault: true },
+      { ...modelsWithoutReasoning('gpt-6-luna')[0], displayName: 'GPT-6-Luna' },
+      { ...modelsWithoutReasoning('gpt-5.5')[0], displayName: 'GPT-5.5', upgrade: 'gpt-5.6-sol' },
+    ])
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.availableModelIds.value).toEqual(['gpt-6-astra', 'gpt-6-luna'])
+    expect(state.availableModelLabels.value).toEqual({
+      'gpt-6-astra': 'GPT-6-Astra',
+      'gpt-6-luna': 'GPT-6-Luna',
+      'gpt-5.5': 'GPT-5.5',
+    })
+  })
+
+  it('retains a superseded official model while it is the configured selection', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.5',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModels.mockResolvedValue([
+      { ...modelsWithoutReasoning('gpt-6-astra')[0], displayName: 'GPT-6-Astra', isDefault: true },
+      { ...modelsWithoutReasoning('gpt-5.5')[0], displayName: 'GPT-5.5', upgrade: 'gpt-5.6-sol' },
+    ])
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.availableModelIds.value).toEqual(['gpt-6-astra', 'gpt-5.5'])
+    expect(state.selectedModelId.value).toBe('gpt-5.5')
+  })
+
   it('ignores global selected-model localStorage when OpenCode Zen is the active provider', async () => {
     installTestWindow({
       'codex-web-local.selected-model-by-context.v1': JSON.stringify({
@@ -1209,16 +1266,28 @@ describe('provider model selection', () => {
     gatewayMocks.getAvailableModels.mockResolvedValue([
       {
         id: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6 Sol',
+        hidden: false,
+        isDefault: true,
+        upgrade: null,
         supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
         defaultReasoningEffort: 'low',
       },
       {
         id: 'gpt-5.5',
+        displayName: 'GPT-5.5',
+        hidden: false,
+        isDefault: false,
+        upgrade: 'gpt-5.6-sol',
         supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         defaultReasoningEffort: 'medium',
       },
       {
         id: 'provider-model-without-metadata',
+        displayName: 'provider-model-without-metadata',
+        hidden: false,
+        isDefault: false,
+        upgrade: null,
         supportedReasoningEfforts: null,
         defaultReasoningEffort: null,
       },
@@ -1258,6 +1327,10 @@ describe('provider model selection', () => {
     })
     gatewayMocks.getAvailableModels.mockResolvedValue([{
       id: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 Sol',
+      hidden: false,
+      isDefault: true,
+      upgrade: null,
       supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       defaultReasoningEffort: 'low',
     }])
@@ -1277,6 +1350,10 @@ describe('provider model selection', () => {
     installTestWindow()
     gatewayMocks.getAvailableModels.mockResolvedValue([{
       id: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 Sol',
+      hidden: false,
+      isDefault: true,
+      upgrade: null,
       supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       defaultReasoningEffort: 'low',
     }])

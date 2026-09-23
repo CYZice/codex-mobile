@@ -19,7 +19,7 @@ Return to the [manual test index](../../tests.md).
 | [OpenCode Zen Provider & Wire API Selector in codexui](opencode-zen-provider-and-wire-api-selector-in-codexui.md) |
 | [Provider Switch Model List Isolation](provider-switch-model-list-isolation.md) |
 | [Zen Proxy Port Resolution When Vite Auto-Increments](zen-proxy-port-resolution-when-vite-auto-increments.md) |
-| [Model List Search / Filter](model-list-search-filter.md) |
+| [Official model catalog picker](official-model-catalog-picker.md) |
 | [OpenRouter "hi" request should not return invalid_prompt](openrouter-hi-request-should-not-return-invalid-prompt.md) |
 | [Custom Endpoint API switch shows Responses vs Completions](custom-endpoint-api-switch-shows-responses-vs-completions.md) |
 | [Custom Endpoint API format uses segmented toggle control](custom-endpoint-api-format-uses-segmented-toggle-control.md) |

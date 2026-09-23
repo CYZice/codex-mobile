@@ -395,6 +395,10 @@ describe('getAvailableModelIds', () => {
           data: [
             {
               id: 'gpt-5.6-sol',
+              displayName: 'GPT-5.6 Sol',
+              hidden: false,
+              isDefault: true,
+              upgrade: null,
               supportedReasoningEfforts: [
                 { reasoningEffort: 'low' },
                 { reasoningEffort: 'max' },
@@ -404,6 +408,10 @@ describe('getAvailableModelIds', () => {
             },
             {
               id: 'gpt-5.5',
+              displayName: 'GPT-5.5',
+              hidden: false,
+              isDefault: false,
+              upgrade: 'gpt-5.6-sol',
               supportedReasoningEfforts: [
                 { reasoningEffort: 'low' },
                 { reasoningEffort: 'xhigh' },
@@ -421,15 +429,62 @@ describe('getAvailableModelIds', () => {
     await expect(getAvailableModels({ includeProviderModels: false })).resolves.toEqual([
       {
         id: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6 Sol',
+        hidden: false,
+        isDefault: true,
+        upgrade: null,
         supportedReasoningEfforts: ['low', 'max', 'ultra'],
         defaultReasoningEffort: 'low',
       },
       {
         id: 'gpt-5.5',
+        displayName: 'GPT-5.5',
+        hidden: false,
+        isDefault: false,
+        upgrade: 'gpt-5.6-sol',
         supportedReasoningEfforts: ['low', 'xhigh'],
         defaultReasoningEffort: 'low',
       },
     ])
+  })
+
+  it('follows model/list pagination and filters hidden catalog entries', async () => {
+    const cursors: Array<string | null> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as { method: string; params?: { cursor?: string | null; includeHidden?: boolean; limit?: number } }
+        : { method: '', params: {} }
+      expect(body.method).toBe('model/list')
+      expect(body.params?.includeHidden).toBe(false)
+      expect(body.params?.limit).toBe(100)
+      cursors.push(body.params?.cursor ?? null)
+      const isSecondPage = body.params?.cursor === 'page-2'
+      return new Response(JSON.stringify({
+        result: isSecondPage
+          ? {
+              data: [
+                { id: 'gpt-6-sol', displayName: 'GPT-6 Sol', hidden: false, isDefault: true },
+                { id: 'gpt-5.4', displayName: 'GPT-5.4', hidden: true, isDefault: false },
+              ],
+              nextCursor: null,
+            }
+          : {
+              data: [
+                { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', hidden: false, isDefault: false },
+              ],
+              nextCursor: 'page-2',
+            },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(getAvailableModels({ includeProviderModels: false })).resolves.toEqual([
+      expect.objectContaining({ id: 'gpt-6-luna', displayName: 'GPT-6 Luna', hidden: false }),
+      expect.objectContaining({ id: 'gpt-6-sol', displayName: 'GPT-6 Sol', hidden: false, isDefault: true }),
+    ])
+    expect(cursors).toEqual([null, 'page-2'])
   })
 })
 

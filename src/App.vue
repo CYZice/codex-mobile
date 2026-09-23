@@ -122,7 +122,7 @@
               <section v-if="settingsSection === 'personalization'" id="settings-personalization" class="settings-center-section settings-center-personalization-section">
                 <PersonalizationSettings />
               </section>
-              <CodexConfigurationSettings v-if="settingsSection === 'agent'" :cwd="directoryCwd" :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts" :project-options="settingsProjectOptions" />
+              <CodexConfigurationSettings v-if="settingsSection === 'agent'" :cwd="directoryCwd" :models="availableModelIds" :model-labels="availableModelLabels" :model-reasoning-efforts="availableModelReasoningEfforts" :project-options="settingsProjectOptions" />
               <ActivitySettings v-if="settingsSection === 'activity'" />
               <DataSettings
                 v-if="settingsSection === 'data'"
@@ -932,7 +932,7 @@
                   :collaboration-modes="availableCollaborationModes"
                   :selected-collaboration-mode="selectedCollaborationMode"
                   :selected-permission-preset="selectedPermissionPreset"
-                  :models="availableModelIds" :model-reasoning-efforts="availableModelReasoningEfforts"
+                  :models="availableModelIds" :model-labels="availableModelLabels" :model-reasoning-efforts="availableModelReasoningEfforts"
                   :selected-model="composerSelectedModelId"
                   :selected-reasoning-effort="selectedReasoningEffort"
                   :selected-speed-mode="selectedSpeedMode"
@@ -1027,6 +1027,7 @@
                     :selected-collaboration-mode="selectedCollaborationMode"
                     :selected-permission-preset="selectedPermissionPreset"
                     :models="availableModelIds"
+                    :model-labels="availableModelLabels"
                     :model-reasoning-efforts="availableModelReasoningEfforts"
                     :selected-model="composerSelectedModelId"
                     :selected-reasoning-effort="selectedReasoningEffort"
@@ -1451,6 +1452,7 @@ const {
   selectedThreadId,
   availableCollaborationModes,
   availableModelIds,
+  availableModelLabels,
   availableModelReasoningEfforts,
   selectedCollaborationMode,
   selectedPermissionPreset,

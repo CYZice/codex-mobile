@@ -181,6 +181,10 @@ type ProviderModelsResponse = {
 
 export type AvailableModel = {
   id: string
+  displayName: string
+  hidden: boolean
+  isDefault: boolean
+  upgrade: string | null
   supportedReasoningEfforts: ReasoningEffort[] | null
   defaultReasoningEffort: ReasoningEffort | null
 }
@@ -2174,6 +2178,10 @@ function normalizeAvailableModel(value: unknown): AvailableModel | null {
 
   return {
     id,
+    displayName: readString(record.displayName ?? record.display_name)?.trim() || id,
+    hidden: readBoolean(record.hidden) === true,
+    isDefault: readBoolean(record.isDefault ?? record.is_default) === true,
+    upgrade: readString(record.upgrade)?.trim() || null,
     supportedReasoningEfforts,
     defaultReasoningEffort: isReasoningEffort(rawDefault) ? rawDefault : null,
   }
@@ -2182,6 +2190,10 @@ function normalizeAvailableModel(value: unknown): AvailableModel | null {
 function providerAvailableModel(id: string): AvailableModel {
   return {
     id,
+    displayName: id,
+    hidden: false,
+    isDefault: false,
+    upgrade: null,
     supportedReasoningEfforts: null,
     defaultReasoningEffort: null,
   }
@@ -2195,13 +2207,27 @@ export async function getAvailableModels(options: { includeProviderModels?: bool
     return (providerModels?.ids ?? []).map(providerAvailableModel)
   }
 
-  const payload = await callRpc<ModelListResponse>('model/list', {})
   const models: AvailableModel[] = []
-  for (const row of payload.data) {
-    const model = normalizeAvailableModel(row)
-    if (!model || models.some((candidate) => candidate.id === model.id)) continue
-    models.push(model)
-  }
+  let cursor: string | null = null
+  const seenCursors = new Set<string>()
+  do {
+    const payload: ModelListResponse = await callRpc<ModelListResponse>('model/list', {
+      cursor,
+      limit: 100,
+      includeHidden: false,
+    })
+    for (const row of payload.data) {
+      const model = normalizeAvailableModel(row)
+      if (!model || model.hidden || models.some((candidate) => candidate.id === model.id)) continue
+      models.push(model)
+    }
+    const nextCursor: string | null = typeof payload.nextCursor === 'string' && payload.nextCursor.trim().length > 0
+      ? payload.nextCursor.trim()
+      : null
+    if (!nextCursor || seenCursors.has(nextCursor)) break
+    seenCursors.add(nextCursor)
+    cursor = nextCursor
+  } while (cursor)
 
   if (!shouldIncludeProviderModels || !providerModels) return models
 

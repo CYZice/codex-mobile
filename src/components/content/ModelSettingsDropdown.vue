@@ -21,7 +21,7 @@
             </div>
             <div class="model-settings-option-list model-settings-model-list" role="listbox" :aria-label="modelLabel">
               <button
-                v-for="option in featuredModelOptions"
+                v-for="option in modelOptions"
                 :key="option.value"
                 class="model-settings-option"
                 :class="{ 'is-selected': option.value === modelValue }"
@@ -32,16 +32,6 @@
                 <span v-if="option.value === modelValue" class="model-settings-selected-mark" aria-label="Selected" />
               </button>
             </div>
-
-            <button
-              v-if="otherModelOptions.length > 0"
-              class="model-settings-navigation-row"
-              type="button"
-              @click="openPanel('otherModels')"
-            >
-              <span class="model-settings-navigation-label">{{ otherModelsLabel }}</span>
-              <IconTablerChevronDown class="model-settings-navigation-chevron" />
-            </button>
 
             <div class="model-settings-divider" />
             <button class="model-settings-navigation-row" type="button" @click="openPanel('thinking')">
@@ -51,28 +41,6 @@
               </span>
               <IconTablerChevronDown class="model-settings-navigation-chevron" />
             </button>
-          </template>
-
-          <template v-else-if="activePanel === 'otherModels'">
-            <div class="model-settings-model-header">
-              <button class="model-settings-back" type="button" :aria-label="modelLabel" @click="openPanel('models')">
-                <IconTablerChevronDown />
-              </button>
-              <span>{{ otherModelsLabel }}</span>
-            </div>
-            <div class="model-settings-option-list model-settings-model-list" role="listbox" :aria-label="otherModelsLabel">
-              <button
-                v-for="option in otherModelOptions"
-                :key="option.value"
-                class="model-settings-option"
-                :class="{ 'is-selected': option.value === modelValue }"
-                type="button"
-                @click="selectModel(option.value)"
-              >
-                <span>{{ option.label }}</span>
-                <span v-if="option.value === modelValue" class="model-settings-selected-mark" aria-label="Selected" />
-              </button>
-            </div>
           </template>
 
           <template v-else>
@@ -123,7 +91,6 @@ const props = defineProps<{
   placeholder: string
   modelLabel: string
   thinkingLabel: string
-  otherModelsLabel: string
   disabled?: boolean
 }>()
 
@@ -136,7 +103,7 @@ const rootRef = ref<HTMLElement | null>(null)
 const menuWrapRef = ref<HTMLElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
 const isOpen = ref(false)
-const activePanel = ref<'models' | 'otherModels' | 'thinking'>('models')
+const activePanel = ref<'models' | 'thinking'>('models')
 const menuWrapStyle = ref<Record<string, string>>({})
 let hasLayoutListeners = false
 
@@ -147,11 +114,6 @@ const selectedReasoningLabel = computed(() => (
   props.reasoningOptions.find((option) => option.value === props.reasoningValue)?.label ?? ''
 ))
 const triggerLabel = computed(() => [selectedModelLabel.value, selectedReasoningLabel.value].filter(Boolean).join(' '))
-const featuredModelOptions = computed(() => {
-  const featured = props.modelOptions.filter((option) => /^gpt-5\.[56](?:-|$)/i.test(option.value))
-  return featured.length > 0 ? featured : props.modelOptions
-})
-const otherModelOptions = computed(() => props.modelOptions.filter((option) => !featuredModelOptions.value.includes(option)))
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -205,7 +167,7 @@ function onToggle(): void {
   isOpen.value = !isOpen.value
 }
 
-function openPanel(panel: 'models' | 'otherModels' | 'thinking'): void {
+function openPanel(panel: 'models' | 'thinking'): void {
   activePanel.value = panel
   void nextTick(() => {
     updateMenuPosition()
