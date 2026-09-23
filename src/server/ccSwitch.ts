@@ -3,7 +3,7 @@ import { existsSync, watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { parse as parseToml } from 'smol-toml'
 
 const SUPPORTED_SCHEMA_VERSION = 18
@@ -93,6 +93,14 @@ type SwitchOptions = {
   reloadRuntime: () => Promise<void>
   paths?: CcSwitchPaths
   expectedCurrentProviderId?: string
+}
+
+type PreparedModelCatalogRepair = {
+  config: string
+  catalogPath: string | null
+  previousCatalog: string | null
+  nextCatalog: string | null
+  changed: boolean
 }
 
 class CcSwitchIntegrationError extends Error {
@@ -694,6 +702,240 @@ async function readOptionalText(path: string): Promise<string | null> {
   }
 }
 
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
+}
+
+function readPositiveNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function getCatalogModels(root: unknown): Record<string, unknown>[] {
+  if (Array.isArray(root)) return root.map(asRecord).filter((row): row is Record<string, unknown> => row !== null)
+  const record = asRecord(root)
+  if (!record || !Array.isArray(record.models)) return []
+  return record.models.map(asRecord).filter((row): row is Record<string, unknown> => row !== null)
+}
+
+function readCatalogModelId(model: Record<string, unknown>): string {
+  return readString(model.slug) || readString(model.model) || readString(model.id)
+}
+
+function getProviderCatalogModel(provider: StoredProvider, modelId: string): Record<string, unknown> | null {
+  const catalog = asRecord(provider.settingsConfig.modelCatalog)
+  if (!catalog || !Array.isArray(catalog.models)) return null
+  for (const rawModel of catalog.models) {
+    const model = asRecord(rawModel)
+    if (!model) continue
+    if (readCatalogModelId(model) === modelId) return model
+  }
+  return null
+}
+
+function reasoningLevelDescription(level: string): string {
+  if (level === 'low') return 'Fast responses with lighter reasoning'
+  if (level === 'medium') return 'Balances speed and reasoning depth for everyday tasks'
+  if (level === 'high') return 'Greater reasoning depth for complex problems'
+  if (level === 'xhigh') return 'Extra high reasoning depth for complex problems'
+  if (level === 'max') return 'Maximum reasoning depth for the hardest problems'
+  if (level === 'ultra') return 'Maximum reasoning with automatic task delegation'
+  return `${level} reasoning effort`
+}
+
+function applyProviderModelIdentity(
+  model: Record<string, unknown>,
+  modelId: string,
+  providerModel: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const next = cloneRecord(model)
+  const displayName = readString(providerModel?.displayName)
+    || readString(providerModel?.display_name)
+    || modelId
+  const contextWindow = readPositiveNumber(providerModel?.contextWindow ?? providerModel?.context_window)
+  const reasoningLevels = Array.isArray(providerModel?.reasoningLevels)
+    ? providerModel.reasoningLevels.map(readString).filter(Boolean)
+    : Array.isArray(providerModel?.reasoning_levels)
+      ? providerModel.reasoning_levels.map(readString).filter(Boolean)
+      : []
+
+  next.slug = modelId
+  next.display_name = displayName
+  next.description = readString(providerModel?.description) || `${displayName} via a third-party Codex provider.`
+  next.visibility = 'list'
+  next.supported_in_api = true
+  next.upgrade = null
+
+  if (contextWindow) {
+    next.context_window = contextWindow
+    next.max_context_window = contextWindow
+  }
+
+  if (reasoningLevels.length > 0) {
+    next.supported_reasoning_levels = reasoningLevels.map((effort) => ({
+      effort,
+      description: reasoningLevelDescription(effort),
+    }))
+    next.default_reasoning_level = reasoningLevels.includes('high')
+      ? 'high'
+      : reasoningLevels.includes('medium')
+        ? 'medium'
+        : reasoningLevels[0]
+  }
+
+  // Hosted/provider capabilities are deliberately conservative. Codex-local
+  // tools are applied separately below.
+  if (providerModel && Array.isArray(providerModel.inputModalities)) {
+    next.input_modalities = providerModel.inputModalities.map(readString).filter(Boolean)
+  } else {
+    next.input_modalities = ['text']
+  }
+  next.supports_search_tool = readBoolean(providerModel?.supportsSearchTool)
+  next.supports_image_detail_original = readBoolean(providerModel?.supportsImageDetailOriginal)
+  next.use_responses_lite = false
+  next.web_search_tool_type = 'text'
+  next.experimental_supported_tools = []
+  next.tool_mode = null
+
+  return next
+}
+
+function applyCodexNativeToolProfile(model: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...model,
+    shell_type: 'unified_exec',
+    apply_patch_tool_type: 'freeform',
+    multi_agent_version: 'v2',
+    supports_parallel_tool_calls: true,
+    include_skills_usage_instructions: true,
+    include_plugin_usage_instructions: true,
+    include_apps_usage_instructions: true,
+    node_repl_disabled: false,
+    node_repl_auto_review_required: false,
+  }
+}
+
+async function loadOfficialCodingTemplate(codexHome: string): Promise<Record<string, unknown>> {
+  const raw = await readOptionalText(join(codexHome, 'models_cache.json'))
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      const models = getCatalogModels(parsed)
+      for (const preferredId of ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-sol']) {
+        const preferred = models.find((model) => readCatalogModelId(model) === preferredId)
+        if (preferred) return cloneRecord(preferred)
+      }
+      const codingModel = models.find((model) => (
+        readString(model.apply_patch_tool_type) === 'freeform'
+        && ['unified_exec', 'shell_command'].includes(readString(model.shell_type))
+      ))
+      if (codingModel) return cloneRecord(codingModel)
+    } catch {
+      // Fall through to a compact schema-compatible template.
+    }
+  }
+
+  return {
+    slug: '',
+    display_name: '',
+    description: '',
+    visibility: 'list',
+    supported_in_api: true,
+    priority: 1000,
+    upgrade: null,
+    context_window: 128000,
+    max_context_window: 128000,
+    effective_context_window_percent: 95,
+    default_reasoning_level: 'medium',
+    default_reasoning_summary: 'none',
+    default_verbosity: 'low',
+    supported_reasoning_levels: [
+      { effort: 'low', description: reasoningLevelDescription('low') },
+      { effort: 'medium', description: reasoningLevelDescription('medium') },
+      { effort: 'high', description: reasoningLevelDescription('high') },
+    ],
+    input_modalities: ['text'],
+    supports_search_tool: false,
+    supports_image_detail_original: false,
+    supports_reasoning_summaries: true,
+    experimental_supported_tools: [],
+    use_responses_lite: false,
+    web_search_tool_type: 'text',
+  }
+}
+
+function parseModelCatalog(raw: string | null, catalogPath: string): Record<string, unknown> {
+  if (raw === null || !raw.trim()) return { models: [] }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (Array.isArray(parsed)) return { models: parsed }
+    const record = asRecord(parsed)
+    if (!record) throw new Error('root is not an object')
+    return record
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new CcSwitchIntegrationError(
+      'INVALID_MODEL_CATALOG',
+      `Model catalog ${catalogPath} is invalid JSON: ${message}`,
+      409,
+    )
+  }
+}
+
+async function prepareThirdPartyModelCatalogRepair(
+  provider: StoredProvider,
+  projectedConfig: string,
+  paths: CcSwitchPaths,
+): Promise<PreparedModelCatalogRepair> {
+  if (provider.category === 'official') {
+    return { config: projectedConfig, catalogPath: null, previousCatalog: null, nextCatalog: null, changed: false }
+  }
+
+  let config = projectedConfig
+  let parsedConfig = parseConfig(config)
+  const modelId = readString(parsedConfig.model)
+  if (!modelId) {
+    return { config, catalogPath: null, previousCatalog: null, nextCatalog: null, changed: false }
+  }
+
+  let configuredCatalogPath = readString(parsedConfig.model_catalog_json)
+  if (!configuredCatalogPath) {
+    configuredCatalogPath = join(paths.codexHome, 'codex-mobile-model-catalog.json')
+    config = insertTopLevelField(config, 'model_catalog_json', JSON.stringify(configuredCatalogPath))
+    parsedConfig = parseConfig(config)
+  }
+  const catalogPath = isAbsolute(configuredCatalogPath)
+    ? configuredCatalogPath
+    : join(paths.codexHome, configuredCatalogPath)
+  const previousCatalog = await readOptionalText(catalogPath)
+  const catalog = parseModelCatalog(previousCatalog, catalogPath)
+  const rawModels = Array.isArray(catalog.models) ? catalog.models : []
+  const models = rawModels.map(asRecord).filter((row): row is Record<string, unknown> => row !== null)
+  const existingIndex = models.findIndex((model) => readCatalogModelId(model) === modelId)
+  const providerModel = getProviderCatalogModel(provider, modelId)
+
+  let nextModel: Record<string, unknown>
+  if (existingIndex >= 0) {
+    nextModel = cloneRecord(models[existingIndex])
+  } else {
+    const localTemplate = models.find((model) => (
+      readString(model.apply_patch_tool_type) === 'freeform'
+      || ['unified_exec', 'shell_command'].includes(readString(model.shell_type))
+    ))
+    const template = localTemplate ? cloneRecord(localTemplate) : await loadOfficialCodingTemplate(paths.codexHome)
+    nextModel = applyProviderModelIdentity(template, modelId, providerModel)
+  }
+  nextModel = applyCodexNativeToolProfile(nextModel)
+
+  const nextModels = [...models]
+  if (existingIndex >= 0) nextModels[existingIndex] = nextModel
+  else nextModels.push(nextModel)
+  const nextCatalogRoot = { ...catalog, models: nextModels }
+  const nextCatalog = `${JSON.stringify(nextCatalogRoot, null, 2)}\n`
+  const changed = previousCatalog !== nextCatalog || readString(parsedConfig.model_catalog_json) !== configuredCatalogPath
+
+  return { config, catalogPath, previousCatalog, nextCatalog, changed }
+}
+
 async function updateDatabaseCurrent(databasePath: string, providerIds: string[]): Promise<void> {
   const db = await openDatabase(databasePath, false)
   try {
@@ -737,7 +979,6 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
   if (incompatibilityReason) {
     throw new CcSwitchIntegrationError('UNSUPPORTED_PROVIDER', incompatibilityReason, 409)
   }
-  if (state.currentProviderId === providerId) return await readCcSwitchStatus(state.paths)
   if (options.expectedCurrentProviderId && options.expectedCurrentProviderId !== state.currentProviderId) {
     throw new CcSwitchIntegrationError(
       'PROVIDER_STATE_CHANGED',
@@ -746,8 +987,13 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
     )
   }
 
-  const nextConfig = projectCcSwitchCodexConfig(provider, state)
+  const projectedConfig = projectCcSwitchCodexConfig(provider, state)
+  const catalogRepair = await prepareThirdPartyModelCatalogRepair(provider, projectedConfig, state.paths)
+  const nextConfig = catalogRepair.config
   const previousConfig = await readOptionalText(state.paths.configPath)
+  if (state.currentProviderId === providerId && !catalogRepair.changed && previousConfig === nextConfig) {
+    return await readCcSwitchStatus(state.paths)
+  }
   const previousSettings = state.settingsRaw
   const nextSettings = {
     ...state.settings,
@@ -755,9 +1001,14 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
   }
 
   let configWritten = false
+  let catalogWritten = false
   let settingsWritten = false
   let databaseWritten = false
   try {
+    if (catalogRepair.catalogPath && catalogRepair.nextCatalog && catalogRepair.changed) {
+      await atomicWriteText(catalogRepair.catalogPath, catalogRepair.nextCatalog)
+      catalogWritten = true
+    }
     await atomicWriteText(state.paths.configPath, nextConfig)
     configWritten = true
     await atomicWriteText(state.paths.settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`)
@@ -781,6 +1032,11 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
     if (configWritten) {
       try { await restoreOptionalText(state.paths.configPath, previousConfig) } catch (rollbackError) {
         rollbackErrors.push(`config: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+      }
+    }
+    if (catalogWritten && catalogRepair.catalogPath) {
+      try { await restoreOptionalText(catalogRepair.catalogPath, catalogRepair.previousCatalog) } catch (rollbackError) {
+        rollbackErrors.push(`catalog: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
       }
     }
     try { await options.reloadRuntime() } catch (rollbackError) {

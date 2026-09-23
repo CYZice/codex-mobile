@@ -25,6 +25,24 @@ Expected results:
 - Exactly one Codex runtime reload occurs and existing threads remain visible.
 - The SHA-256 hash of `~/.codex/auth.json` is unchanged.
 
+## Third-party Codex tool metadata fallback
+
+1. Select a third-party CC Switch provider whose active model has no Codex model-catalog entry, or temporarily remove only that model entry from a disposable catalog fixture.
+2. Switch to that provider from CodexMobile. Repeat the same-provider switch once after it is already current.
+3. Inspect the `model_catalog_json` referenced by the projected `~/.codex/config.toml`.
+4. Repeat with an existing third-party model entry whose provider capabilities include a custom context window, image/search flags, or other provider-specific fields.
+5. Force a runtime reload failure in a fixture and inspect the catalog afterward.
+
+Expected results:
+
+- A missing third-party model entry is created from CC Switch `modelCatalog` identity/context/reasoning data when available, with a local official Codex model used only as the schema template.
+- The repaired entry uses `shell_type: unified_exec`, `apply_patch_tool_type: freeform`, `multi_agent_version: v2`, parallel tool calls, skills/apps/plugins usage instructions, and an enabled Node REPL.
+- Existing provider-owned fields such as context window, image capability, search capability, and custom metadata survive unchanged.
+- Hosted/provider capabilities are not fabricated: search remains disabled when the provider metadata does not advertise it, Responses Lite remains disabled for synthesized third-party entries, and `tool_mode` is not forced to GPT code mode.
+- Re-selecting the current third-party provider still performs the repair and reload rather than silently no-oping.
+- If runtime reload fails, both the projected config and model catalog return to their exact previous contents; a newly-created fallback catalog is removed.
+- After repair, a coding turn can use both shell execution and `apply_patch` without `Unknown model ... fallback model metadata` or `unsupported call: apply_patch` errors.
+
 ## External CC Switch synchronization and stale-state protection
 
 1. Leave CodexMobile open with the current provider visible.

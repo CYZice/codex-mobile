@@ -226,6 +226,145 @@ describe('CC Switch status and switching', () => {
     expect(reloadRuntime).toHaveBeenCalledTimes(1)
   })
 
+  it('creates missing third-party model metadata with Codex native tools', async () => {
+    const deepSeekProvider: FixtureProvider = {
+      ...thirdPartyProvider,
+      id: 'deepseek',
+      name: 'DeepSeek',
+      config: thirdPartyProvider.config.replace('gpt-custom', 'deepseek-flash'),
+      modelCatalog: {
+        models: [{
+          model: 'deepseek-flash',
+          displayName: 'DeepSeek Flash',
+          contextWindow: 258000,
+          reasoningLevels: ['low', 'high', 'max'],
+        }],
+      },
+    }
+    const fixture = await createFixture({
+      providers: [officialProvider, deepSeekProvider],
+      currentProviderId: 'official',
+    })
+    const reloadRuntime = vi.fn(async () => undefined)
+
+    await switchCcSwitchProvider('deepseek', { paths: fixture.paths, reloadRuntime })
+
+    const projected = await readFile(fixture.configPath, 'utf8')
+    expect(projected).toContain('model_catalog_json = ')
+    const catalogPath = join(fixture.codexHome, 'codex-mobile-model-catalog.json')
+    const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as { models: Array<Record<string, unknown>> }
+    const model = catalog.models.find((entry) => entry.slug === 'deepseek-flash')
+    expect(model).toMatchObject({
+      slug: 'deepseek-flash',
+      display_name: 'DeepSeek Flash',
+      context_window: 258000,
+      max_context_window: 258000,
+      default_reasoning_level: 'high',
+      shell_type: 'unified_exec',
+      apply_patch_tool_type: 'freeform',
+      multi_agent_version: 'v2',
+      supports_parallel_tool_calls: true,
+      include_skills_usage_instructions: true,
+      include_plugin_usage_instructions: true,
+      include_apps_usage_instructions: true,
+      node_repl_disabled: false,
+      supports_search_tool: false,
+      use_responses_lite: false,
+      tool_mode: null,
+    })
+    expect(model?.supported_reasoning_levels).toEqual([
+      { effort: 'low', description: 'Fast responses with lighter reasoning' },
+      { effort: 'high', description: 'Greater reasoning depth for complex problems' },
+      { effort: 'max', description: 'Maximum reasoning depth for the hardest problems' },
+    ])
+  })
+
+  it('normalizes an existing third-party catalog entry without overwriting provider capabilities', async () => {
+    const provider: FixtureProvider = {
+      ...thirdPartyProvider,
+      id: 'deepseek-existing',
+      name: 'DeepSeek Existing',
+      config: [
+        'model = "deepseek-flash"',
+        'model_provider = "custom"',
+        'model_catalog_json = "existing-catalog.json"',
+        '',
+        '[model_providers.custom]',
+        'name = "DeepSeek"',
+        'base_url = "https://example.test/v1"',
+        'wire_api = "responses"',
+        '',
+      ].join('\n'),
+    }
+    const fixture = await createFixture({
+      providers: [officialProvider, provider],
+      currentProviderId: 'official',
+    })
+    const catalogPath = join(fixture.codexHome, 'existing-catalog.json')
+    await writeFile(catalogPath, `${JSON.stringify({
+      models: [{
+        slug: 'deepseek-flash',
+        display_name: 'DeepSeek Flash',
+        context_window: 258000,
+        max_context_window: 258000,
+        shell_type: 'shell_command',
+        apply_patch_tool_type: null,
+        supports_search_tool: false,
+        supports_image_detail_original: true,
+        custom_provider_marker: 'keep-me',
+      }],
+    }, null, 2)}\n`, 'utf8')
+
+    await switchCcSwitchProvider('deepseek-existing', {
+      paths: fixture.paths,
+      reloadRuntime: async () => undefined,
+    })
+
+    const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as { models: Array<Record<string, unknown>> }
+    expect(catalog.models[0]).toMatchObject({
+      slug: 'deepseek-flash',
+      context_window: 258000,
+      shell_type: 'unified_exec',
+      apply_patch_tool_type: 'freeform',
+      multi_agent_version: 'v2',
+      supports_parallel_tool_calls: true,
+      include_skills_usage_instructions: true,
+      include_plugin_usage_instructions: true,
+      include_apps_usage_instructions: true,
+      node_repl_disabled: false,
+      supports_search_tool: false,
+      supports_image_detail_original: true,
+      custom_provider_marker: 'keep-me',
+    })
+  })
+
+  it('repairs the current third-party provider instead of treating it as a no-op', async () => {
+    const deepSeekProvider: FixtureProvider = {
+      ...thirdPartyProvider,
+      id: 'deepseek-current',
+      config: thirdPartyProvider.config.replace('gpt-custom', 'deepseek-flash'),
+      modelCatalog: {
+        models: [{ model: 'deepseek-flash', displayName: 'DeepSeek Flash', contextWindow: 258000 }],
+      },
+      isCurrent: true,
+    }
+    const fixture = await createFixture({
+      providers: [deepSeekProvider],
+      currentProviderId: 'deepseek-current',
+    })
+    const reloadRuntime = vi.fn(async () => undefined)
+
+    await switchCcSwitchProvider('deepseek-current', { paths: fixture.paths, reloadRuntime })
+
+    const catalogPath = join(fixture.codexHome, 'codex-mobile-model-catalog.json')
+    const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as { models: Array<Record<string, unknown>> }
+    expect(catalog.models.find((entry) => entry.slug === 'deepseek-flash')).toMatchObject({
+      shell_type: 'unified_exec',
+      apply_patch_tool_type: 'freeform',
+    })
+    expect(reloadRuntime).toHaveBeenCalledTimes(1)
+  })
+
   it('switches config and current markers without changing auth.json', async () => {
     const fixture = await createFixture({
       providers: [officialProvider, thirdPartyProvider],
@@ -311,6 +450,7 @@ describe('CC Switch status and switching', () => {
     const configBefore = await readFile(fixture.configPath, 'utf8')
     const settingsBefore = await readFile(fixture.settingsPath, 'utf8')
     const authBefore = await readFile(fixture.authPath)
+    const generatedCatalogPath = join(fixture.codexHome, 'codex-mobile-model-catalog.json')
     const reloadRuntime = vi.fn()
       .mockRejectedValueOnce(new Error('reload failed'))
       .mockResolvedValueOnce(undefined)
@@ -323,6 +463,7 @@ describe('CC Switch status and switching', () => {
     expect(await readFile(fixture.configPath, 'utf8')).toBe(configBefore)
     expect(await readFile(fixture.settingsPath, 'utf8')).toBe(settingsBefore)
     expect(await readFile(fixture.authPath)).toEqual(authBefore)
+    await expect(readFile(generatedCatalogPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     const db = new DatabaseSync(fixture.databasePath, { readOnly: true })
     const currentRows = db.prepare("SELECT id FROM providers WHERE app_type = 'codex' AND is_current = 1").all()
     db.close()
