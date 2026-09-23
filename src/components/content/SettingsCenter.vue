@@ -53,11 +53,17 @@ const filteredSections = computed(() => sections.filter(section => t(section.lab
 .settings-center-main { @apply min-w-0 overflow-y-auto px-8 py-10; }
 
 @media (max-width: 1023px) {
-  .settings-center { @apply flex h-full flex-col overflow-hidden; }
-  .settings-center-nav { @apply flex shrink-0 items-center gap-1 overflow-x-auto border-b border-r-0 px-3 py-2; }
-  .settings-center-nav-title { @apply hidden; }
-  .settings-center-search { @apply mb-0 w-36 shrink-0; }
-  .settings-center-nav-item { @apply mb-0 w-auto shrink-0 px-3 py-2 text-xs; }
-  .settings-center-main { @apply min-h-0 flex-1 overflow-y-auto px-4 py-6; }
+  .settings-center { @apply grid h-full grid-cols-[124px_minmax(0,1fr)] overflow-hidden; }
+  .settings-center-nav { @apply overflow-y-auto border-r border-zinc-200 px-2 py-5; }
+  .settings-center-nav-title { @apply mb-3 px-2 text-[10px]; }
+  .settings-center-search { @apply hidden; }
+  .settings-center-nav-item { @apply mb-1 w-full whitespace-normal px-2 py-2 text-xs leading-tight; }
+  .settings-center-main { @apply min-h-0 overflow-y-auto px-3 py-5; }
+}
+
+@media (max-width: 420px) {
+  .settings-center { @apply grid-cols-[108px_minmax(0,1fr)]; }
+  .settings-center-nav { @apply px-1.5; }
+  .settings-center-nav-item { @apply px-2 text-[11px]; }
 }
 </style>
