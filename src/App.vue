@@ -1,5 +1,5 @@
 <template>
-  <DesktopLayout :is-sidebar-collapsed="isSidebarCollapsed" @close-sidebar="setSidebarCollapsed(true)">
+  <Teleport to="body">
     <div v-if="isMemoryControlOpen" class="memory-control-backdrop" @click.self="closeMemoryControl">
       <section class="memory-control-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-control-title">
         <header class="memory-control-header">
@@ -17,6 +17,9 @@
         <p class="memory-control-note">{{ t('These controls apply only to the current chat and override the global settings.') }}</p>
       </section>
     </div>
+  </Teleport>
+
+  <DesktopLayout :is-sidebar-collapsed="isSidebarCollapsed" @close-sidebar="setSidebarCollapsed(true)">
     <template #sidebar>
       <section class="sidebar-root">
         <div
@@ -3756,6 +3759,7 @@ async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promis
         : (payload.command.value ? '已允许当前聊天生成记忆。' : '已禁止当前聊天生成记忆。'))
     } else {
       isMemoryControlOpen.value = true
+      showContentActionFeedback('已打开当前聊天记忆设置。')
     }
     composer?.completeSubmission()
     return

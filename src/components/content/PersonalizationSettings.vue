@@ -140,21 +140,38 @@ function formatBytes(value: number): string {
 
 async function load(): Promise<void> {
   isLoading.value = true
+  isMemoryLoading.value = true
   statusMessage.value = ''
+  memoryStatusMessage.value = ''
+  const [instructionsResult, memoryResult] = await Promise.allSettled([
+    getGlobalInstructions(),
+    getCodexNativeSettings('user'),
+  ])
   try {
-    const [nextState, nextMemorySettings] = await Promise.all([getGlobalInstructions(), getCodexNativeSettings('user')])
+    if (instructionsResult.status === 'rejected') throw instructionsResult.reason
+    const nextState = instructionsResult.value
     state.value = nextState
     draft.value = nextState.content
     savedContent.value = nextState.content
-    memorySettings.value = nextMemorySettings
-    const nextMemory = nextMemorySettings.memory ?? { enabled: false, useMemories: true, generateMemories: true, disableOnExternalContext: false }
-    memoryDraft.value = { ...nextMemory }
-    savedMemoryDraft.value = { ...nextMemory }
   } catch (error) {
     statusKind.value = 'error'
     statusMessage.value = error instanceof Error ? error.message : t('Failed to load global instructions')
   } finally {
     isLoading.value = false
+  }
+
+  try {
+    if (memoryResult.status === 'rejected') throw memoryResult.reason
+    const nextMemorySettings = memoryResult.value
+    memorySettings.value = nextMemorySettings
+    const nextMemory = nextMemorySettings.memory ?? { enabled: false, useMemories: true, generateMemories: true, disableOnExternalContext: false }
+    memoryDraft.value = { ...nextMemory }
+    savedMemoryDraft.value = { ...nextMemory }
+  } catch (error) {
+    memoryStatusKind.value = 'error'
+    memoryStatusMessage.value = error instanceof Error ? error.message : t('Failed to load memory settings')
+  } finally {
+    isMemoryLoading.value = false
   }
 }
 
