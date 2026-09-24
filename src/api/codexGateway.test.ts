@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { compactThread, getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, reloadCodexAppServer, resumeThread, saveCodexNativeSettings, startThreadReview, startThreadTurn, steerThreadTurn } from './codexGateway'
+import { compactThread, getAvailableModelIds, getAvailableModels, getCodexActivitySummary, getCodexNativeSettings, getCurrentModelConfig, getThreadDetail, listChatGptConversations, reloadCodexAppServer, resumeThread, saveCodexMemorySettings, saveCodexNativeSettings, startThreadReview, startThreadTurn, steerThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -102,6 +102,41 @@ describe('Codex activity summary', () => {
 
 describe('native Codex settings', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('uses the native Codex memory defaults when the user layer omits memory keys', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      result: {
+        config: {}, origins: {}, layers: [{ name: { type: 'user', file: 'C:\\Users\\test\\.codex\\config.toml' }, version: 'v1', config: {}, disabledReason: null }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    await expect(getCodexNativeSettings('user')).resolves.toMatchObject({
+      memory: {
+        enabled: true,
+        useMemories: true,
+        generateMemories: true,
+        disableOnExternalContext: false,
+      },
+    })
+  })
+
+  it('writes only the two native /memories settings', async () => {
+    const { requests } = mockRpcFetch()
+
+    await saveCodexMemorySettings(false, true)
+
+    expect(requests).toEqual([{
+      method: 'config/batchWrite',
+      params: {
+        edits: [
+          { keyPath: 'memories.use_memories', value: false, mergeStrategy: 'upsert' },
+          { keyPath: 'memories.generate_memories', value: true, mergeStrategy: 'upsert' },
+        ],
+        filePath: null,
+        expectedVersion: null,
+      },
+    }])
+  })
 
   it('reads the project layer and writes back to its config.toml', async () => {
     const requests: Array<Record<string, unknown>> = []

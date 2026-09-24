@@ -113,6 +113,20 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('Codex memory compatibility', () => {
+  it('removes legacy browser-only per-thread memory overrides', () => {
+    installTestWindow({
+      'codex-web-local.thread-memory.v1': JSON.stringify({
+        'thread-old': { useMemories: false, generateMemories: false },
+      }),
+    })
+
+    useDesktopState()
+
+    expect(window.localStorage.removeItem).toHaveBeenCalledWith('codex-web-local.thread-memory.v1')
+  })
+})
+
 describe('filterGroupsByWorkspaceRoots', () => {
   it('keeps projectless chats visible when workspace roots are configured', () => {
     const groups: UiProjectGroup[] = [

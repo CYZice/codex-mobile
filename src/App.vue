@@ -3,18 +3,18 @@
     <div v-if="isMemoryControlOpen" class="memory-control-backdrop" @click.self="closeMemoryControl">
       <section class="memory-control-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-control-title">
         <header class="memory-control-header">
-          <div><h2 id="memory-control-title">{{ t('Chat memory') }}</h2><p>{{ t('Choose what this chat can read and generate.') }}</p></div>
+          <div><h2 id="memory-control-title">{{ t('Memory') }}</h2><p>{{ t('Configure how Codex uses and generates local memories.') }}</p></div>
           <button type="button" class="memory-control-close" @click="closeMemoryControl">×</button>
         </header>
-        <button type="button" class="memory-control-row" @click="toggleThreadMemory('useMemories')">
-          <span><strong>{{ t('Use existing memories') }}</strong><small>{{ t('Read relevant local memories in this chat.') }}</small></span>
-          <span class="memory-control-toggle" :class="{ 'is-on': effectiveThreadMemory.useMemories }" />
+        <button type="button" class="memory-control-row" :disabled="isMemoryControlSaving" @click="toggleMemorySetting('useMemories')">
+          <span><strong>{{ t('Use existing memories') }}</strong><small>{{ t('Inject relevant local memories into Codex sessions.') }}</small></span>
+          <span class="memory-control-toggle" :class="{ 'is-on': globalMemorySettings.useMemories }" />
         </button>
-        <button type="button" class="memory-control-row" @click="toggleThreadMemory('generateMemories')">
-          <span><strong>{{ t('Generate memories from this chat') }}</strong><small>{{ t('Allow this chat to become an input for future memory generation.') }}</small></span>
-          <span class="memory-control-toggle" :class="{ 'is-on': effectiveThreadMemory.generateMemories }" />
+        <button type="button" class="memory-control-row" :disabled="isMemoryControlSaving" @click="toggleMemorySetting('generateMemories')">
+          <span><strong>{{ t('Generate memories') }}</strong><small>{{ t('Allow new chats to become inputs for future memory generation.') }}</small></span>
+          <span class="memory-control-toggle" :class="{ 'is-on': globalMemorySettings.generateMemories }" />
         </button>
-        <p class="memory-control-note">{{ t('These controls apply only to the current chat and override the global settings.') }}</p>
+        <p class="memory-control-note">{{ t('These are the Codex memory defaults. New chats inherit them automatically.') }}</p>
       </section>
     </div>
   </Teleport>
@@ -1248,6 +1248,7 @@ import {
   getCcSwitchStatus,
   getCodexLoginStatus,
   getCodexNativeSettings,
+  saveCodexMemorySettings,
   getArchivedThreadGroupsPage,
   completeCodexLogin,
   compactThread,
@@ -1476,7 +1477,6 @@ const {
   availableModelLabels,
   availableModelReasoningEfforts,
   selectedCollaborationMode,
-  selectedThreadMemory,
   selectedPermissionPreset,
   selectedModelId,
   modelRerouteByThreadId,
@@ -1519,7 +1519,6 @@ const {
   reorderQueuedMessage,
   steerQueuedMessage,
   setSelectedCollaborationMode,
-  setThreadMemorySettings,
   setSelectedPermissionPreset,
   readModelIdForThread,
   setSelectedModelIdForThread,
@@ -1648,18 +1647,46 @@ const defaultNewProjectName = ref('New Project (1)')
 const homeDirectory = ref('')
 const isSettingsOpen = ref(false)
 const isMemoryControlOpen = ref(false)
-const globalMemorySettings = ref({ enabled: false, useMemories: true, generateMemories: true })
-const effectiveThreadMemory = computed(() => ({
-  useMemories: selectedThreadMemory.value.useMemories ?? (globalMemorySettings.value.enabled && globalMemorySettings.value.useMemories),
-  generateMemories: selectedThreadMemory.value.generateMemories ?? (globalMemorySettings.value.enabled && globalMemorySettings.value.generateMemories),
-}))
+const isMemoryControlSaving = ref(false)
+const globalMemorySettings = ref({ enabled: true, useMemories: true, generateMemories: true })
+
+async function refreshGlobalMemorySettings(): Promise<void> {
+  const settings = await getCodexNativeSettings('user')
+  if (!settings.memory) return
+  globalMemorySettings.value = {
+    enabled: settings.memory.enabled,
+    useMemories: settings.memory.useMemories,
+    generateMemories: settings.memory.generateMemories,
+  }
+}
 
 function closeMemoryControl(): void {
   isMemoryControlOpen.value = false
 }
 
-function toggleThreadMemory(setting: 'useMemories' | 'generateMemories'): void {
-  setThreadMemorySettings(selectedThreadId.value, { [setting]: !effectiveThreadMemory.value[setting] })
+async function setMemorySetting(setting: 'useMemories' | 'generateMemories', value: boolean): Promise<void> {
+  if (isMemoryControlSaving.value) return
+  const next = {
+    ...globalMemorySettings.value,
+    [setting]: value,
+  }
+  isMemoryControlSaving.value = true
+  try {
+    await saveCodexMemorySettings(next.useMemories, next.generateMemories)
+    await reloadCodexAppServer()
+    globalMemorySettings.value = next
+    showContentActionFeedback(setting === 'useMemories'
+      ? (next.useMemories ? '已启用现有记忆。' : '已停用现有记忆。')
+      : (next.generateMemories ? '已启用记忆生成；新对话默认参与记忆生成。' : '已停用记忆生成；新对话默认不参与记忆生成。'))
+  } catch (error) {
+    showContentActionFeedback(error instanceof Error ? error.message : '保存记忆设置失败。', 'error')
+  } finally {
+    isMemoryControlSaving.value = false
+  }
+}
+
+function toggleMemorySetting(setting: 'useMemories' | 'generateMemories'): void {
+  void setMemorySetting(setting, !globalMemorySettings.value[setting])
 }
 const isRefreshingMessages = ref(false)
 const isArchivedChatsOpen = ref(false)
@@ -2240,15 +2267,7 @@ onMounted(() => {
   applyDarkMode()
   darkModeMediaQuery?.addEventListener('change', applyDarkMode)
   void initialize()
-  void getCodexNativeSettings('user').then((settings) => {
-    if (settings.memory) {
-      globalMemorySettings.value = {
-        enabled: settings.memory.enabled,
-        useMemories: settings.memory.useMemories,
-        generateMemories: settings.memory.generateMemories,
-      }
-    }
-  }).catch(() => undefined)
+  void refreshGlobalMemorySettings().catch(() => undefined)
   void loadHomeDirectory()
   void loadWorkspaceRootOptionsState()
   void refreshDefaultProjectName()
@@ -3745,21 +3764,13 @@ async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promis
   }
 
   if (payload.command.name === 'memories') {
-    const threadId = selectedThreadId.value
-    if (!threadId && !isHomeRoute.value) {
-      desktopError.value = 'Open an existing thread before changing memory controls.'
-      return
-    }
     if (payload.command.setting) {
-      setThreadMemorySettings(threadId, {
-        [payload.command.setting === 'use' ? 'useMemories' : 'generateMemories']: payload.command.value === true,
-      })
-      showContentActionFeedback(payload.command.setting === 'use'
-        ? (payload.command.value ? '已允许当前聊天读取记忆。' : '已禁止当前聊天读取记忆。')
-        : (payload.command.value ? '已允许当前聊天生成记忆。' : '已禁止当前聊天生成记忆。'))
+      const setting = payload.command.setting === 'use' ? 'useMemories' : 'generateMemories'
+      await setMemorySetting(setting, payload.command.value === true)
     } else {
+      await refreshGlobalMemorySettings().catch(() => undefined)
       isMemoryControlOpen.value = true
-      showContentActionFeedback('已打开当前聊天记忆设置。')
+      showContentActionFeedback('已打开 Codex 记忆设置。')
     }
     composer?.completeSubmission()
     return

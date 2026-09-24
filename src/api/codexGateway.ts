@@ -1563,22 +1563,16 @@ export type ResumedThread = {
   turnIndexByTurnId: ThreadTurnIndexById
 }
 
-export interface ThreadMemorySettings {
-  useMemories: boolean | null
-  generateMemories: boolean | null
-}
-
 const RESUME_THREAD_COALESCE_TTL_MS = 30_000
 const recentResumeThreadById = new Map<string, Promise<ResumedThread>>()
 
-export async function resumeThread(threadId: string, memory?: ThreadMemorySettings): Promise<ResumedThread> {
-  const resumeKey = `${threadId}:${memory?.useMemories == null ? 'inherit' : memory.useMemories ? 'on' : 'off'}:${memory?.generateMemories == null ? 'inherit' : memory.generateMemories ? 'on' : 'off'}`
+export async function resumeThread(threadId: string): Promise<ResumedThread> {
+  const resumeKey = threadId
   const existing = recentResumeThreadById.get(resumeKey)
   if (existing) return existing
 
   const promise = (async () => {
     const params: Record<string, unknown> = { threadId }
-    if (memory) params.config = { memories: { use_memories: memory.useMemories, generate_memories: memory.generateMemories } }
     const payload = await callRpc<ThreadResumeResponse>('thread/resume', params, { timeoutMs: 15_000 })
     const startTurnIndex = readThreadTurnStartIndex(payload)
     const messages = normalizeThreadMessagesV2(payload, startTurnIndex)
@@ -1754,7 +1748,6 @@ export type StartThreadOptions = {
   outputDirectory?: string
   workspaceRoot?: string
   model?: string
-  memory?: ThreadMemorySettings
 }
 
 const CHATGPT_READ_THREAD_DYNAMIC_TOOL = {
@@ -1794,9 +1787,6 @@ export async function startThread(options: StartThreadOptions = {}): Promise<Sta
     }
     if (typeof options.model === 'string' && options.model.trim().length > 0) {
       params.model = options.model.trim()
-    }
-    if (options.memory) {
-      params.config = { memories: { use_memories: options.memory.useMemories, generate_memories: options.memory.generateMemories } }
     }
     params.dynamicTools = [CHATGPT_READ_THREAD_DYNAMIC_TOOL]
     const payload = await callRpc<ThreadStartResponse>('thread/start', params)
@@ -2740,7 +2730,7 @@ export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: st
     verbosity: typeof layerConfig.model_verbosity === 'string' ? layerConfig.model_verbosity : '',
     reasoningSummary: typeof layerConfig.model_reasoning_summary === 'string' ? layerConfig.model_reasoning_summary : '',
     memory: {
-      enabled: readLayerBoolean(features, 'memories', 'features.memories', false),
+      enabled: readLayerBoolean(features, 'memories', 'features.memories', true),
       useMemories: readLayerBoolean(memories, 'use_memories', 'memories.use_memories', true),
       generateMemories: readLayerBoolean(memories, 'generate_memories', 'memories.generate_memories', true),
       disableOnExternalContext: readLayerBoolean(memories, 'disable_on_external_context', 'memories.disable_on_external_context', false),
@@ -2770,6 +2760,17 @@ export async function saveCodexNativeSettings(settings: CodexNativeSettings): Pr
     ] : []),
   ].map(([keyPath, value]) => ({ keyPath, value: value === '' ? null : value, mergeStrategy: value === '' ? 'replace' : 'upsert' }))
   await callRpc('config/batchWrite', { edits, filePath: settings.filePath, expectedVersion: settings.version })
+}
+
+export async function saveCodexMemorySettings(useMemories: boolean, generateMemories: boolean): Promise<void> {
+  await callRpc('config/batchWrite', {
+    edits: [
+      { keyPath: 'memories.use_memories', value: useMemories, mergeStrategy: 'upsert' },
+      { keyPath: 'memories.generate_memories', value: generateMemories, mergeStrategy: 'upsert' },
+    ],
+    filePath: null,
+    expectedVersion: null,
+  })
 }
 
 export interface CodexActivitySummary {
