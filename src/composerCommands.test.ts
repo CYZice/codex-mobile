@@ -22,6 +22,13 @@ describe('composer commands', () => {
     }
   })
 
+  it('parses current-chat memory controls', () => {
+    expect(parseComposerCommand('/memories')).toEqual({ name: 'memories' })
+    expect(parseComposerCommand('/memories use on')).toEqual({ name: 'memories', setting: 'use', value: true })
+    expect(parseComposerCommand('/memories generate off')).toEqual({ name: 'memories', setting: 'generate', value: false })
+    expect(parseComposerCommand('/memories unknown')).toBe(null)
+  })
+
   it('reads persistent goals without accepting unrelated slash prompts', () => {
     expect(parseComposerCommand('/goal')).toEqual({ name: 'goal', argument: '' })
     expect(parseComposerCommand('/GOAL ship the release')).toEqual({ name: 'goal', argument: 'ship the release' })

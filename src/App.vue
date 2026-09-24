@@ -1,5 +1,22 @@
 <template>
   <DesktopLayout :is-sidebar-collapsed="isSidebarCollapsed" @close-sidebar="setSidebarCollapsed(true)">
+    <div v-if="isMemoryControlOpen" class="memory-control-backdrop" @click.self="closeMemoryControl">
+      <section class="memory-control-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-control-title">
+        <header class="memory-control-header">
+          <div><h2 id="memory-control-title">{{ t('Chat memory') }}</h2><p>{{ t('Choose what this chat can read and generate.') }}</p></div>
+          <button type="button" class="memory-control-close" @click="closeMemoryControl">×</button>
+        </header>
+        <button type="button" class="memory-control-row" @click="toggleThreadMemory('useMemories')">
+          <span><strong>{{ t('Use existing memories') }}</strong><small>{{ t('Read relevant local memories in this chat.') }}</small></span>
+          <span class="memory-control-toggle" :class="{ 'is-on': effectiveThreadMemory.useMemories }" />
+        </button>
+        <button type="button" class="memory-control-row" @click="toggleThreadMemory('generateMemories')">
+          <span><strong>{{ t('Generate memories from this chat') }}</strong><small>{{ t('Allow this chat to become an input for future memory generation.') }}</small></span>
+          <span class="memory-control-toggle" :class="{ 'is-on': effectiveThreadMemory.generateMemories }" />
+        </button>
+        <p class="memory-control-note">{{ t('These controls apply only to the current chat and override the global settings.') }}</p>
+      </section>
+    </div>
     <template #sidebar>
       <section class="sidebar-root">
         <div
@@ -1227,6 +1244,7 @@ import {
   getAccounts,
   getCcSwitchStatus,
   getCodexLoginStatus,
+  getCodexNativeSettings,
   getArchivedThreadGroupsPage,
   completeCodexLogin,
   compactThread,
@@ -1455,6 +1473,7 @@ const {
   availableModelLabels,
   availableModelReasoningEfforts,
   selectedCollaborationMode,
+  selectedThreadMemory,
   selectedPermissionPreset,
   selectedModelId,
   modelRerouteByThreadId,
@@ -1497,6 +1516,7 @@ const {
   reorderQueuedMessage,
   steerQueuedMessage,
   setSelectedCollaborationMode,
+  setThreadMemorySettings,
   setSelectedPermissionPreset,
   readModelIdForThread,
   setSelectedModelIdForThread,
@@ -1624,6 +1644,20 @@ let threadWorktreeSummaryRequestId = 0
 const defaultNewProjectName = ref('New Project (1)')
 const homeDirectory = ref('')
 const isSettingsOpen = ref(false)
+const isMemoryControlOpen = ref(false)
+const globalMemorySettings = ref({ enabled: false, useMemories: true, generateMemories: true })
+const effectiveThreadMemory = computed(() => ({
+  useMemories: selectedThreadMemory.value.useMemories ?? (globalMemorySettings.value.enabled && globalMemorySettings.value.useMemories),
+  generateMemories: selectedThreadMemory.value.generateMemories ?? (globalMemorySettings.value.enabled && globalMemorySettings.value.generateMemories),
+}))
+
+function closeMemoryControl(): void {
+  isMemoryControlOpen.value = false
+}
+
+function toggleThreadMemory(setting: 'useMemories' | 'generateMemories'): void {
+  setThreadMemorySettings(selectedThreadId.value, { [setting]: !effectiveThreadMemory.value[setting] })
+}
 const isRefreshingMessages = ref(false)
 const isArchivedChatsOpen = ref(false)
 const archivedThreads = ref<Array<{ id: string; title: string; preview: string; updatedAtIso: string }>>([])
@@ -2203,6 +2237,15 @@ onMounted(() => {
   applyDarkMode()
   darkModeMediaQuery?.addEventListener('change', applyDarkMode)
   void initialize()
+  void getCodexNativeSettings('user').then((settings) => {
+    if (settings.memory) {
+      globalMemorySettings.value = {
+        enabled: settings.memory.enabled,
+        useMemories: settings.memory.useMemories,
+        generateMemories: settings.memory.generateMemories,
+      }
+    }
+  }).catch(() => undefined)
   void loadHomeDirectory()
   void loadWorkspaceRootOptionsState()
   void refreshDefaultProjectName()
@@ -3694,6 +3737,26 @@ async function onExecuteComposerCommand(payload: ComposerCommandPayload): Promis
       return
     }
     onSelectSpeedMode(selectedSpeedMode.value === 'fast' ? 'standard' : 'fast')
+    composer?.completeSubmission()
+    return
+  }
+
+  if (payload.command.name === 'memories') {
+    const threadId = selectedThreadId.value
+    if (!threadId && !isHomeRoute.value) {
+      desktopError.value = 'Open an existing thread before changing memory controls.'
+      return
+    }
+    if (payload.command.setting) {
+      setThreadMemorySettings(threadId, {
+        [payload.command.setting === 'use' ? 'useMemories' : 'generateMemories']: payload.command.value === true,
+      })
+      showContentActionFeedback(payload.command.setting === 'use'
+        ? (payload.command.value ? '已允许当前聊天读取记忆。' : '已禁止当前聊天读取记忆。')
+        : (payload.command.value ? '已允许当前聊天生成记忆。' : '已禁止当前聊天生成记忆。'))
+    } else {
+      isMemoryControlOpen.value = true
+    }
     composer?.completeSubmission()
     return
   }
@@ -6680,6 +6743,74 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 .sidebar-settings-row--input:has(input[type='url']),
 .sidebar-settings-provider-error {
   display: none;
+}
+
+.memory-control-backdrop {
+  @apply fixed inset-0 z-[120] flex items-center justify-center bg-black/35 px-4;
+}
+
+.memory-control-dialog {
+  @apply w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-2xl;
+}
+
+.memory-control-header {
+  @apply mb-4 flex items-start justify-between gap-4;
+}
+
+.memory-control-header h2 {
+  @apply text-lg font-semibold;
+}
+
+.memory-control-header p,
+.memory-control-note {
+  @apply mt-1 text-sm text-zinc-500;
+}
+
+.memory-control-close {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-white text-xl text-zinc-500 hover:bg-zinc-50;
+}
+
+.memory-control-row {
+  @apply flex w-full items-center justify-between gap-4 border-0 border-t border-zinc-200 bg-white px-1 py-4 text-left;
+}
+
+.memory-control-row strong,
+.memory-control-row small {
+  @apply block;
+}
+
+.memory-control-row strong {
+  @apply text-sm font-medium;
+}
+
+.memory-control-row small {
+  @apply mt-1 text-xs leading-5 text-zinc-500;
+}
+
+.memory-control-toggle {
+  @apply relative h-7 w-12 shrink-0 rounded-full bg-zinc-200 transition;
+}
+
+.memory-control-toggle::after {
+  content: '';
+  @apply absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition;
+}
+
+.memory-control-toggle.is-on {
+  @apply bg-orange-500;
+}
+
+.memory-control-toggle.is-on::after {
+  transform: translateX(20px);
+}
+
+:root.dark .memory-control-dialog {
+  @apply border-zinc-700 bg-zinc-900 text-zinc-100;
+}
+
+:root.dark .memory-control-close,
+:root.dark .memory-control-row {
+  @apply border-zinc-700 bg-zinc-900;
 }
 
 </style>

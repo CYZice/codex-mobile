@@ -43,6 +43,7 @@ import {
   type AvailableModel,
   type SkillInfo,
   type StartThreadOptions,
+  type ThreadMemorySettings,
   type ThreadQueueState,
   type WorkspaceRootsState,
 } from '../api/codexGateway'
@@ -101,6 +102,7 @@ const LEGACY_SELECTED_MODEL_STORAGE_KEY = 'codex-web-local.selected-model-id.v1'
 const PROJECT_ORDER_STORAGE_KEY = 'codex-web-local.project-order.v1'
 const PROJECT_DISPLAY_NAME_STORAGE_KEY = 'codex-web-local.project-display-name.v1'
 const COLLABORATION_MODE_STORAGE_KEY = 'codex-web-local.collaboration-mode-by-context.v1'
+const THREAD_MEMORY_STORAGE_KEY = 'codex-web-local.thread-memory.v1'
 const LEGACY_COLLABORATION_MODE_STORAGE_KEY = 'codex-web-local.collaboration-mode.v1'
 const NEW_THREAD_COLLABORATION_MODE_CONTEXT = '__new-thread__'
 const NEW_THREAD_PROVIDER_MODEL_CONTEXT_PREFIX = '__new-thread-provider__::'
@@ -367,6 +369,37 @@ function saveSelectedCollaborationModeMap(state: Record<string, CollaborationMod
     window.localStorage.removeItem(LEGACY_COLLABORATION_MODE_STORAGE_KEY)
   } catch {
     // Keep in-memory mode selection working even if localStorage writes fail.
+  }
+}
+
+function loadThreadMemoryMap(): Record<string, ThreadMemorySettings> {
+  if (typeof window === 'undefined') return createStringKeyedRecord<ThreadMemorySettings>()
+  try {
+    const raw = window.localStorage.getItem(THREAD_MEMORY_STORAGE_KEY)
+    if (!raw) return createStringKeyedRecord<ThreadMemorySettings>()
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return createStringKeyedRecord<ThreadMemorySettings>()
+    const next = createStringKeyedRecord<ThreadMemorySettings>()
+    for (const [contextId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const record = value as Record<string, unknown>
+      const useMemories = typeof record.useMemories === 'boolean' ? record.useMemories : null
+      const generateMemories = typeof record.generateMemories === 'boolean' ? record.generateMemories : null
+      if (useMemories !== null || generateMemories !== null) next[contextId] = { useMemories, generateMemories }
+    }
+    return next
+  } catch {
+    return createStringKeyedRecord<ThreadMemorySettings>()
+  }
+}
+
+function saveThreadMemoryMap(state: Record<string, ThreadMemorySettings>): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (Object.keys(state).length === 0) window.localStorage.removeItem(THREAD_MEMORY_STORAGE_KEY)
+    else window.localStorage.setItem(THREAD_MEMORY_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Keep the current in-memory state usable when storage is unavailable.
   }
 }
 
@@ -1449,6 +1482,10 @@ export function useDesktopState() {
   const selectedCollaborationMode = ref<CollaborationModeKind>(
     readSelectedCollaborationMode(selectedCollaborationModeByContext.value, selectedThreadId.value),
   )
+  const threadMemoryByContext = ref<Record<string, ThreadMemorySettings>>(loadThreadMemoryMap())
+  const selectedThreadMemory = ref<ThreadMemorySettings>(
+    threadMemoryByContext.value[toThreadContextId(selectedThreadId.value)] ?? { useMemories: null, generateMemories: null },
+  )
   const permissionState = ref<PermissionState>({
     defaultPreset: DEFAULT_PERMISSION_PRESET,
     threadPresets: {},
@@ -1790,6 +1827,7 @@ export function useDesktopState() {
       selectedCollaborationModeByContext.value,
       nextThreadId,
     )
+    selectedThreadMemory.value = threadMemoryByContext.value[toThreadContextId(nextThreadId)] ?? { useMemories: null, generateMemories: null }
     activeReasoningItemId = ''
     shouldAutoScrollOnNextAgentEvent = false
   }
@@ -1948,6 +1986,36 @@ export function useDesktopState() {
     saveSelectedCollaborationModeMap(selectedCollaborationModeByContext.value)
   }
 
+  function getThreadMemorySettings(threadId: string = selectedThreadId.value): ThreadMemorySettings {
+    return threadMemoryByContext.value[toThreadContextId(threadId)] ?? { useMemories: null, generateMemories: null }
+  }
+
+  function setThreadMemorySettings(threadId: string, next: Partial<ThreadMemorySettings>): void {
+    const contextId = toThreadContextId(threadId)
+    const current = getThreadMemorySettings(threadId)
+    const normalized: ThreadMemorySettings = {
+      useMemories: typeof next.useMemories === 'boolean' ? next.useMemories : current.useMemories,
+      generateMemories: typeof next.generateMemories === 'boolean' ? next.generateMemories : current.generateMemories,
+    }
+    const nextMap = cloneStringKeyedRecord(threadMemoryByContext.value)
+    if (normalized.useMemories === null && normalized.generateMemories === null) delete nextMap[contextId]
+    else nextMap[contextId] = normalized
+    threadMemoryByContext.value = nextMap
+    saveThreadMemoryMap(nextMap)
+    if (contextId === toThreadContextId(selectedThreadId.value)) selectedThreadMemory.value = normalized
+    if (threadId.trim()) {
+      const normalizedThreadId = threadId.trim()
+      resumedThreadById.value = { ...resumedThreadById.value, [normalizedThreadId]: false }
+      if (!inProgressById.value[normalizedThreadId]) {
+        void resumeThread(normalizedThreadId, normalized).catch(() => {
+          // The persisted UI state remains authoritative until the next successful resume.
+        }).then(() => {
+          resumedThreadById.value = { ...resumedThreadById.value, [normalizedThreadId]: true }
+        })
+      }
+    }
+  }
+
   function readPermissionPresetForThread(threadId: string): PermissionPreset {
     const normalizedThreadId = threadId.trim()
     return normalizedThreadId
@@ -2088,7 +2156,7 @@ export function useDesktopState() {
       setThreadInProgress(threadId, true)
 
       if (resumedThreadById.value[threadId] !== true) {
-        const resumedThread = await resumeThread(threadId)
+        const resumedThread = await resumeThread(threadId, getThreadMemorySettings(threadId))
         if (resumedThread.model) {
           setThreadModelId(threadId, resolveThreadModelForProvider(threadId, resumedThread.model, resumedThread.modelProvider))
         }
@@ -4832,7 +4900,7 @@ export function useDesktopState() {
       }
 
       const needsResume = resumedThreadById.value[threadId] !== true
-      const resumedThread = needsResume ? await resumeThread(threadId) : null
+      const resumedThread = needsResume ? await resumeThread(threadId, getThreadMemorySettings(threadId)) : null
       const detail = resumedThread ?? await getThreadDetail(threadId)
 
       if (detail.modelProvider) {
@@ -5489,6 +5557,8 @@ export function useDesktopState() {
     const selectedModel = readModelIdForThread(NEW_THREAD_COLLABORATION_MODE_CONTEXT).trim()
     const selectedMode = selectedCollaborationMode.value
     const selectedPermissionPreset = readPermissionPresetForThread('')
+    const selectedMemory = getThreadMemorySettings('')
+    const memoryOverride = selectedMemory.useMemories === null && selectedMemory.generateMemories === null ? undefined : selectedMemory
     if (!nextText && imageUrls.length === 0 && fileAttachments.length === 0) return ''
 
     isSendingMessage.value = true
@@ -5503,6 +5573,7 @@ export function useDesktopState() {
           outputDirectory: workspace.outputDirectory,
           workspaceRoot: workspace.workspaceRoot,
           model: selectedModel || undefined,
+          memory: memoryOverride,
         })
         threadId = startedThread.threadId
         resolvedThreadCwd = targetCwd || startedThread.cwd
@@ -5517,6 +5588,7 @@ export function useDesktopState() {
             outputDirectory: workspace.outputDirectory,
             workspaceRoot: workspace.workspaceRoot,
             model: MODEL_FALLBACK_ID,
+            memory: memoryOverride,
           })
           threadId = fallbackThread.threadId
           resolvedThreadCwd = targetCwd || fallbackThread.cwd
@@ -5637,7 +5709,7 @@ export function useDesktopState() {
 
     try {
       if (resumedThreadById.value[threadId] !== true) {
-        const resumedThread = await resumeThread(threadId)
+        const resumedThread = await resumeThread(threadId, getThreadMemorySettings(threadId))
         if (resumedThread.model) {
           setThreadModelId(threadId, resolveThreadModelForProvider(threadId, resumedThread.model, resumedThread.modelProvider))
         }
@@ -6257,6 +6329,7 @@ export function useDesktopState() {
     availableModelLabels,
     availableModelReasoningEfforts,
     selectedCollaborationMode,
+    selectedThreadMemory,
     selectedPermissionPreset,
     selectedModelId,
     modelRerouteByThreadId,
@@ -6303,6 +6376,8 @@ export function useDesktopState() {
     reorderQueuedMessage,
     steerQueuedMessage,
     setSelectedCollaborationMode,
+    getThreadMemorySettings,
+    setThreadMemorySettings,
     setSelectedPermissionPreset,
     readModelIdForThread,
     setSelectedModelIdForThread,

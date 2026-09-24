@@ -874,6 +874,7 @@ const hasDraftContext = computed(() =>
 const isInteractionDisabled = computed(() => props.disabled || !props.activeThreadId || props.isSubmitting === true)
 const slashCommands = [
   { name: 'plan' as const, description: 'Switch to Plan mode; add text after the command to send it' },
+  { name: 'memories' as const, description: 'Control memory use and generation for this chat' },
   { name: 'review' as const, description: 'Review uncommitted changes, a branch, or a commit' },
   { name: 'compact' as const, description: 'Compress context while retaining important work state' },
   { name: 'fork' as const, description: 'Fork this conversation into a new thread' },

@@ -1563,15 +1563,23 @@ export type ResumedThread = {
   turnIndexByTurnId: ThreadTurnIndexById
 }
 
+export interface ThreadMemorySettings {
+  useMemories: boolean | null
+  generateMemories: boolean | null
+}
+
 const RESUME_THREAD_COALESCE_TTL_MS = 30_000
 const recentResumeThreadById = new Map<string, Promise<ResumedThread>>()
 
-export async function resumeThread(threadId: string): Promise<ResumedThread> {
-  const existing = recentResumeThreadById.get(threadId)
+export async function resumeThread(threadId: string, memory?: ThreadMemorySettings): Promise<ResumedThread> {
+  const resumeKey = `${threadId}:${memory?.useMemories == null ? 'inherit' : memory.useMemories ? 'on' : 'off'}:${memory?.generateMemories == null ? 'inherit' : memory.generateMemories ? 'on' : 'off'}`
+  const existing = recentResumeThreadById.get(resumeKey)
   if (existing) return existing
 
   const promise = (async () => {
-    const payload = await callRpc<ThreadResumeResponse>('thread/resume', { threadId }, { timeoutMs: 15_000 })
+    const params: Record<string, unknown> = { threadId }
+    if (memory) params.config = { memories: { use_memories: memory.useMemories, generate_memories: memory.generateMemories } }
+    const payload = await callRpc<ThreadResumeResponse>('thread/resume', params, { timeoutMs: 15_000 })
     const startTurnIndex = readThreadTurnStartIndex(payload)
     const messages = normalizeThreadMessagesV2(payload, startTurnIndex)
     return {
@@ -1587,17 +1595,17 @@ export async function resumeThread(threadId: string): Promise<ResumedThread> {
     }
   })()
 
-  recentResumeThreadById.set(threadId, promise)
+  recentResumeThreadById.set(resumeKey, promise)
   const hardEvictionTimer = globalThis.setTimeout(() => {
-    if (recentResumeThreadById.get(threadId) === promise) {
-      recentResumeThreadById.delete(threadId)
+    if (recentResumeThreadById.get(resumeKey) === promise) {
+      recentResumeThreadById.delete(resumeKey)
     }
   }, RESUME_THREAD_COALESCE_TTL_MS)
   void promise.finally(() => {
     globalThis.clearTimeout(hardEvictionTimer)
     globalThis.setTimeout(() => {
-      if (recentResumeThreadById.get(threadId) === promise) {
-        recentResumeThreadById.delete(threadId)
+      if (recentResumeThreadById.get(resumeKey) === promise) {
+        recentResumeThreadById.delete(resumeKey)
       }
     }, 2000)
   }).catch(() => undefined)
@@ -1746,6 +1754,7 @@ export type StartThreadOptions = {
   outputDirectory?: string
   workspaceRoot?: string
   model?: string
+  memory?: ThreadMemorySettings
 }
 
 const CHATGPT_READ_THREAD_DYNAMIC_TOOL = {
@@ -1785,6 +1794,9 @@ export async function startThread(options: StartThreadOptions = {}): Promise<Sta
     }
     if (typeof options.model === 'string' && options.model.trim().length > 0) {
       params.model = options.model.trim()
+    }
+    if (options.memory) {
+      params.config = { memories: { use_memories: options.memory.useMemories, generate_memories: options.memory.generateMemories } }
     }
     params.dynamicTools = [CHATGPT_READ_THREAD_DYNAMIC_TOOL]
     const payload = await callRpc<ThreadStartResponse>('thread/start', params)
@@ -2675,6 +2687,13 @@ function normalizeStoredQueuedMessage(value: unknown): StoredQueuedMessage | nul
 
 export type CodexSettingsScope = 'user' | 'project'
 
+export interface MemorySettings {
+  enabled: boolean
+  useMemories: boolean
+  generateMemories: boolean
+  disableOnExternalContext: boolean
+}
+
 export interface CodexNativeSettings {
   scope: CodexSettingsScope
   filePath: string | null
@@ -2687,6 +2706,7 @@ export interface CodexNativeSettings {
   webSearch: string
   verbosity: string
   reasoningSummary: string
+  memory?: MemorySettings
 }
 
 export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: string): Promise<CodexNativeSettings> {
@@ -2700,6 +2720,13 @@ export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: st
       ? `${String(source.dotCodexFolder).replace(/[\\/]$/, '')}/config.toml`
       : null
   const workspace = layerConfig.sandbox_workspace_write as Record<string, unknown> | undefined
+  const features = layerConfig.features as Record<string, unknown> | undefined
+  const memories = layerConfig.memories as Record<string, unknown> | undefined
+  const readLayerBoolean = (nested: Record<string, unknown> | undefined, nestedKey: string, dottedKey: string, fallback: boolean): boolean => {
+    if (typeof nested?.[nestedKey] === 'boolean') return nested[nestedKey] as boolean
+    if (typeof layerConfig[dottedKey] === 'boolean') return layerConfig[dottedKey] as boolean
+    return fallback
+  }
   return {
     scope,
     filePath,
@@ -2712,6 +2739,12 @@ export async function getCodexNativeSettings(scope: CodexSettingsScope, cwd?: st
     webSearch: typeof layerConfig.web_search === 'string' ? layerConfig.web_search : '',
     verbosity: typeof layerConfig.model_verbosity === 'string' ? layerConfig.model_verbosity : '',
     reasoningSummary: typeof layerConfig.model_reasoning_summary === 'string' ? layerConfig.model_reasoning_summary : '',
+    memory: {
+      enabled: readLayerBoolean(features, 'memories', 'features.memories', false),
+      useMemories: readLayerBoolean(memories, 'use_memories', 'memories.use_memories', true),
+      generateMemories: readLayerBoolean(memories, 'generate_memories', 'memories.generate_memories', true),
+      disableOnExternalContext: readLayerBoolean(memories, 'disable_on_external_context', 'memories.disable_on_external_context', false),
+    },
   }
 }
 
@@ -2719,6 +2752,7 @@ export async function saveCodexNativeSettings(settings: CodexNativeSettings): Pr
   if (settings.scope === 'project' && !settings.filePath) {
     throw new Error('Codex did not expose a Project config path for this workspace.')
   }
+  const memory = settings.memory ?? { enabled: false, useMemories: true, generateMemories: true, disableOnExternalContext: false }
   const edits = [
     ['model', settings.model],
     ['model_reasoning_effort', settings.reasoningEffort],
@@ -2728,6 +2762,12 @@ export async function saveCodexNativeSettings(settings: CodexNativeSettings): Pr
     ['web_search', settings.webSearch],
     ['model_verbosity', settings.verbosity],
     ['model_reasoning_summary', settings.reasoningSummary],
+    ...(settings.scope === 'user' ? [
+      ['features.memories', memory.enabled],
+      ['memories.use_memories', memory.useMemories],
+      ['memories.generate_memories', memory.generateMemories],
+      ['memories.disable_on_external_context', memory.disableOnExternalContext],
+    ] : []),
   ].map(([keyPath, value]) => ({ keyPath, value: value === '' ? null : value, mergeStrategy: value === '' ? 'replace' : 'upsert' }))
   await callRpc('config/batchWrite', { edits, filePath: settings.filePath, expectedVersion: settings.version })
 }
@@ -2745,6 +2785,7 @@ export interface CodexActivitySummary {
 
 export type RuntimeDiagnosticsSnapshot = {
   appServer: { lifecycle: string; generation: number; pid: number | null; startedAtIso: string | null; initializedAtIso: string | null; command: string | null; sandbox: string | null; approval: string | null; memories: boolean | null; pendingRpcCount: number; activeTurnCount: number; pendingServerRequestCount: number; lastExit: { atIso: string; code: number | null; signal: string | null } | null; lastReload: { atIso: string; cause: string } | null; lastError: { atIso: string; message: string } | null }
+  memory?: { enabled: boolean | null; generationStatus: 'unknown' | 'idle' | 'queued' | 'running' | 'success' | 'error'; storagePath: string }
   stderrTail: string
   recentEvents: Array<{ atIso: string; kind: string; detail?: Record<string, unknown> }>
   websocket: { activeSubscribers: number; totalConnections: number; lastEvent: { atIso: string; kind: string; detail?: Record<string, unknown> } | null }

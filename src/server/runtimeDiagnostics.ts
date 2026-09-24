@@ -32,6 +32,7 @@ export type RuntimeDiagnosticsSnapshot = {
     lastReload: { atIso: string; cause: string } | null
     lastError: { atIso: string; message: string } | null
   }
+  memory: { enabled: boolean | null; generationStatus: 'unknown'; storagePath: string }
   stderrTail: string
   recentEvents: RuntimeDiagnosticEvent[]
   websocket: { activeSubscribers: number; totalConnections: number; lastEvent: RuntimeDiagnosticEvent | null }
@@ -119,6 +120,7 @@ export class RuntimeDiagnostics {
   snapshot(): RuntimeDiagnosticsSnapshot {
     return {
       appServer: { ...this.state }, stderrTail: redactDiagnosticText(this.stderrTail, DIAGNOSTICS_MAX_STDERR),
+      memory: { enabled: this.state.memories, generationStatus: 'unknown', storagePath: join(codexHome(), 'memories') },
       recentEvents: this.events.slice(0, DIAGNOSTICS_MAX_EVENTS),
       websocket: { activeSubscribers: this.websocketActive, totalConnections: this.websocketTotal, lastEvent: this.websocketLastEvent },
       log: { enabled: true, currentBytes: this.currentBytes, backupCount: this.backupCount, maxBytes: DIAGNOSTICS_MAX_LOG_BYTES },

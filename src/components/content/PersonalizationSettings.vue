@@ -62,6 +62,46 @@
           {{ statusMessage }}
         </p>
       </section>
+
+      <section class="personalization-settings-memory" aria-labelledby="memory-settings-title">
+        <header class="personalization-settings-editor-header">
+          <div>
+            <h2 id="memory-settings-title">{{ t('Codex memory') }}</h2>
+            <p>{{ t('Choose how local memories are used across chats on this machine.') }}</p>
+          </div>
+          <button
+            class="personalization-settings-save"
+            type="button"
+            :disabled="isMemoryLoading || isMemorySaving || !memorySettingsChanged"
+            @click="saveMemorySettings"
+          >
+            {{ isMemorySaving ? t('Saving…') : t('Save') }}
+          </button>
+        </header>
+
+        <div v-if="isMemoryLoading" class="personalization-settings-loading">{{ t('Loading…') }}</div>
+        <div v-else class="personalization-settings-memory-list">
+          <button class="personalization-settings-memory-row" type="button" @click="memoryDraft.enabled = !memoryDraft.enabled">
+            <span><strong>{{ t('Enable local memories') }}</strong><small>{{ t('Use memories created from chats on this computer.') }}</small></span>
+            <span class="personalization-settings-toggle" :class="{ 'is-on': memoryDraft.enabled }" aria-hidden="true" />
+          </button>
+          <button class="personalization-settings-memory-row" type="button" @click="memoryDraft.useMemories = !memoryDraft.useMemories">
+            <span><strong>{{ t('Use existing memories in future chats') }}</strong><small>{{ t('Inject relevant local memories into new Codex sessions.') }}</small></span>
+            <span class="personalization-settings-toggle" :class="{ 'is-on': memoryDraft.useMemories }" aria-hidden="true" />
+          </button>
+          <button class="personalization-settings-memory-row" type="button" @click="memoryDraft.generateMemories = !memoryDraft.generateMemories">
+            <span><strong>{{ t('Allow chats to create memories') }}</strong><small>{{ t('Let eligible chats become inputs for future memory generation.') }}</small></span>
+            <span class="personalization-settings-toggle" :class="{ 'is-on': memoryDraft.generateMemories }" aria-hidden="true" />
+          </button>
+          <button class="personalization-settings-memory-row" type="button" @click="memoryDraft.disableOnExternalContext = !memoryDraft.disableOnExternalContext">
+            <span><strong>{{ t('Skip memory generation after external tools') }}</strong><small>{{ t('Skip generation for chats that use MCP, web search, or other external context.') }}</small></span>
+            <span class="personalization-settings-toggle" :class="{ 'is-on': memoryDraft.disableOnExternalContext }" aria-hidden="true" />
+          </button>
+        </div>
+        <p v-if="memoryStatusMessage" class="personalization-settings-status" :data-kind="memoryStatusKind" role="status" aria-live="polite">
+          {{ memoryStatusMessage }}
+        </p>
+      </section>
     </main>
   </div>
 </template>
@@ -69,7 +109,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import IconTablerSettings from '../icons/IconTablerSettings.vue'
-import { getGlobalInstructions, saveGlobalInstructions, type GlobalInstructionsState } from '../../api/codexGateway'
+import { getCodexNativeSettings, getGlobalInstructions, reloadCodexAppServer, saveCodexNativeSettings, saveGlobalInstructions, type CodexNativeSettings, type GlobalInstructionsState, type MemorySettings } from '../../api/codexGateway'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 
 const RECOMMENDED_MAX_BYTES = 32 * 1024
@@ -81,9 +121,17 @@ const isLoading = ref(true)
 const isSaving = ref(false)
 const statusMessage = ref('')
 const statusKind = ref<'success' | 'error'>('success')
+const memorySettings = ref<CodexNativeSettings | null>(null)
+const memoryDraft = ref<MemorySettings>({ enabled: false, useMemories: true, generateMemories: true, disableOnExternalContext: false })
+const savedMemoryDraft = ref<MemorySettings>({ ...memoryDraft.value })
+const isMemoryLoading = ref(true)
+const isMemorySaving = ref(false)
+const memoryStatusMessage = ref('')
+const memoryStatusKind = ref<'success' | 'error'>('success')
 
 const byteCount = computed(() => new TextEncoder().encode(draft.value).byteLength)
 const hasChanges = computed(() => draft.value !== savedContent.value)
+const memorySettingsChanged = computed(() => JSON.stringify(memoryDraft.value) !== JSON.stringify(savedMemoryDraft.value))
 
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`
@@ -94,15 +142,39 @@ async function load(): Promise<void> {
   isLoading.value = true
   statusMessage.value = ''
   try {
-    const nextState = await getGlobalInstructions()
+    const [nextState, nextMemorySettings] = await Promise.all([getGlobalInstructions(), getCodexNativeSettings('user')])
     state.value = nextState
     draft.value = nextState.content
     savedContent.value = nextState.content
+    memorySettings.value = nextMemorySettings
+    const nextMemory = nextMemorySettings.memory ?? { enabled: false, useMemories: true, generateMemories: true, disableOnExternalContext: false }
+    memoryDraft.value = { ...nextMemory }
+    savedMemoryDraft.value = { ...nextMemory }
   } catch (error) {
     statusKind.value = 'error'
     statusMessage.value = error instanceof Error ? error.message : t('Failed to load global instructions')
   } finally {
     isLoading.value = false
+  }
+}
+
+async function saveMemorySettings(): Promise<void> {
+  if (!memorySettings.value || isMemorySaving.value || !memorySettingsChanged.value) return
+  isMemorySaving.value = true
+  memoryStatusMessage.value = ''
+  try {
+    const nextSettings = { ...memorySettings.value, memory: { ...memoryDraft.value } } as CodexNativeSettings
+    await saveCodexNativeSettings(nextSettings)
+    await reloadCodexAppServer()
+    memorySettings.value = nextSettings
+    savedMemoryDraft.value = { ...memoryDraft.value }
+    memoryStatusKind.value = 'success'
+    memoryStatusMessage.value = t('Memory settings saved and the app-server was reloaded.')
+  } catch (error) {
+    memoryStatusKind.value = 'error'
+    memoryStatusMessage.value = error instanceof Error ? error.message : t('Failed to save memory settings')
+  } finally {
+    isMemorySaving.value = false
   }
 }
 
@@ -239,6 +311,52 @@ onMounted(() => {
 
 .personalization-settings-status[data-kind='error'] {
   @apply bg-red-50 text-red-700;
+}
+
+.personalization-settings-memory {
+  @apply mx-auto mt-10 w-full max-w-[820px] border-t border-zinc-200 pt-8;
+}
+
+.personalization-settings-memory-list {
+  @apply overflow-hidden rounded-2xl border border-zinc-200;
+}
+
+.personalization-settings-memory-row {
+  @apply flex w-full items-center justify-between gap-5 border-0 border-b border-zinc-200 bg-white px-5 py-4 text-left last:border-b-0 hover:bg-zinc-50;
+}
+
+.personalization-settings-memory-row span:first-child {
+  @apply min-w-0;
+}
+
+.personalization-settings-memory-row strong,
+.personalization-settings-memory-row small {
+  @apply block;
+}
+
+.personalization-settings-memory-row strong {
+  @apply text-sm font-medium text-zinc-900;
+}
+
+.personalization-settings-memory-row small {
+  @apply mt-1 text-xs leading-5 text-zinc-500;
+}
+
+.personalization-settings-toggle {
+  @apply relative h-7 w-12 shrink-0 rounded-full bg-zinc-200 transition;
+}
+
+.personalization-settings-toggle::after {
+  content: '';
+  @apply absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition;
+}
+
+.personalization-settings-toggle.is-on {
+  @apply bg-orange-500;
+}
+
+.personalization-settings-toggle.is-on::after {
+  transform: translateX(20px);
 }
 
 @media (max-width: 1023px) {

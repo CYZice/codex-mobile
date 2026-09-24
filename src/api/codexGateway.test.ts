@@ -109,13 +109,14 @@ describe('native Codex settings', () => {
       const request = JSON.parse(String(init?.body)) as Record<string, unknown>
       requests.push(request)
       return new Response(JSON.stringify({ result: request.method === 'config/read' ? {
-        config: {}, origins: {}, layers: [{ name: { type: 'project', dotCodexFolder: 'D:\\repo\\.codex' }, version: 'v1', config: { model: 'gpt-5.6-sol', sandbox_mode: 'workspace-write' }, disabledReason: null }],
+        config: {}, origins: {}, layers: [{ name: { type: 'project', dotCodexFolder: 'D:\\repo\\.codex' }, version: 'v1', config: { model: 'gpt-5.6-sol', sandbox_mode: 'workspace-write', 'features.memories': true, 'memories.use_memories': false, 'memories.generate_memories': true, 'memories.disable_on_external_context': true }, disabledReason: null }],
       } : {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }))
 
     const settings = await getCodexNativeSettings('project', 'D:\\repo')
     expect(settings.filePath).toBe('D:\\repo\\.codex/config.toml')
     expect(settings.model).toBe('gpt-5.6-sol')
+    expect(settings.memory).toEqual({ enabled: true, useMemories: false, generateMemories: true, disableOnExternalContext: true })
     await saveCodexNativeSettings(settings)
     expect(requests[1]).toMatchObject({ method: 'config/batchWrite', params: { filePath: 'D:\\repo\\.codex/config.toml', expectedVersion: 'v1' } })
   })

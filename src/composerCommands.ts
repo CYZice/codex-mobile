@@ -2,6 +2,7 @@ export type ComposerCommand =
   | { name: 'plan'; argument: string }
   | { name: 'review'; target?: ReviewCommandTarget }
   | { name: 'compact' | 'fork' | 'status' | 'fast' }
+  | { name: 'memories'; setting?: 'use' | 'generate'; value?: boolean }
   | { name: 'goal'; argument: string }
 
 export type ComposerCommandName = ComposerCommand['name']
@@ -12,11 +13,17 @@ export type ReviewCommandTarget =
 
 export function parseComposerCommand(value: string): ComposerCommand | null {
   const trimmed = value.trim()
-  const tokenMatch = trimmed.match(/^\/(plan|review|compact|fork|status|fast|goal)(?:\s+([\s\S]*))?$/i)
+  const tokenMatch = trimmed.match(/^\/(plan|review|compact|fork|status|fast|goal|memories)(?:\s+([\s\S]*))?$/i)
   if (!tokenMatch) return null
 
   const name = tokenMatch[1]?.toLowerCase()
   const argument = tokenMatch[2]?.trim() ?? ''
+  if (name === 'memories') {
+    if (!argument) return { name }
+    const match = argument.match(/^(use|generate)\s+(on|off)$/iu)
+    if (!match) return null
+    return { name, setting: match[1].toLowerCase() as 'use' | 'generate', value: match[2].toLowerCase() === 'on' }
+  }
   if (name === 'plan' || name === 'goal') return { name, argument }
   if (name === 'review') {
     if (!argument) return { name }
