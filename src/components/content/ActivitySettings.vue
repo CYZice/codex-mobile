@@ -106,62 +106,74 @@
             <h3>{{ t('Model distribution') }}</h3>
             <p>{{ t('Top 5 models by token usage; remaining models are grouped into Others.') }}</p>
           </div>
-          <strong>{{ compact(data.totals.totalTokens) }} {{ t('tokens') }}</strong>
         </div>
 
-        <div class="distribution-card">
-          <div class="distribution-bar" role="group" :aria-label="t('Model distribution')">
-            <button
-              v-for="(model, index) in modelDistribution"
-              :key="model.key"
-              type="button"
-              class="distribution-segment"
-              :class="[`distribution-segment--${index + 1}`, { selected: selectedDistribution?.key === model.key }]"
-              :style="{ width: share(model.totalTokens) }"
-              :title="`${model.label}: ${compact(model.totalTokens)} · ${share(model.totalTokens)}`"
-              @click="selectedModelKey = model.key"
-            >
-              <span class="sr-only">{{ model.label }}</span>
-            </button>
-          </div>
-
-          <div class="distribution-legend">
-            <button
-              v-for="(model, index) in modelDistribution"
-              :key="model.key"
-              type="button"
-              :class="{ selected: selectedDistribution?.key === model.key }"
-              @click="selectedModelKey = model.key"
-            >
-              <i :class="`distribution-dot--${index + 1}`" />
-              <span>{{ model.label }}</span>
-              <b>{{ share(model.totalTokens) }}</b>
-              <small>{{ compact(model.totalTokens) }}</small>
-            </button>
-          </div>
-
-          <div v-if="selectedDistribution" class="distribution-details">
-            <div class="distribution-details-heading">
+        <div class="distribution-panels">
+          <article v-for="panel in distributionPanels" :key="panel.id" class="distribution-card">
+            <div class="distribution-card-heading">
               <div>
-                <strong>{{ selectedDistribution.label }}</strong>
-                <span>{{ compact(selectedDistribution.totalTokens) }} · {{ share(selectedDistribution.totalTokens) }}</span>
+                <h4>{{ panel.title }}</h4>
+                <p>{{ panel.subtitle }}</p>
               </div>
-              <small v-if="selectedDistribution.key === 'others'">
-                {{ selectedDistribution.members.length }} {{ t('models grouped') }}
-              </small>
+              <strong>{{ compact(panel.totalTokens) }}</strong>
             </div>
-            <div class="distribution-metrics">
-              <span><b>{{ compact(selectedDistribution.freshInputTokens) }}</b>{{ t('fresh input') }}</span>
-              <span><b>{{ compact(selectedDistribution.cacheReadTokens) }}</b>{{ t('cache read') }}</span>
-              <span><b>{{ percent(modelCacheHitRate(selectedDistribution)) }}</b>{{ t('cache hit') }}</span>
-              <span><b>{{ compact(selectedDistribution.outputTokens) }}</b>{{ t('output') }}</span>
-              <span><b>{{ selectedDistribution.requests.toLocaleString() }}</b>{{ t('requests') }}</span>
-              <span><b>{{ money(selectedDistribution.totalCostUsd) }}</b>{{ t('cost') }}</span>
+
+            <div class="distribution-bar" role="group" :aria-label="panel.title">
+              <button
+                v-for="(model, index) in panel.items"
+                :key="model.key"
+                type="button"
+                class="distribution-segment"
+                :class="[`distribution-segment--${index + 1}`, { selected: selectedDistribution(panel)?.key === model.key }]"
+                :style="{ width: modelShare(model.totalTokens, panel.totalTokens) }"
+                :title="`${model.label}: ${compact(model.totalTokens)} · ${modelShare(model.totalTokens, panel.totalTokens)}`"
+                @click="selectDistribution(panel.id, model.key)"
+              >
+                <span class="sr-only">{{ model.label }}</span>
+              </button>
             </div>
-            <p v-if="selectedDistribution.key === 'others'" class="distribution-members">
-              {{ selectedDistribution.members.join(' · ') }}
-            </p>
-          </div>
+
+            <div class="distribution-legend">
+              <button
+                v-for="(model, index) in panel.items"
+                :key="model.key"
+                type="button"
+                :class="{ selected: selectedDistribution(panel)?.key === model.key }"
+                @click="selectDistribution(panel.id, model.key)"
+              >
+                <i :class="`distribution-dot--${index + 1}`" />
+                <span>{{ model.label }}</span>
+                <b>{{ modelShare(model.totalTokens, panel.totalTokens) }}</b>
+                <small>{{ compact(model.totalTokens) }}</small>
+              </button>
+            </div>
+
+            <div v-if="selectedDistribution(panel)" class="distribution-details">
+              <div class="distribution-details-heading">
+                <div>
+                  <strong>{{ selectedDistribution(panel)?.label }}</strong>
+                  <span>
+                    {{ compact(selectedDistribution(panel)?.totalTokens ?? 0) }} ·
+                    {{ modelShare(selectedDistribution(panel)?.totalTokens ?? 0, panel.totalTokens) }}
+                  </span>
+                </div>
+                <small v-if="selectedDistribution(panel)?.key === 'others'">
+                  {{ selectedDistribution(panel)?.members.length }} {{ t('models grouped') }}
+                </small>
+              </div>
+              <div class="distribution-metrics">
+                <span><b>{{ compact(selectedDistribution(panel)?.freshInputTokens ?? 0) }}</b>{{ t('fresh input') }}</span>
+                <span><b>{{ compact(selectedDistribution(panel)?.cacheReadTokens ?? 0) }}</b>{{ t('cache read') }}</span>
+                <span><b>{{ percent(modelCacheHitRate(selectedDistribution(panel))) }}</b>{{ t('cache hit') }}</span>
+                <span><b>{{ compact(selectedDistribution(panel)?.outputTokens ?? 0) }}</b>{{ t('output') }}</span>
+                <span><b>{{ (selectedDistribution(panel)?.requests ?? 0).toLocaleString() }}</b>{{ t('requests') }}</span>
+                <span><b>{{ money(selectedDistribution(panel)?.totalCostUsd ?? 0) }}</b>{{ t('cost') }}</span>
+              </div>
+              <p v-if="selectedDistribution(panel)?.key === 'others'" class="distribution-members">
+                {{ selectedDistribution(panel)?.members.join(' · ') }}
+              </p>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -246,7 +258,7 @@ const memoryIndex = ref<MemoryIndex | null>(null)
 const selectedTopic = ref<MemoryIndex['topics'][number] | null>(null)
 const source = ref<{ path: string; content: string } | null>(null)
 const memoryError = ref('')
-const selectedModelKey = ref('')
+const selectedModelKeys = ref<Record<'recent' | 'all', string>>({ recent: '', all: '' })
 const loading = ref(false)
 const error = ref('')
 const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
@@ -255,6 +267,14 @@ type ModelDistributionItem = CcSwitchUsageDashboard['models'][number] & {
   key: string
   label: string
   members: string[]
+}
+
+type DistributionPanel = {
+  id: 'recent' | 'all'
+  title: string
+  subtitle: string
+  totalTokens: number
+  items: ModelDistributionItem[]
 }
 
 function compact(value: number) {
@@ -268,8 +288,9 @@ function compact(value: number) {
 
 const money = (value: number) => `$${value.toFixed(value >= 100 ? 2 : 4)}`
 const percent = (value: number) => `${(value * 100).toFixed(1)}%`
-const share = (tokens: number) => data.value?.totals.totalTokens ? `${((tokens / data.value.totals.totalTokens) * 100).toFixed(1)}%` : '0%'
-const modelCacheHitRate = (model: CcSwitchUsageDashboard['models'][number]) => {
+const modelShare = (tokens: number, totalTokens: number) => totalTokens ? `${((tokens / totalTokens) * 100).toFixed(1)}%` : '0%'
+const modelCacheHitRate = (model: CcSwitchUsageDashboard['models'][number] | null | undefined) => {
+  if (!model) return 0
   const cacheableInput = model.freshInputTokens + model.cacheCreationTokens + model.cacheReadTokens
   return cacheableInput ? model.cacheReadTokens / cacheableInput : 0
 }
@@ -287,8 +308,7 @@ const dateRange = computed(() => {
   return `${data.value.totals.firstDate} → ${data.value.totals.latestDate}`
 })
 
-const modelDistribution = computed<ModelDistributionItem[]>(() => {
-  const models = data.value?.models ?? []
+function buildModelDistribution(models: CcSwitchUsageDashboard['models']): ModelDistributionItem[] {
   const top = models.slice(0, 5).map((model) => ({
     ...model,
     key: model.model,
@@ -315,11 +335,36 @@ const modelDistribution = computed<ModelDistributionItem[]>(() => {
     totalCostUsd: rest.reduce((sum, model) => sum + model.totalCostUsd, 0),
   })
   return top
+}
+
+const distributionPanels = computed<DistributionPanel[]>(() => {
+  const recentModels = data.value?.modelsLast30Days ?? []
+  const allModels = data.value?.models ?? []
+  return [
+    {
+      id: 'recent',
+      title: t('Last 30 days'),
+      subtitle: t('Recent model usage from CC Switch'),
+      totalTokens: recentModels.reduce((sum, model) => sum + model.totalTokens, 0),
+      items: buildModelDistribution(recentModels),
+    },
+    {
+      id: 'all',
+      title: t('All time'),
+      subtitle: t('Full model usage history from CC Switch'),
+      totalTokens: allModels.reduce((sum, model) => sum + model.totalTokens, 0),
+      items: buildModelDistribution(allModels),
+    },
+  ]
 })
 
-const selectedDistribution = computed(() => {
-  return modelDistribution.value.find((model) => model.key === selectedModelKey.value) ?? modelDistribution.value[0] ?? null
-})
+function selectedDistribution(panel: DistributionPanel): ModelDistributionItem | null {
+  return panel.items.find((model) => model.key === selectedModelKeys.value[panel.id]) ?? panel.items[0] ?? null
+}
+
+function selectDistribution(panelId: DistributionPanel['id'], modelKey: string) {
+  selectedModelKeys.value[panelId] = modelKey
+}
 
 const memoryUpdatedAt = computed(() => {
   const values = memoryIndex.value?.files.map((file) => new Date(file.updatedAt).getTime()).filter(Number.isFinite) ?? []
@@ -428,8 +473,10 @@ async function load() {
     }
     if (usage.status === 'rejected') throw usage.reason
     data.value = usage.value
-    if (!selectedModelKey.value || !modelDistribution.value.some((model) => model.key === selectedModelKey.value)) {
-      selectedModelKey.value = modelDistribution.value[0]?.key ?? ''
+    for (const panel of distributionPanels.value) {
+      if (!selectedModelKeys.value[panel.id] || !panel.items.some((model) => model.key === selectedModelKeys.value[panel.id])) {
+        selectedModelKeys.value[panel.id] = panel.items[0]?.key ?? ''
+      }
     }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -475,7 +522,12 @@ onMounted(load)
 .insight-list--grid div{@apply flex items-baseline justify-between gap-4 border-b border-zinc-100 pb-2}
 .insight-list dt{@apply text-sm text-zinc-500}
 .insight-list dd{@apply text-sm font-medium}
-.distribution-card{@apply mt-5 rounded-xl border border-zinc-200 p-4}
+.distribution-panels{@apply mt-5 grid grid-cols-2 gap-4}
+.distribution-card{@apply rounded-xl border border-zinc-200 p-4}
+.distribution-card-heading{@apply mb-4 flex items-start justify-between gap-4}
+.distribution-card-heading h4{@apply text-base font-semibold}
+.distribution-card-heading p{@apply mt-1 text-xs text-zinc-500}
+.distribution-card-heading>strong{@apply shrink-0 text-sm font-semibold}
 .distribution-bar{@apply flex h-9 w-full overflow-hidden rounded-lg bg-zinc-100}
 .distribution-segment{@apply relative h-full min-w-[2px] transition-[filter,opacity] hover:brightness-110}
 .distribution-segment.selected{@apply ring-2 ring-inset ring-white/80}
@@ -530,6 +582,7 @@ onMounted(load)
   .insight-list--grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .distribution-legend{grid-template-columns:repeat(2,minmax(0,1fr))}
   .distribution-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .distribution-panels{grid-template-columns:1fr}
 }
 @media(max-width:640px){
   .activity-header{flex-direction:column}

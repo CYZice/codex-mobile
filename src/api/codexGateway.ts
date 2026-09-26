@@ -2848,6 +2848,7 @@ export type CcSwitchUsageDashboard = {
   }
   daily: CcSwitchUsageRow[]
   models: CcSwitchUsageModel[]
+  modelsLast30Days: CcSwitchUsageModel[]
 }
 
 export type MemoryIndex = {

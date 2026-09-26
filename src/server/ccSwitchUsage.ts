@@ -42,6 +42,7 @@ export type CcSwitchUsageDashboard = {
   }
   daily: CcSwitchUsageRow[]
   models: CcSwitchUsageModel[]
+  modelsLast30Days: CcSwitchUsageModel[]
 }
 
 const ccSwitchDatabasePath = () => {
@@ -200,6 +201,40 @@ ORDER BY date, model;`
   }).filter((row) => row.date)
 }
 
+function aggregateModels(rows: CcSwitchUsageRow[]): CcSwitchUsageModel[] {
+  const modelMap = new Map<string, CcSwitchUsageModel & { successCount: number }>()
+  for (const row of rows) {
+    const model = modelMap.get(row.model) || {
+      model: row.model,
+      requests: 0,
+      successCount: 0,
+      successRate: 0,
+      freshInputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      totalCostUsd: 0,
+    }
+    model.requests += row.requests
+    model.successCount += row.successCount
+    model.freshInputTokens += row.freshInputTokens
+    model.cacheReadTokens += row.cacheReadTokens
+    model.cacheCreationTokens += row.cacheCreationTokens
+    model.outputTokens += row.outputTokens
+    model.totalTokens += row.totalTokens
+    model.totalCostUsd += row.totalCostUsd
+    modelMap.set(row.model, model)
+  }
+
+  return [...modelMap.values()]
+    .map(({ successCount, ...model }) => ({
+      ...model,
+      successRate: model.requests ? successCount / model.requests : 0,
+    }))
+    .sort((a, b) => b.totalTokens - a.totalTokens)
+}
+
 export function readCcSwitchUsageDashboard(): CcSwitchUsageDashboard {
   const databasePath = ccSwitchDatabasePath()
   if (!existsSync(databasePath)) {
@@ -208,7 +243,6 @@ export function readCcSwitchUsageDashboard(): CcSwitchUsageDashboard {
 
   const rows = queryRows(databasePath)
   const dailyMap = new Map<string, CcSwitchUsageRow>()
-  const modelMap = new Map<string, CcSwitchUsageModel & { successCount: number }>()
   const totals = {
     requests: 0,
     successCount: 0,
@@ -252,27 +286,6 @@ export function readCcSwitchUsageDashboard(): CcSwitchUsageDashboard {
     day.totalCostUsd += row.totalCostUsd
     dailyMap.set(row.date, day)
 
-    const model = modelMap.get(row.model) || {
-      model: row.model,
-      requests: 0,
-      successCount: 0,
-      successRate: 0,
-      freshInputTokens: 0,
-      cacheReadTokens: 0,
-      cacheCreationTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      totalCostUsd: 0,
-    }
-    model.requests += row.requests
-    model.successCount += row.successCount
-    model.freshInputTokens += row.freshInputTokens
-    model.cacheReadTokens += row.cacheReadTokens
-    model.cacheCreationTokens += row.cacheCreationTokens
-    model.outputTokens += row.outputTokens
-    model.totalTokens += row.totalTokens
-    model.totalCostUsd += row.totalCostUsd
-    modelMap.set(row.model, model)
   }
 
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date))
@@ -282,12 +295,13 @@ export function readCcSwitchUsageDashboard(): CcSwitchUsageDashboard {
   const successRate = totals.requests ? totals.successCount / totals.requests : 0
   const cacheHitRate = cacheableInput ? totals.cacheReadTokens / cacheableInput : 0
 
-  const models = [...modelMap.values()]
-    .map(({ successCount, ...model }) => ({
-      ...model,
-      successRate: model.requests ? successCount / model.requests : 0,
-    }))
-    .sort((a, b) => b.totalTokens - a.totalTokens)
+  const models = aggregateModels(rows)
+  const last30Start = new Date()
+  last30Start.setHours(12, 0, 0, 0)
+  last30Start.setDate(last30Start.getDate() - 29)
+  const last30StartKey = localDateKey(last30Start)
+  const last30EndKey = localDateKey(new Date())
+  const modelsLast30Days = aggregateModels(rows.filter((row) => row.date >= last30StartKey && row.date <= last30EndKey))
 
   return {
     source: 'cc-switch',
@@ -311,5 +325,6 @@ export function readCcSwitchUsageDashboard(): CcSwitchUsageDashboard {
     },
     daily,
     models,
+    modelsLast30Days,
   }
 }
