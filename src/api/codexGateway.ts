@@ -2850,10 +2850,40 @@ export type CcSwitchUsageDashboard = {
   models: CcSwitchUsageModel[]
 }
 
+export type MemoryIndex = {
+  rootPath: string
+  scannedAt: string
+  topics: Array<{
+    id: string
+    title: string
+    summary: string
+    keywords: string[]
+    sourceFile: string
+    updatedAt: string
+    line: number
+  }>
+  files: Array<{ path: string; size: number; updatedAt: string }>
+  errors: string[]
+}
+
 export async function getCcSwitchUsage(): Promise<CcSwitchUsageDashboard> {
   const response = await fetch('/codex-api/ccswitch-usage')
   const payload = await response.json().catch(() => null) as { data?: CcSwitchUsageDashboard; error?: string } | null
   if (!response.ok || !payload?.data) throw new Error(payload?.error?.trim() || 'Failed to load CC Switch usage')
+  return payload.data
+}
+
+export async function getMemoryIndex(): Promise<MemoryIndex> {
+  const response = await fetch('/codex-api/memories/index')
+  const payload = await response.json().catch(() => null) as { data?: MemoryIndex; error?: string } | null
+  if (!response.ok || !payload?.data) throw new Error(payload?.error?.trim() || 'Failed to load memory index')
+  return payload.data
+}
+
+export async function getMemoryFile(path: string): Promise<{ path: string; content: string }> {
+  const response = await fetch(`/codex-api/memories/file?path=${encodeURIComponent(path)}`)
+  const payload = await response.json().catch(() => null) as { data?: { path: string; content: string }; error?: string } | null
+  if (!response.ok || !payload?.data) throw new Error(payload?.error?.trim() || 'Failed to load memory file')
   return payload.data
 }
 

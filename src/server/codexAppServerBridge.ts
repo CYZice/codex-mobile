@@ -52,6 +52,7 @@ import {
 import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } from '../types/codex.js'
 import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
 import { hashDiagnosticThreadId, redactDiagnosticText, runtimeDiagnostics } from './runtimeDiagnostics.js'
+import { readMemoryFile, readMemoryIndex } from './memoryIndex.js'
 import { UpstreamResponseTraceReader, uniqueTraceTurn, type UpstreamResponseModel } from './upstreamResponseTrace.js'
 import {
   addWorkspaceDependencyDynamicTool,
@@ -10346,6 +10347,24 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: readCcSwitchUsageDashboard() })
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to load CC Switch usage') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/memories/index') {
+        try {
+          setJson(res, 200, { data: readMemoryIndex() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load memory index') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/memories/file') {
+        try {
+          setJson(res, 200, { data: readMemoryFile(url.searchParams.get('path') ?? '') })
+        } catch (error) {
+          setJson(res, 400, { error: getErrorMessage(error, 'Failed to read memory file') })
         }
         return
       }
