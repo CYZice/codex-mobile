@@ -14,6 +14,7 @@ import { writeFile } from 'node:fs/promises'
 import { handleAccountRoutes } from './accountRoutes.js'
 import { buildAppServerArgs, resolveAppServerRuntimeConfig } from './appServerRuntimeConfig.js'
 import { handleCcSwitchRoutes, watchCcSwitchExternalChanges } from './ccSwitch.js'
+import { readCcSwitchUsageDashboard } from './ccSwitchUsage.js'
 import { callRpcWithRateLimitDecodeRecovery } from './rateLimitDecodeRecovery.js'
 import { handleReviewRoutes } from './reviewGit.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
@@ -10336,6 +10337,15 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
           setJson(res, 200, { data: readCodexActivitySummary() })
         } catch (error) {
           setJson(res, 500, { error: getErrorMessage(error, 'Failed to load activity summary') })
+        }
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/ccswitch-usage') {
+        try {
+          setJson(res, 200, { data: readCcSwitchUsageDashboard() })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load CC Switch usage') })
         }
         return
       }

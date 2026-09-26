@@ -2809,6 +2809,54 @@ export async function getCodexActivitySummary(): Promise<CodexActivitySummary> {
   return payload.data
 }
 
+export type CcSwitchUsageRow = {
+  date: string
+  model: string
+  requests: number
+  successCount: number
+  freshInputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  outputTokens: number
+  totalTokens: number
+  totalCostUsd: number
+}
+
+export type CcSwitchUsageModel = Omit<CcSwitchUsageRow, 'date' | 'successCount'> & {
+  successRate: number
+}
+
+export type CcSwitchUsageDashboard = {
+  source: 'cc-switch'
+  databasePath: string
+  totals: {
+    requests: number
+    successRate: number
+    freshInputTokens: number
+    cacheReadTokens: number
+    cacheCreationTokens: number
+    outputTokens: number
+    totalTokens: number
+    totalCostUsd: number
+    cacheHitRate: number
+    activeDays: number
+    peakDailyTokens: number
+    currentStreak: number
+    longestStreak: number
+    firstDate: string | null
+    latestDate: string | null
+  }
+  daily: CcSwitchUsageRow[]
+  models: CcSwitchUsageModel[]
+}
+
+export async function getCcSwitchUsage(): Promise<CcSwitchUsageDashboard> {
+  const response = await fetch('/codex-api/ccswitch-usage')
+  const payload = await response.json().catch(() => null) as { data?: CcSwitchUsageDashboard; error?: string } | null
+  if (!response.ok || !payload?.data) throw new Error(payload?.error?.trim() || 'Failed to load CC Switch usage')
+  return payload.data
+}
+
 export async function listChatGptConversations(offset = 0, limit = 50): Promise<ChatGptConversationPage> {
   const query = new URLSearchParams({ offset: String(Math.max(0, offset)), limit: String(Math.min(50, Math.max(1, limit))) })
   const response = await fetch(`/codex-api/chatgpt-conversations?${query.toString()}`)
