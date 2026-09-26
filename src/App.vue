@@ -505,6 +505,8 @@
                   @update:model-value="onCcSwitchProviderChange"
                 />
               </div>
+              <p v-if="ccSwitchSwitchFeedback" class="sidebar-quick-settings-provider-feedback">{{ ccSwitchSwitchFeedback }}</p>
+              <p v-if="ccSwitchProviderError" class="sidebar-quick-settings-error">{{ ccSwitchProviderError }}</p>
               <button
                 v-if="route.name === 'thread' && selectedThreadId"
                 type="button"
@@ -1819,11 +1821,13 @@ const ccSwitchStatus = ref<CcSwitchStatus | null>(null)
 const ccSwitchLoading = ref(false)
 const ccSwitchCurrentProviderId = ref('')
 const ccSwitchProviderError = ref('')
+const ccSwitchSwitchFeedback = ref('')
+let ccSwitchSwitchFeedbackTimer: number | null = null
 const ccSwitchProviderOptions = computed(() => (ccSwitchStatus.value?.providers ?? [])
   .filter((provider) => provider.compatible)
   .map((provider) => ({ value: provider.id, label: provider.name })))
 const ccSwitchCurrentProviderMeta = computed(() => {
-  if (ccSwitchLoading.value) return t('Switching provider…')
+  if (ccSwitchSwitchFeedback.value) return ccSwitchSwitchFeedback.value
   const provider = ccSwitchStatus.value?.providers.find((entry) => entry.id === ccSwitchCurrentProviderId.value)
   if (!provider) return ''
   return [provider.endpointHost, provider.model].filter(Boolean).join(' · ')
@@ -2303,6 +2307,10 @@ onUnmounted(() => {
     accountStatePollTimer = null
   }
   stopCcSwitchStatusPolling()
+  if (ccSwitchSwitchFeedbackTimer !== null) {
+    window.clearTimeout(ccSwitchSwitchFeedbackTimer)
+    ccSwitchSwitchFeedbackTimer = null
+  }
   if (threadSearchTimer) {
     clearTimeout(threadSearchTimer)
     threadSearchTimer = null
@@ -4856,21 +4864,34 @@ async function onCcSwitchProviderChange(providerId: string): Promise<void> {
   if (!normalizedProviderId || ccSwitchLoading.value) return
   if (normalizedProviderId === ccSwitchCurrentProviderId.value) return
   const previousProviderId = ccSwitchCurrentProviderId.value
+  const providerName = ccSwitchProviderOptions.value.find((entry) => entry.value === normalizedProviderId)?.label || normalizedProviderId
+  if (ccSwitchSwitchFeedbackTimer !== null) {
+    window.clearTimeout(ccSwitchSwitchFeedbackTimer)
+    ccSwitchSwitchFeedbackTimer = null
+  }
   ccSwitchCurrentProviderId.value = normalizedProviderId
   ccSwitchLoading.value = true
   ccSwitchProviderError.value = ''
+  ccSwitchSwitchFeedback.value = `${t('Switching provider and restarting app-server…')} ${providerName}`
   try {
     const status = await switchCcSwitchProvider(normalizedProviderId, previousProviderId)
     ccSwitchStatus.value = status
     ccSwitchCurrentProviderId.value = status.currentProviderId
+    ccSwitchSwitchFeedback.value = t('Provider switched. Refreshing page data…')
     await refreshAll({
       includeSelectedThreadMessages: false,
       forceThreadRefresh: true,
       providerChanged: true,
       awaitAncillaryRefreshes: true,
     })
+    ccSwitchSwitchFeedback.value = `${t('Switched to')} ${providerName}`
+    ccSwitchSwitchFeedbackTimer = window.setTimeout(() => {
+      ccSwitchSwitchFeedback.value = ''
+      ccSwitchSwitchFeedbackTimer = null
+    }, 2500)
   } catch (error) {
     ccSwitchCurrentProviderId.value = previousProviderId
+    ccSwitchSwitchFeedback.value = ''
     ccSwitchProviderError.value = error instanceof Error ? error.message : t('Failed to switch CC Switch provider')
     await loadCcSwitchStatus({ silent: true })
   } finally {
@@ -6159,6 +6180,18 @@ async function loadWorktreeBranches(sourceCwd: string): Promise<void> {
 
 .sidebar-quick-settings-row--select :deep(.composer-dropdown) {
   @apply min-w-0 flex-1;
+}
+
+.sidebar-quick-settings-provider-dropdown :deep(.composer-dropdown-trigger) {
+  @apply w-full justify-end;
+}
+
+.sidebar-quick-settings-provider-dropdown :deep(.composer-dropdown-value) {
+  @apply max-w-40;
+}
+
+.sidebar-quick-settings-provider-feedback {
+  @apply -mt-1 px-3 pb-1 text-right text-[11px] text-zinc-500;
 }
 
 .sidebar-quick-settings-error {
