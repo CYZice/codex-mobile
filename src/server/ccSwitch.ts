@@ -521,20 +521,22 @@ function isOfficialUnifiedProviderTable(value: unknown): boolean {
     && Object.keys(table).length === 4
     && table.name === 'OpenAI'
     && table.requires_openai_auth === true
-    && table.supports_websockets === false
+    && typeof table.supports_websockets === 'boolean'
     && table.wire_api === 'responses')
 }
 
 function injectOfficialUnifiedHistoryRoute(config: string): string {
   const parsed = parseConfig(config)
-  if (typeof parsed.model_provider === 'string') return config
+  const configuredProvider = typeof parsed.model_provider === 'string' ? parsed.model_provider.trim() : ''
+  if (configuredProvider && configuredProvider !== 'custom') return config
   const modelProviders = asRecord(parsed.model_providers)
   const existingCustom = modelProviders?.custom
   if (existingCustom !== undefined && !isOfficialUnifiedProviderTable(existingCustom)) return config
 
-  let next = insertTopLevelField(config, 'model_provider', '"custom"')
-  if (existingCustom === undefined) next = appendOfficialUnifiedProvider(next)
-  return next
+  let next = config
+  if (!configuredProvider) next = insertTopLevelField(next, 'model_provider', '"custom"')
+  if (existingCustom === undefined) return appendOfficialUnifiedProvider(next)
+  return upsertTableField(next, ['model_providers', 'custom'], 'supports_websockets', 'false')
 }
 
 function getActiveProviderTable(parsed: Record<string, unknown>): {
@@ -999,7 +1001,9 @@ async function switchProviderInternal(providerId: string, options: SwitchOptions
       const currentProvider = readString(currentParsed.model_provider)
       const projectedProvider = readString(projectedParsed.model_provider)
       if (currentModel === projectedModel && currentProvider === projectedProvider) {
-        repairBaseConfig = previousConfig
+        repairBaseConfig = provider.category === 'official' && state.unifyHistory
+          ? injectOfficialUnifiedHistoryRoute(previousConfig)
+          : previousConfig
       }
     } catch {
       // A malformed/stale current config is repaired from the provider projection.

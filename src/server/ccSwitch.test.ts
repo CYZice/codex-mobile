@@ -167,6 +167,32 @@ describe('CC Switch Codex config projection', () => {
     expect(projected).toContain('supports_websockets = false')
     expect(projected).not.toContain('experimental_bearer_token')
   })
+
+  it('repairs legacy unified official providers to SSE', () => {
+    const legacyOfficialProvider: FixtureProvider = {
+      ...officialProvider,
+      config: [
+        '# official comment',
+        'model = "gpt-5"',
+        'model_provider = "custom"',
+        '',
+        '[model_providers.custom]',
+        'name = "OpenAI"',
+        'requires_openai_auth = true',
+        'supports_websockets = true',
+        'wire_api = "responses"',
+        '',
+      ].join('\n'),
+    }
+    const projected = projectCcSwitchCodexConfig(legacyOfficialProvider, {
+      preserveOfficialAuth: true,
+      unifyHistory: true,
+    })
+    expect(projected).toContain('model_provider = "custom"')
+    expect(projected).toContain('supports_websockets = false')
+    expect(projected).not.toContain('supports_websockets = true')
+    expect(projected.match(/\[model_providers\.custom\]/gu)).toHaveLength(1)
+  })
 })
 
 describe('CC Switch status and switching', () => {
@@ -370,6 +396,33 @@ describe('CC Switch status and switching', () => {
     await switchCcSwitchProvider('deepseek-current', { paths: fixture.paths, reloadRuntime })
     expect(await readFile(fixture.configPath, 'utf8')).toBe(configAfterRepair)
     expect(await readFile(catalogPath, 'utf8')).toBe(catalogAfterRepair)
+    expect(reloadRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it('repairs a current official provider that still enables websocket responses', async () => {
+    const fixture = await createFixture({
+      providers: [officialProvider],
+      currentProviderId: 'official',
+    })
+    await writeFile(fixture.configPath, [
+      '# legacy unified official config',
+      'model = "gpt-5"',
+      'model_provider = "custom"',
+      '',
+      '[model_providers.custom]',
+      'name = "OpenAI"',
+      'requires_openai_auth = true',
+      'supports_websockets = true',
+      'wire_api = "responses"',
+      '',
+    ].join('\n'), 'utf8')
+    const reloadRuntime = vi.fn(async () => undefined)
+
+    await switchCcSwitchProvider('official', { paths: fixture.paths, reloadRuntime })
+
+    const config = await readFile(fixture.configPath, 'utf8')
+    expect(config).toContain('supports_websockets = false')
+    expect(config).not.toContain('supports_websockets = true')
     expect(reloadRuntime).toHaveBeenCalledTimes(1)
   })
 
