@@ -2387,7 +2387,7 @@ function openRenameProjectMenu(group: UiProjectGroup): void {
 function projectGroupsForMove(threadId: string): UiProjectGroup[] {
   const current = props.groups.find((group) => group.threads.some((thread) => thread.id === threadId))
   const currentIdentity = current ? projectIdentity(current) : ''
-  return props.groups.filter((group) => projectIdentity(group) !== currentIdentity && group.projectName.trim().length > 0)
+  return props.groups.filter((group) => group.projectId != null && projectIdentity(group) !== currentIdentity)
 }
 
 function onMoveThread(threadId: string, projectId: string | null): void {
