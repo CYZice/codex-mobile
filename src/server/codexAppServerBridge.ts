@@ -9927,16 +9927,6 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         return
       }
 
-      if (req.method === 'POST' && url.pathname === '/codex-api/local-projects/migrate') {
-        try {
-          const record = asRecord(await readJsonBody(req))
-          setJson(res, 200, { data: await migrateLegacyProjectState(record?.aliases, record?.overrides) })
-        } catch (error) {
-          setJson(res, 400, { error: getErrorMessage(error, 'Failed to migrate legacy project state') })
-        }
-        return
-      }
-
       const localProjectMatch = url.pathname.match(/^\/codex-api\/local-projects\/([^/]+)$/u)
       if (localProjectMatch && req.method === 'PATCH') {
         try {

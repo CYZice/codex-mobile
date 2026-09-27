@@ -3069,7 +3069,6 @@ export async function getWorkspaceRootsState(): Promise<WorkspaceRootsState> {
 }
 
 async function fetchWorkspaceRootsState(): Promise<WorkspaceRootsState> {
-  await migrateLegacyProjectStateIfNeeded()
   const response = await fetch('/codex-api/workspace-roots-state', { cache: 'no-store' })
   const payload = (await response.json()) as unknown
   if (!response.ok) {
@@ -3092,38 +3091,6 @@ function cloneWorkspaceRootsState(state: WorkspaceRootsState): WorkspaceRootsSta
     localProjects: state.localProjects?.map((item) => ({ ...item, rootPaths: [...item.rootPaths] })) ?? [],
     threadAssignments: { ...(state.threadAssignments ?? {}) },
   }
-}
-
-let legacyProjectMigrationPromise: Promise<void> | null = null
-
-async function migrateLegacyProjectStateIfNeeded(): Promise<void> {
-  if (typeof window === 'undefined') return
-  if (legacyProjectMigrationPromise) {
-    await legacyProjectMigrationPromise
-    return
-  }
-  const aliasesKey = 'codex-web-local.project-root-aliases.v1'
-  const overridesKey = 'codex-web-local.thread-project-overrides.v1'
-  const aliasesRaw = window.localStorage.getItem(aliasesKey)
-  const overridesRaw = window.localStorage.getItem(overridesKey)
-  if (!aliasesRaw && !overridesRaw) return
-  legacyProjectMigrationPromise = (async () => {
-    let aliases: unknown = {}
-    let overrides: unknown = {}
-    try { aliases = aliasesRaw ? JSON.parse(aliasesRaw) : {} } catch { aliases = {} }
-    try { overrides = overridesRaw ? JSON.parse(overridesRaw) : {} } catch { overrides = {} }
-    const response = await fetch('/codex-api/local-projects/migrate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aliases, overrides }),
-    })
-    if (!response.ok) throw new Error('Legacy project migration failed')
-    window.localStorage.removeItem(aliasesKey)
-    window.localStorage.removeItem(overridesKey)
-  })().finally(() => {
-    legacyProjectMigrationPromise = null
-  })
-  return await legacyProjectMigrationPromise
 }
 
 function invalidateWorkspaceRootsStateCache(): void {
