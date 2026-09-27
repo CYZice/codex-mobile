@@ -919,9 +919,9 @@ function mergeThreadGroups(
   previous: UiProjectGroup[],
   incoming: UiProjectGroup[],
 ): UiProjectGroup[] {
-  const previousGroupsById = new Map(previous.map((group) => [group.projectId ?? `thread:${group.projectName}`, group]))
+  const previousGroupsById = new Map(previous.map((group) => [group.projectId ?? 'projectless', group]))
   const mergedGroups: UiProjectGroup[] = incoming.map((incomingGroup) => {
-    const groupKey = incomingGroup.projectId ?? `thread:${incomingGroup.projectName}`
+    const groupKey = incomingGroup.projectId ?? 'projectless'
     const previousGroup = previousGroupsById.get(groupKey)
     const previousThreadsById = new Map(previousGroup?.threads.map((thread) => [thread.id, thread]) ?? [])
 
@@ -970,7 +970,7 @@ export function mergeIncomingWithLocalInProgressThreads(
     return incoming
   }
 
-  const incomingByProjectId = new Map(incoming.map((group) => [group.projectId ?? `thread:${group.projectName}`, group]))
+  const incomingByProjectId = new Map(incoming.map((group) => [group.projectId ?? 'projectless', group]))
   const merged: UiProjectGroup[] = incoming.map((group) => ({
     projectId: group.projectId ?? null,
     projectName: group.projectName,
@@ -979,9 +979,9 @@ export function mergeIncomingWithLocalInProgressThreads(
   }))
 
   for (const thread of localInProgressThreads) {
-    const existingGroup = incomingByProjectId.get(thread.projectId ?? `thread:${thread.projectName}`)
+    const existingGroup = incomingByProjectId.get(thread.projectId ?? 'projectless')
     if (existingGroup) {
-      const mergedGroupIndex = merged.findIndex((group) => (group.projectId ?? `thread:${group.projectName}`) === (thread.projectId ?? `thread:${thread.projectName}`))
+      const mergedGroupIndex = merged.findIndex((group) => (group.projectId ?? 'projectless') === (thread.projectId ?? 'projectless'))
       if (mergedGroupIndex >= 0) {
         merged[mergedGroupIndex] = {
           projectId: merged[mergedGroupIndex].projectId ?? null,
@@ -4221,7 +4221,7 @@ export function useDesktopState() {
     }
     const groupsByProject = new Map<string, UiThread[]>()
     for (const thread of threadById.values()) {
-      const projectKey = thread.projectId ?? `thread:${thread.projectName}`
+      const projectKey = thread.projectId ?? 'projectless'
       const existing = groupsByProject.get(projectKey)
       if (existing) existing.push(thread)
       else groupsByProject.set(projectKey, [thread])

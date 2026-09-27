@@ -632,7 +632,7 @@
         <div class="thread-menu-label">Move to project</div>
         <button
           v-for="group in projectGroupsForMove(openThreadMenuThread.id)"
-          :key="`move:${group.projectId ?? group.projectName}`"
+          :key="`move:${projectIdentity(group)}`"
           class="thread-menu-item"
           type="button"
           @click="onMoveThread(openThreadMenuThread.id, group.projectId ?? null)"
@@ -985,7 +985,7 @@ const { t } = useUiLanguage()
 const { recordVisibleFailure } = useFeedbackDiagnostics()
 
 function projectIdentity(group: UiProjectGroup): string {
-  return group.projectId?.trim() || `legacy:${group.projectName}`
+  return group.projectId?.trim() || 'projectless'
 }
 
 function projectByIdentity(identity: string): UiProjectGroup | undefined {
