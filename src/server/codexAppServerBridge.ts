@@ -53,6 +53,15 @@ import { isReasoningEffort, type CollaborationModeKind, type ReasoningEffort } f
 import { isAbsoluteLikePath, isProjectlessChatPath } from '../pathUtils.js'
 import { hashDiagnosticThreadId, redactDiagnosticText, runtimeDiagnostics } from './runtimeDiagnostics.js'
 import { readMemoryFile, readMemoryIndex } from './memoryIndex.js'
+import {
+  buildAutomaticThreadTitlePrompt,
+  isAutomaticThreadTitleEligible,
+  parseStructuredThreadTitle,
+  readCompletedUserMessageForTitle,
+  shouldApplyAutomaticThreadTitle,
+  THREAD_TITLE_MODEL,
+  threadTitleOutputSchema,
+} from './threadTitle.js'
 import { UpstreamResponseTraceReader, uniqueTraceTurn, type UpstreamResponseModel } from './upstreamResponseTrace.js'
 import {
   addWorkspaceDependencyDynamicTool,
@@ -6721,6 +6730,11 @@ class AppServerProcess {
   private readonly activeTurnKeys = new Set<string>()
   private readonly upstreamTraceReader = new UpstreamResponseTraceReader()
   private readonly lastUpstreamReportByTurn = new Map<string, UpstreamResponseModel>()
+  private readonly pendingAutomaticThreadTitles = new Set<string>()
+  private readonly cancelledAutomaticThreadTitles = new Set<string>()
+  private readonly internalThreadIds = new Set<string>()
+  private readonly internalActiveTurnKeys = new Set<string>()
+  private readonly internalNotificationListeners = new Map<string, Set<(value: { method: string; params: unknown }) => void>>()
   private chatgptAuthRefreshPromise: Promise<ChatgptAuthTokensRefreshResponse> | null = null
   private pendingTurnStarts = 0
   private runtimeConfigurationChangeActive = false
@@ -6829,6 +6843,11 @@ class AppServerProcess {
       this.pending.clear()
       this.pendingServerRequests.clear()
       this.lastUpstreamReportByTurn.clear()
+      this.pendingAutomaticThreadTitles.clear()
+      this.cancelledAutomaticThreadTitles.clear()
+      this.internalThreadIds.clear()
+      this.internalActiveTurnKeys.clear()
+      this.internalNotificationListeners.clear()
       this.upstreamTraceReader.reset()
       this.process = null
       this.initialized = false
@@ -6883,17 +6902,261 @@ class AppServerProcess {
   }
 
   private emitNotification(notification: { method: string; params: unknown }): void {
+    const nThreadId = this.extractThreadIdFromParams(notification.params)
+    const params = asRecord(notification.params)
+    const thread = asRecord(params?.thread)
+    const threadSource = readNonEmptyString(thread?.threadSource)
+    if (nThreadId && (this.internalThreadIds.has(nThreadId) || threadSource === 'thread_title')) {
+      this.internalThreadIds.add(nThreadId)
+      this.trackInternalTurnActivity(notification)
+      const listeners = this.internalNotificationListeners.get(nThreadId)
+      if (listeners) {
+        for (const listener of listeners) listener(notification)
+      }
+      return
+    }
+
     this.trackTurnActivity(notification)
     this.recordStreamEvent(notification)
     this.captureItemFromNotification(notification)
     if (notification.method === 'turn/started' || notification.method === 'turn/completed' || notification.method === 'error') runtimeDiagnostics.record(`app-server.notification.${notification.method.replace(/\//gu, '.')}`, { threadKey: hashDiagnosticThreadId(this.extractThreadIdFromParams(notification.params)) })
-    const nThreadId = this.extractThreadIdFromParams(notification.params)
     if (nThreadId) {
       this.invalidateLiveStateCache(nThreadId)
       this.threadTurnPageReadCacheByThreadId.delete(nThreadId)
     }
+    const titleRequest = readCompletedUserMessageForTitle(notification)
+    if (titleRequest) void this.generateAutomaticThreadTitle(titleRequest.threadId, titleRequest.prompt)
     for (const listener of this.notificationListeners) {
       listener(notification)
+    }
+  }
+
+  private trackInternalTurnActivity(notification: { method: string; params: unknown }): void {
+    if (notification.method !== 'turn/started' && notification.method !== 'turn/completed') return
+    const params = asRecord(notification.params)
+    if (!params) return
+    const threadId = this.extractThreadIdFromParams(params)
+    const turnId = readStreamTurnId(params)
+    if (!threadId || !turnId) return
+    const key = `${threadId}:${turnId}`
+    if (notification.method === 'turn/started') this.internalActiveTurnKeys.add(key)
+    else this.internalActiveTurnKeys.delete(key)
+  }
+
+  private onInternalThreadNotification(threadId: string, listener: (value: { method: string; params: unknown }) => void): () => void {
+    let listeners = this.internalNotificationListeners.get(threadId)
+    if (!listeners) {
+      listeners = new Set()
+      this.internalNotificationListeners.set(threadId, listeners)
+    }
+    listeners.add(listener)
+    return () => {
+      listeners?.delete(listener)
+      if (listeners?.size === 0) this.internalNotificationListeners.delete(threadId)
+    }
+  }
+
+  private async resolveAutomaticTitleModel(thread: Record<string, unknown>): Promise<{ model: string; modelProvider: string; effort?: 'low' }> {
+    const currentModel = readNonEmptyString(thread.model)
+    const modelProvider = readNonEmptyString(thread.modelProvider)
+    if (!currentModel || !modelProvider) throw new Error('Thread model metadata is unavailable')
+    if (modelProvider !== 'openai') return { model: currentModel, modelProvider }
+
+    try {
+      const [accountPayload, modelsPayload] = await Promise.all([
+        this.call('account/read', { refreshToken: false }),
+        this.call('model/list', {}),
+      ])
+      const account = asRecord(asRecord(accountPayload)?.account)
+      const models = Array.isArray(asRecord(modelsPayload)?.data) ? asRecord(modelsPayload)?.data as unknown[] : []
+      const hasChatGptAccount = readNonEmptyString(account?.type).toLowerCase() === 'chatgpt'
+      const hasTitleModel = models.some((row) => {
+        const record = asRecord(row)
+        return readNonEmptyString(record?.id) === THREAD_TITLE_MODEL || readNonEmptyString(record?.model) === THREAD_TITLE_MODEL
+      })
+      if (hasChatGptAccount && hasTitleModel) {
+        return { model: THREAD_TITLE_MODEL, modelProvider, effort: 'low' }
+      }
+    } catch {
+      // Match Codex's behavior: fall back to the visible thread's model.
+    }
+    return { model: currentModel, modelProvider }
+  }
+
+  private async buildAutomaticTitleConfig(cwd: string): Promise<Record<string, unknown>> {
+    const config: Record<string, unknown> = {
+      'features.apps': false,
+      'features.code_mode': false,
+      'features.code_mode_only': false,
+      'features.context_management': false,
+      'features.current_time_reminder': false,
+      'features.deferred_executor': false,
+      'features.enable_fanout': false,
+      'features.goals': false,
+      'features.hooks': false,
+      'features.image_generation': false,
+      'features.memories': false,
+      'features.multi_agent': false,
+      'features.multi_agent_v2': false,
+      'features.plugins': false,
+      'features.request_permissions_tool': false,
+      'features.shell_snapshot': false,
+      'features.shell_tool': false,
+      'features.standalone_web_search': false,
+      'features.token_budget': false,
+      'features.tool_suggest': false,
+      'features.unified_exec': false,
+      'features.view_image': false,
+      'cloud.skills.enabled': false,
+      'skills.include_instructions': false,
+      'tools.experimental_request_user_input.enabled': false,
+      'tools.update_plan.enabled': false,
+      web_search: 'disabled',
+    }
+    try {
+      const configPayload = asRecord(await this.call('config/read', { includeLayers: false, cwd }))
+      const effectiveConfig = asRecord(configPayload?.config)
+      const additional = asRecord(effectiveConfig?.additional)
+      const mcpServers = asRecord(additional?.mcp_servers) ?? asRecord(effectiveConfig?.mcp_servers)
+      if (mcpServers) {
+        config.mcp_servers = Object.fromEntries(Object.keys(mcpServers).map((name) => [name, { enabled: false }]))
+      }
+    } catch {
+      // The remaining read-only/tool-disable settings still fail closed for built-ins.
+    }
+    return config
+  }
+
+  private async collectAutomaticTitleResponse(threadId: string, prompt: string, effort?: 'low'): Promise<string> {
+    let turnId = ''
+    let responseText = ''
+    const buffered: Array<{ method: string; params: unknown }> = []
+    let resolveCompletion!: (value: string) => void
+    let rejectCompletion!: (reason: Error) => void
+    const completion = new Promise<string>((resolve, reject) => {
+      resolveCompletion = resolve
+      rejectCompletion = reject
+    })
+
+    const processNotification = (notification: { method: string; params: unknown }) => {
+      if (!turnId) {
+        buffered.push(notification)
+        return
+      }
+      const params = asRecord(notification.params)
+      if (!params || readStreamTurnId(params) !== turnId) return
+      if (notification.method === 'item/completed') {
+        const item = asRecord(params.item)
+        if (item?.type === 'agentMessage') {
+          const text = readNonEmptyString(item.text)
+          if (text) responseText = text
+        }
+        return
+      }
+      if (notification.method === 'turn/completed') {
+        const turn = asRecord(params.turn)
+        const status = readNonEmptyString(turn?.status).toLowerCase()
+        if (status === 'completed') resolveCompletion(responseText)
+        else rejectCompletion(new Error(`Title turn ended with status ${status || 'unknown'}`))
+      }
+    }
+
+    const unsubscribe = this.onInternalThreadNotification(threadId, processNotification)
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    try {
+      const turnPayload = asRecord(await this.call('turn/start', {
+        threadId,
+        input: [{ type: 'text', text: prompt }],
+        outputSchema: threadTitleOutputSchema(),
+        ...(effort ? { effort } : {}),
+      }))
+      turnId = readNonEmptyString(asRecord(turnPayload?.turn)?.id)
+      if (!turnId) throw new Error('Title turn did not return an id')
+      for (const notification of buffered.splice(0)) processNotification(notification)
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Title generation timed out')), 30_000)
+      })
+      return await Promise.race([completion, timeoutPromise])
+    } catch (error) {
+      if (turnId && this.process && this.initialized) {
+        await this.call('turn/interrupt', { threadId, turnId }).catch(() => {})
+      }
+      throw error
+    } finally {
+      if (timeout) clearTimeout(timeout)
+      unsubscribe()
+    }
+  }
+
+  private async generateAutomaticThreadTitle(threadId: string, userMessage: string): Promise<void> {
+    if (this.pendingAutomaticThreadTitles.has(threadId)) return
+    this.pendingAutomaticThreadTitles.add(threadId)
+    this.cancelledAutomaticThreadTitles.delete(threadId)
+    let temporaryThreadId = ''
+    try {
+      const threadPayload = asRecord(await this.call('thread/read', { threadId, includeTurns: false }))
+      const thread = asRecord(threadPayload?.thread)
+      if (!thread || !isAutomaticThreadTitleEligible(thread)) return
+
+      const cwd = readNonEmptyString(thread.cwd) || process.cwd()
+      const { model, modelProvider, effort } = await this.resolveAutomaticTitleModel(thread)
+      const hiddenConfig = await this.buildAutomaticTitleConfig(cwd)
+      const started = asRecord(await this.call('thread/start', {
+        model,
+        modelProvider,
+        cwd,
+        approvalPolicy: 'never',
+        sandbox: 'read-only',
+        runtimeWorkspaceRoots: [],
+        ephemeral: true,
+        threadSource: 'thread_title',
+        environments: [],
+        dynamicTools: [],
+        selectedCapabilityRoots: [],
+        config: hiddenConfig,
+      }))
+      temporaryThreadId = readNonEmptyString(asRecord(started?.thread)?.id)
+      if (!temporaryThreadId) throw new Error('Title thread did not return an id')
+      this.internalThreadIds.add(temporaryThreadId)
+
+      const response = await this.collectAutomaticTitleResponse(
+        temporaryThreadId,
+        buildAutomaticThreadTitlePrompt(userMessage),
+        effort,
+      )
+      if (!shouldApplyAutomaticThreadTitle(null, this.cancelledAutomaticThreadTitles.has(threadId))) return
+      const title = parseStructuredThreadTitle(response)
+      if (!title) return
+
+      const latestPayload = asRecord(await this.call('thread/read', { threadId, includeTurns: false }))
+      const latestThread = asRecord(latestPayload?.thread)
+      if (!latestThread || !shouldApplyAutomaticThreadTitle(latestThread.name, this.cancelledAutomaticThreadTitles.has(threadId))) return
+      await this.call('thread/name/set', { threadId, name: title })
+    } catch (error) {
+      runtimeDiagnostics.record('thread-title.failure', {
+        threadKey: hashDiagnosticThreadId(threadId),
+        message: redactDiagnosticText(error),
+      })
+    } finally {
+      if (temporaryThreadId) {
+        if (this.process && this.initialized) {
+          await this.call('thread/unsubscribe', { threadId: temporaryThreadId }).catch(() => {})
+        }
+        this.internalThreadIds.delete(temporaryThreadId)
+        this.internalNotificationListeners.delete(temporaryThreadId)
+        for (const key of this.internalActiveTurnKeys) {
+          if (key.startsWith(`${temporaryThreadId}:`)) this.internalActiveTurnKeys.delete(key)
+        }
+      }
+      this.cancelledAutomaticThreadTitles.delete(threadId)
+      this.pendingAutomaticThreadTitles.delete(threadId)
+    }
+  }
+
+  cancelAutomaticThreadTitle(threadId: string): void {
+    const normalizedThreadId = threadId.trim()
+    if (normalizedThreadId && this.pendingAutomaticThreadTitles.has(normalizedThreadId)) {
+      this.cancelledAutomaticThreadTitles.add(normalizedThreadId)
     }
   }
 
@@ -6925,7 +7188,9 @@ class AppServerProcess {
 
   private handleUpstreamTraceReport(report: UpstreamResponseModel): void {
     // Codex's TRACE SSE lines do not include a thread or turn identifier.
-    // Never attribute an upstream response when more than one turn is active.
+    // Never attribute an upstream response while a hidden metadata turn is running,
+    // or when more than one public turn is active.
+    if (this.internalActiveTurnKeys.size > 0) return
     const active = uniqueTraceTurn(this.activeTurnKeys)
     if (!active) return
     const { threadId, turnId } = active
@@ -7406,6 +7671,7 @@ class AppServerProcess {
   getRuntimeConfigurationChangeBlockReason(): string {
     if (this.runtimeConfigurationChangeActive) return 'A Codex configuration change is already in progress.'
     if (this.reloadPromise) return 'Codex app-server is reloading.'
+    if (this.pendingAutomaticThreadTitles.size > 0 || this.internalActiveTurnKeys.size > 0) return 'Wait for thread title generation to finish.'
     if (this.pendingTurnStarts > 0 || this.activeTurnKeys.size > 0) return 'Wait for all running Codex tasks to finish.'
     if (this.pendingServerRequests.size > 0) return 'Resolve pending Codex approvals before switching providers.'
     return ''
@@ -7441,6 +7707,11 @@ class AppServerProcess {
     this.pending.clear()
     this.pendingServerRequests.clear()
     this.activeTurnKeys.clear()
+    this.pendingAutomaticThreadTitles.clear()
+    this.cancelledAutomaticThreadTitles.clear()
+    this.internalThreadIds.clear()
+    this.internalActiveTurnKeys.clear()
+    this.internalNotificationListeners.clear()
 
     try {
       proc.stdin.end()
@@ -8925,10 +9196,11 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
 	          return
 	        }
 
-	        if (body.method === 'generate-thread-title') {
-	          setJson(res, 200, { result: { title: '' } })
-	          return
-	        }
+        if (body.method === 'thread/name/set') {
+          const params = asRecord(body.params)
+          const threadId = readNonEmptyString(params?.threadId)
+          if (threadId) appServer.cancelAutomaticThreadTitle(threadId)
+        }
 
 	        if (body.method === 'account/rateLimits/read' && !(await hasUsableCodexAuth())) {
 	          setJson(res, 200, { result: null })

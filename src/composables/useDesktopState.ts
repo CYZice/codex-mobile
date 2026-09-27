@@ -32,7 +32,6 @@ import {
   setWorkspaceProjectOrder,
   getThreadTitleCache,
   persistThreadTitle,
-  generateThreadTitle,
   resumeThread,
 
   startThread,
@@ -4500,22 +4499,6 @@ export function useDesktopState() {
     }
   }
 
-  async function requestThreadTitleGeneration(threadId: string, prompt: string, cwd: string | null): Promise<void> {
-    if (threadTitleById.value[threadId]) return
-    const trimmed = prompt.trim()
-    if (!trimmed) return
-    const truncated = trimmed.length > 300 ? trimmed.slice(0, 300) : trimmed
-    try {
-      const title = await generateThreadTitle(truncated, cwd)
-      if (!title || threadTitleById.value[threadId]) return
-      threadTitleById.value = { ...threadTitleById.value, [threadId]: title }
-      applyThreadFlags()
-      void persistThreadTitle(threadId, title)
-    } catch {
-      // Title generation is best-effort.
-    }
-  }
-
   function filterGroupsByWorkspaceRoots(
     groups: UiProjectGroup[],
     rootsState: WorkspaceRootsState | null,
@@ -5566,9 +5549,6 @@ export function useDesktopState() {
       )
       setTurnErrorForThread(threadId, null)
       setThreadInProgress(threadId, true)
-      const capturedThreadId = threadId
-      const capturedCwd = resolvedThreadCwd || null
-      const capturedPrompt = visibleText
       void startTurnForThread(
         threadId,
         nextText,
@@ -5589,7 +5569,6 @@ export function useDesktopState() {
         .finally(() => {
           isSendingMessage.value = false
         })
-      void requestThreadTitleGeneration(capturedThreadId, capturedPrompt, capturedCwd)
       return threadId
     } catch (unknownError) {
       shouldAutoScrollOnNextAgentEvent = false

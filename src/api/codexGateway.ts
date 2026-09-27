@@ -4036,15 +4036,6 @@ export async function persistFirstLaunchPluginsCardPreference(dismissed: boolean
   }
 }
 
-export async function generateThreadTitle(prompt: string, cwd: string | null): Promise<string> {
-  try {
-    const result = await callRpc<{ title?: string }>('generate-thread-title', { prompt, cwd })
-    return result.title?.trim() ?? ''
-  } catch {
-    return ''
-  }
-}
-
 export type SkillInfo = {
   name: string
   displayName?: string

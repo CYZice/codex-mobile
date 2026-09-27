@@ -30,7 +30,6 @@ const gatewayMocks = vi.hoisted(() => ({
   getWorkspaceRootsState: vi.fn(),
   removeWorkspaceRootPaths: vi.fn(),
   renameWorkspaceRootPaths: vi.fn(),
-  generateThreadTitle: vi.fn(),
   interruptThreadTurn: vi.fn(),
   persistThreadTitle: vi.fn(),
   renameThread: vi.fn(),
