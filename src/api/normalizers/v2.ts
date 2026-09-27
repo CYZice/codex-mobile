@@ -643,7 +643,7 @@ export function normalizeThreadSummaryV2(payload: ThreadReadResponse, state: Thr
 function groupThreadsByProject(threads: UiThread[], state: ThreadProjectNormalizationState | null = null): UiProjectGroup[] {
   const grouped = new Map<string, UiThread[]>()
   for (const thread of threads) {
-    const key = thread.projectId ?? `path:${thread.projectName}`
+    const key = thread.projectId ?? 'projectless'
     const rows = grouped.get(key)
     if (rows) rows.push(thread)
     else grouped.set(key, [thread])
@@ -655,7 +655,7 @@ function groupThreadsByProject(threads: UiThread[], state: ThreadProjectNormaliz
       const project = state?.localProjects.find((item) => item.id === first?.projectId)
       return {
       projectId: first?.projectId ?? null,
-      projectName: first?.projectName ?? key,
+      projectName: first?.projectId ? (first.projectName ?? key) : 'Chat without project',
       rootPaths: project ? [...project.rootPaths] : [],
       threads: projectThreads.sort(
         (a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime(),

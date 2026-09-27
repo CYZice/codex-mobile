@@ -106,7 +106,7 @@
             <span class="sidebar-skills-link-title">{{ t('Automations') }}</span>
           </button>
 
-          <SidebarThreadTree ref="sidebarThreadTreeRef" :groups="projectGroups" :project-display-name-by-id="projectDisplayNameById"
+          <SidebarThreadTree ref="sidebarThreadTreeRef" :groups="projectGroups"
             :project-git-repo-by-id="projectGitRepoById"
             :project-cwd-by-id="projectCwdById"
             :workspace-root-options="workspaceRootOptionsState"
@@ -636,7 +636,6 @@
               ref="automationsPanelRef"
               :groups="projectGroups"
               :project-cwd-by-id="projectCwdById"
-              :project-display-name-by-id="projectDisplayNameById"
               :selected-automation-id="routeAutomationId"
               @select-automation="onSelectAutomationInPanel"
               @edit-automation="onEditAutomationFromPanel"
@@ -1472,7 +1471,6 @@ const WHISPER_LANGUAGES: Record<string, string> = {
 
 const {
   projectGroups,
-  projectDisplayNameById,
   selectedThread,
   selectedThreadTokenUsage,
   selectedThreadTerminalOpen,

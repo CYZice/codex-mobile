@@ -962,7 +962,7 @@ import IconTablerArchive from '../icons/IconTablerArchive.vue'
 import IconTablerCopy from '../icons/IconTablerCopy.vue'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
-import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPath, isProjectlessThreadCwd } from '../../pathUtils.js'
+import { getPathLeafName, getPathParent, isAbsoluteLikePath, isProjectlessChatPath } from '../../pathUtils.js'
 import ComposerDropdown from '../content/ComposerDropdown.vue'
 import SidebarMenuRow from './SidebarMenuRow.vue'
 import { reconcilePinnedThreadIds } from './pinnedThreadUtils'
@@ -970,7 +970,6 @@ import { groupThreadsByActivityDate, isAttentionThread, sortThreadsByActivity } 
 
 const props = defineProps<{
   groups: UiProjectGroup[]
-  projectDisplayNameById: Record<string, string>
   projectGitRepoById: Record<string, boolean>
   projectCwdById: Record<string, string>
   workspaceRootOptions?: { order: string[]; labels: Record<string, string>; projectOrder: string[] }
@@ -1351,7 +1350,7 @@ const filteredGroups = computed<UiProjectGroup[]>(() => {
 })
 
 function isChatThread(thread: UiThread): boolean {
-  return isProjectlessThreadCwd(thread.cwd)
+  return thread.projectId === null || thread.projectId === undefined && isProjectlessChatPath(thread.cwd)
 }
 
 const isChronologicalView = computed(() => threadViewMode.value === 'chronological')
@@ -2281,7 +2280,7 @@ async function onRunAutomationFromDialog(): Promise<void> {
 
 function getProjectDisplayName(projectIdentityValue: string): string {
   const group = projectByIdentity(projectIdentityValue)
-  return group?.projectName || props.projectDisplayNameById[projectIdentityValue] || projectIdentityValue.replace(/^legacy:/u, '')
+  return group?.projectName || projectIdentityValue
 }
 
 defineExpose({
@@ -2311,19 +2310,8 @@ function isDuplicatePathLeafName(value: string): boolean {
 }
 
 function getProjectVisibleName(group: UiProjectGroup): string {
-  const customDisplayName = group.projectId ? props.projectDisplayNameById[group.projectId] : undefined
   const displayName = group.projectName || getProjectDisplayName(projectIdentity(group))
   const projectName = group.projectName
-  if (customDisplayName && !isPathLikeProjectName(projectName) && projectName !== displayName) {
-    if (displayName.includes(projectName) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(projectName)) return displayName
-    return `${displayName} ${projectName}`
-  }
-  if (customDisplayName && isPathLikeProjectName(projectName)) {
-    const leafName = getPathLeafName(projectName)
-    const parentLeafName = getPathLeafName(getPathParent(projectName))
-    const contextName = isDuplicatePathLeafName(projectName) ? parentLeafName : leafName
-    return contextName && contextName !== displayName ? `${displayName} ${contextName}` : displayName
-  }
   if (!displayName.includes('/') && !displayName.includes('\\')) return displayName
   const leafName = getPathLeafName(displayName) || displayName
   const parentLeafName = getPathLeafName(getPathParent(displayName))
@@ -2381,7 +2369,7 @@ function openProjectContextMenu(projectIdentityValue: string): void {
 }
 
 function getProjectRenameDraftName(group: UiProjectGroup): string {
-  return group.projectId ? props.projectDisplayNameById[group.projectId] ?? getProjectVisibleName(group) : getProjectVisibleName(group)
+  return getProjectVisibleName(group)
 }
 
 function openRenameProjectMenu(group: UiProjectGroup): void {

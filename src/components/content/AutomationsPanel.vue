@@ -118,7 +118,6 @@ import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
 const props = defineProps<{
   groups: UiProjectGroup[]
   projectCwdById: Record<string, string>
-  projectDisplayNameById: Record<string, string>
   selectedAutomationId?: string
 }>()
 
