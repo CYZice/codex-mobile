@@ -214,7 +214,7 @@ export type WorkspaceRootsState = {
     rootPaths: string[]
     order: number
   }>
-  threadAssignments?: Record<string, string>
+  threadAssignments?: Record<string, string | null>
 }
 
 type LocalProjectState = {
@@ -4316,14 +4316,19 @@ function normalizeLocalProjects(value: unknown): LocalProjectState[] {
   return projects
 }
 
-function normalizeThreadProjectAssignments(value: unknown): Record<string, string> {
+function normalizeThreadProjectAssignments(value: unknown): Record<string, string | null> {
   const record = asRecord(value)
   if (!record) return {}
-  const assignments: Record<string, string> = {}
+  const assignments: Record<string, string | null> = {}
   for (const [threadId, projectId] of Object.entries(record)) {
     const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) continue
+    if (projectId === null) {
+      assignments[normalizedThreadId] = null
+      continue
+    }
     const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : ''
-    if (normalizedThreadId && normalizedProjectId) assignments[normalizedThreadId] = normalizedProjectId
+    if (normalizedProjectId) assignments[normalizedThreadId] = normalizedProjectId
   }
   return assignments
 }
@@ -5940,7 +5945,7 @@ async function canonicalizeLocalProjects(
 function mergeLocalProjectsIntoWorkspaceRootsState(
   state: WorkspaceRootsState,
   localProjects: LocalProjectState[],
-  threadAssignments: Record<string, string> = {},
+  threadAssignments: Record<string, string | null> = {},
 ): WorkspaceRootsState {
   const order: string[] = []
   const seenOrder = new Set<string>()
@@ -5999,8 +6004,8 @@ function mergeLocalProjectsIntoWorkspaceRootsState(
     }))
   const knownProjectIds = new Set(localProjectRows.map((project) => project.id))
   const filteredAssignments = Object.fromEntries(
-    Object.entries(threadAssignments).filter(([, projectId]) => knownProjectIds.has(projectId)),
-  )
+    Object.entries(threadAssignments).filter(([, projectId]) => projectId === null || knownProjectIds.has(projectId)),
+  ) as Record<string, string | null>
 
   return {
     order,
@@ -6476,6 +6481,12 @@ export async function updateLocalProject(
   await withCodexGlobalStateUpdate(async (payload) => {
     const match = readLocalProjectRecordById(payload, normalizedId)
     if (!match) throw new Error('Project not found')
+    const previousRootKeys = new Set(match.project.rootPaths.map(workspaceRootComparisonKey))
+    const otherProjectRootKeys = new Set(
+      normalizeLocalProjects(payload['local-projects'])
+        .filter((project) => project.id !== normalizedId)
+        .flatMap((project) => project.rootPaths.map(workspaceRootComparisonKey)),
+    )
     const now = Date.now()
     payload['local-projects'] = {
       ...(asRecord(payload['local-projects']) ?? {}),
@@ -6488,12 +6499,22 @@ export async function updateLocalProject(
       },
     }
     const savedRoots = normalizeStringArray(payload['electron-saved-workspace-roots'])
+      .filter((rootPath) => {
+        const key = workspaceRootComparisonKey(rootPath)
+        return !previousRootKeys.has(key) || rootPaths.some((root) => workspaceRootComparisonKey(root) === key) || otherProjectRootKeys.has(key)
+      })
     payload['electron-saved-workspace-roots'] = normalizeStringArray([
       ...rootPaths,
       ...savedRoots,
       ...normalizeLocalProjects(payload['local-projects']).flatMap((project) => project.rootPaths),
     ])
     const labels = normalizeStringRecord(payload['electron-workspace-root-labels'])
+    for (const [rootPath, label] of Object.entries(labels)) {
+      const key = workspaceRootComparisonKey(rootPath)
+      if (previousRootKeys.has(key) && !rootPaths.some((root) => workspaceRootComparisonKey(root) === key) && !otherProjectRootKeys.has(key)) {
+        delete labels[rootPath]
+      }
+    }
     for (const rootPath of rootPaths) labels[rootPath] = name
     payload['electron-workspace-root-labels'] = labels
     const order = normalizeStringArray(payload['project-order'])
@@ -6537,7 +6558,7 @@ export async function assignThreadToProject(threadId: string, projectId: string 
     }
     const assignments = normalizeThreadProjectAssignments(payload[THREAD_PROJECT_ASSIGNMENTS_KEY])
     if (normalizedProjectId) assignments[normalizedThreadId] = normalizedProjectId
-    else delete assignments[normalizedThreadId]
+    else assignments[normalizedThreadId] = null
     payload[THREAD_PROJECT_ASSIGNMENTS_KEY] = assignments
   })
   return await readWorkspaceRootsState()

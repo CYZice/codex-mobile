@@ -217,7 +217,7 @@ export type WorkspaceRootsState = {
     label: string
   }>
   localProjects?: Array<{ id: string; name: string; rootPaths: string[]; order: number }>
-  threadAssignments?: Record<string, string>
+  threadAssignments?: Record<string, string | null>
 }
 
 let workspaceRootsStatePromise: Promise<WorkspaceRootsState> | null = null
@@ -2647,9 +2647,11 @@ function normalizeWorkspaceRootsState(payload: unknown): WorkspaceRootsState {
       })
       : [],
     threadAssignments: record.threadAssignments && typeof record.threadAssignments === 'object' && !Array.isArray(record.threadAssignments)
-      ? Object.fromEntries(Object.entries(record.threadAssignments as Record<string, unknown>).flatMap(([threadId, projectId]) => {
+      ? Object.fromEntries(Object.entries(record.threadAssignments as Record<string, unknown>).flatMap<[string, string | null]>(([threadId, projectId]) => {
+        if (!threadId.trim()) return []
+        if (projectId === null) return [[threadId.trim(), null]]
         const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : ''
-        return threadId.trim() && normalizedProjectId ? [[threadId.trim(), normalizedProjectId]] : []
+        return normalizedProjectId ? [[threadId.trim(), normalizedProjectId]] : []
       }))
       : {},
   }
@@ -3095,7 +3097,11 @@ function cloneWorkspaceRootsState(state: WorkspaceRootsState): WorkspaceRootsSta
 let legacyProjectMigrationPromise: Promise<void> | null = null
 
 async function migrateLegacyProjectStateIfNeeded(): Promise<void> {
-  if (typeof window === 'undefined' || legacyProjectMigrationPromise) return await legacyProjectMigrationPromise
+  if (typeof window === 'undefined') return
+  if (legacyProjectMigrationPromise) {
+    await legacyProjectMigrationPromise
+    return
+  }
   const aliasesKey = 'codex-web-local.project-root-aliases.v1'
   const overridesKey = 'codex-web-local.thread-project-overrides.v1'
   const aliasesRaw = window.localStorage.getItem(aliasesKey)

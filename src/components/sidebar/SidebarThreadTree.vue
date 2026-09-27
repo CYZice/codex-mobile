@@ -635,11 +635,11 @@
           :key="`move:${group.projectId ?? group.projectName}`"
           class="thread-menu-item"
           type="button"
-          @click="onMoveThread(openThreadMenuThread.id, group.projectName)"
+          @click="onMoveThread(openThreadMenuThread.id, group.projectId ?? null)"
         >
           <IconTablerFolder class="thread-menu-item-icon" /><span>{{ getProjectVisibleName(group) }}</span>
         </button>
-        <button class="thread-menu-item" type="button" @click="onMoveThread(openThreadMenuThread.id, '__no-project__')">
+        <button class="thread-menu-item" type="button" @click="onMoveThread(openThreadMenuThread.id, null)">
           <IconTablerFolder class="thread-menu-item-icon" /><span>No project</span>
         </button>
         <button class="thread-menu-item" type="button" @click="openDeleteThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
@@ -944,9 +944,9 @@ import {
   runThreadAutomationNow,
   upsertProjectAutomation,
   upsertThreadAutomation,
-  openProjectRoot,
   removeWorkspaceRootPaths,
   renameWorkspaceRootPaths,
+  validateProjectRoot,
   updateLocalProject,
 } from '../../api/codexGateway'
 import type { UiProjectGroup, UiThread, UiThreadAutomation, UiThreadAutomationStatus } from '../../types/codex'
@@ -1000,7 +1000,7 @@ const emit = defineEmits<{
   'rename-project': [payload: { projectName: string; displayName: string }]
   'project-folders-changed': []
   'rename-thread': [payload: { threadId: string; title: string }]
-  'move-thread': [payload: { threadId: string; projectName: string }]
+  'move-thread': [payload: { threadId: string; projectId: string | null }]
   'remove-project': [projectName: string]
   'reorder-project': [payload: { projectName: string; toIndex: number }]
   'copy-thread-chat': [threadId: string]
@@ -2389,8 +2389,8 @@ function projectGroupsForMove(threadId: string): UiProjectGroup[] {
   return props.groups.filter((group) => group.projectName !== current && group.projectName.trim().length > 0)
 }
 
-function onMoveThread(threadId: string, projectName: string): void {
-  emit('move-thread', { threadId, projectName })
+function onMoveThread(threadId: string, projectId: string | null): void {
+  emit('move-thread', { threadId, projectId })
   closeThreadMenu()
 }
 
@@ -2424,7 +2424,7 @@ async function addProjectEditorFolder(): Promise<void> {
   if (!candidate) return
   if (projectEditorFolders.value.some((folder) => folder.toLowerCase() === candidate.toLowerCase())) return
   try {
-    const normalized = await openProjectRoot(candidate, { createIfMissing: false, label: projectEditorName.value.trim() })
+    const normalized = await validateProjectRoot(candidate)
     if (!normalized) return
     projectEditorFolders.value = [...projectEditorFolders.value, normalized]
   } catch (error) {

@@ -3255,11 +3255,8 @@ function onRenameThread(payload: { threadId: string; title: string }): void {
   void renameThreadById(payload.threadId, payload.title)
 }
 
-async function onMoveThread(payload: { threadId: string; projectName: string }): Promise<void> {
-  const targetGroup = payload.projectName === '__no-project__'
-    ? null
-    : projectGroups.value.find((group) => group.projectName === payload.projectName)
-  await setThreadProject(payload.threadId, targetGroup?.projectId ?? null)
+async function onMoveThread(payload: { threadId: string; projectId: string | null }): Promise<void> {
+  await setThreadProject(payload.threadId, payload.projectId)
   await refreshAll()
 }
 

@@ -9,6 +9,8 @@ import {
   readWorkspaceRootsState,
   recoverWorkspaceRootsForRunningThreads,
   reorderWorkspaceRoots,
+  assignThreadToProject,
+  updateLocalProject,
   writePermissionState,
   writeWorkspaceRootsState,
 } from './codexAppServerBridge'
@@ -24,6 +26,62 @@ afterEach(() => {
 })
 
 describe('workspace roots Desktop state compatibility', () => {
+  it('persists an explicit no-project assignment as null', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-no-project-'))
+    const projectRoot = join(codexHome, 'project')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await mkdir(projectRoot, { recursive: true })
+      await writeFile(join(codexHome, '.codex-global-state.json'), JSON.stringify({
+        'electron-saved-workspace-roots': [projectRoot],
+        'project-order': ['project-id'],
+        'local-projects': {
+          'project-id': { id: 'project-id', name: 'Project', rootPaths: [projectRoot] },
+        },
+      }), 'utf8')
+
+      await assignThreadToProject('thread-a', null)
+
+      const raw = JSON.parse(await readFile(join(codexHome, '.codex-global-state.json'), 'utf8')) as Record<string, unknown>
+      expect(raw['thread-project-assignments']).toEqual({ 'thread-a': null })
+      expect((await readWorkspaceRootsState()).threadAssignments).toEqual({ 'thread-a': null })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it('removes an edited-out root when no other project uses it', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-project-root-remove-'))
+    const projectRoot = join(codexHome, 'project')
+    const removedRoot = join(codexHome, 'removed')
+    process.env.CODEX_HOME = codexHome
+
+    try {
+      await Promise.all([
+        mkdir(projectRoot, { recursive: true }),
+        mkdir(removedRoot, { recursive: true }),
+      ])
+      await writeFile(join(codexHome, '.codex-global-state.json'), JSON.stringify({
+        'electron-saved-workspace-roots': [projectRoot, removedRoot],
+        'project-order': ['project-id'],
+        'electron-workspace-root-labels': { [projectRoot]: 'Project', [removedRoot]: 'Project' },
+        'local-projects': {
+          'project-id': { id: 'project-id', name: 'Project', rootPaths: [projectRoot, removedRoot] },
+        },
+      }), 'utf8')
+
+      await updateLocalProject('project-id', { name: 'Renamed', rootPaths: [projectRoot] })
+
+      const raw = JSON.parse(await readFile(join(codexHome, '.codex-global-state.json'), 'utf8')) as Record<string, unknown>
+      expect(raw['electron-saved-workspace-roots']).toEqual([projectRoot])
+      expect(raw['electron-workspace-root-labels']).toEqual({ [projectRoot]: 'Renamed' })
+      expect((raw['local-projects'] as Record<string, Record<string, unknown>>)['project-id'].rootPaths).toEqual([projectRoot])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   it('stores permission presets separately from shared project state', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'codex-home-permissions-'))
     const globalStatePath = join(codexHome, '.codex-global-state.json')

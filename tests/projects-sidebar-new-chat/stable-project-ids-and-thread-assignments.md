@@ -15,7 +15,7 @@ Local project names, roots, ordering, and thread assignments persist in Codex gl
 2. Edit a project name and add a second root, then save. Refresh both contexts.
 3. Confirm the ID remains unchanged, both roots remain present, and the second context shows the new name.
 4. Move a chat to the project and refresh. Confirm the chat remains grouped there while its `cwd` is unchanged.
-5. Move the chat to “No project” and confirm root inference is restored.
+5. Move the chat to “No project” and confirm it remains in “Chat without project” even when its `cwd` matches a project root.
 6. Remove the project and confirm its chats remain visible under another matching root or “Chat without project”.
 7. Add a folder to the editor and cancel. Confirm the global state file is unchanged.
 
@@ -25,6 +25,7 @@ Local project names, roots, ordering, and thread assignments persist in Codex gl
 - Save is atomic for name, roots, labels, and ordering.
 - Assignment writes are server-side and shared by both browser contexts.
 - Removing a project clears assignments without deleting chats or files.
+- “No project” is an explicit persisted assignment; it does not immediately fall back to `cwd` inference.
 
 ## Rollback/Cleanup
 

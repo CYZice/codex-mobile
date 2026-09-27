@@ -22,7 +22,7 @@ import { stripChatGptConversationReferenceBlocks } from '../../composerReference
 
 export type ThreadProjectNormalizationState = {
   localProjects: Array<{ id: string; name: string; rootPaths: string[]; order?: number }>
-  threadAssignments: Record<string, string>
+  threadAssignments: Record<string, string | null>
 }
 
 function pathMatchesProjectRoot(cwd: string, root: string): boolean {
@@ -606,16 +606,20 @@ function toUiThread(summary: Thread, state: ThreadProjectNormalizationState | nu
     comparableCwd.includes('/.codex/worktrees/') ||
     comparableCwd.includes('/.git/worktrees/')
 
-  const assignedProjectId = state?.threadAssignments?.[summary.id] ?? null
+  const hasExplicitAssignment = state ? Object.prototype.hasOwnProperty.call(state.threadAssignments, summary.id) : false
+  const assignedProjectId = hasExplicitAssignment ? state?.threadAssignments?.[summary.id] ?? null : undefined
   const comparableRoots = state?.localProjects ?? []
-  const matchedProject = assignedProjectId
-    ? comparableRoots.find((project) => project.id === assignedProjectId)
+  const matchedProject = assignedProjectId === null && hasExplicitAssignment
+    ? undefined
+    : typeof assignedProjectId === 'string'
+      ? comparableRoots.find((project) => project.id === assignedProjectId)
     : comparableRoots
       .flatMap((project) => project.rootPaths.map((root) => ({ project, root })))
       .filter(({ root }) => pathMatchesProjectRoot(comparableCwd, root))
       .sort((first, second) => second.root.length - first.root.length)[0]?.project
   const projectId = matchedProject?.id ?? null
-  const projectName = matchedProject?.name?.trim() || (isProjectlessChatPath(cwd) ? 'Chat without project' : toProjectName(cwd))
+  const projectName = matchedProject?.name?.trim()
+    || (hasExplicitAssignment && assignedProjectId === null ? 'Chat without project' : isProjectlessChatPath(cwd) ? 'Chat without project' : toProjectName(cwd))
   return {
     id: summary.id,
     title: toThreadTitle(summary),
