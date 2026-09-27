@@ -27,6 +27,7 @@ import {
   setThreadQueueState,
   setThreadUnreadState,
   setPermissionState,
+  setThreadProject,
   getThreadTitleCache,
   persistThreadTitle,
   resumeThread,
@@ -946,6 +947,7 @@ function mergeThreadGroups(
       projectId: incomingGroup.projectId ?? null,
       projectName: incomingGroup.projectName,
       rootPaths: [...(incomingGroup.rootPaths ?? [])],
+      kind: incomingGroup.kind ?? (incomingGroup.projectId ? 'local' : 'projectless'),
       threads: mergedThreads,
     }
   })
@@ -975,6 +977,7 @@ export function mergeIncomingWithLocalInProgressThreads(
     projectId: group.projectId ?? null,
     projectName: group.projectName,
     rootPaths: [...(group.rootPaths ?? [])],
+    kind: group.kind ?? (group.projectId ? 'local' : 'projectless'),
     threads: [...group.threads],
   }))
 
@@ -987,6 +990,7 @@ export function mergeIncomingWithLocalInProgressThreads(
           projectId: merged[mergedGroupIndex].projectId ?? null,
           projectName: merged[mergedGroupIndex].projectName,
           rootPaths: [...(merged[mergedGroupIndex].rootPaths ?? [])],
+          kind: merged[mergedGroupIndex].kind,
           threads: [thread, ...merged[mergedGroupIndex].threads],
         }
       }
@@ -997,6 +1001,7 @@ export function mergeIncomingWithLocalInProgressThreads(
       projectId: thread.projectId ?? null,
       projectName: thread.projectName,
       rootPaths: [...(thread.rootPaths ?? [])],
+      kind: thread.projectId ? 'local' : 'projectless',
       threads: [thread],
     })
   }
@@ -1043,12 +1048,14 @@ export function filterGroupsByWorkspaceRoots(
     projectId: project.id,
     projectName: project.name,
     rootPaths: [...project.rootPaths],
+    kind: 'local',
     threads: groupsById.get(project.id)?.threads ?? [],
   }))
   const remoteGroups: UiProjectGroup[] = (rootsState.remoteProjects ?? []).map((project) => ({
     projectId: project.id,
     projectName: getRemoteProjectDisplayName(project),
     rootPaths: [],
+    kind: 'remote',
     threads: groupsById.get(project.id)?.threads ?? [],
   }))
   const knownIds = new Set([...localGroups, ...remoteGroups].map((group) => group.projectId))
@@ -1056,7 +1063,7 @@ export function filterGroupsByWorkspaceRoots(
   return [
     ...localGroups,
     ...remoteGroups,
-    ...(unassignedThreads.length > 0 ? [{ projectId: null, projectName: 'Chat without project', rootPaths: [], threads: unassignedThreads }] : []),
+    ...(unassignedThreads.length > 0 ? [{ projectId: null, projectName: 'Chat without project', rootPaths: [], kind: 'projectless' as const, threads: unassignedThreads }] : []),
   ]
 }
 
@@ -2055,7 +2062,7 @@ export function useDesktopState() {
     projectGroups.value = mergeThreadGroups(projectGroups.value, flaggedGroups)
   }
 
-  function insertOptimisticThread(threadId: string, cwd: string, firstMessageText: string): void {
+  function insertOptimisticThread(threadId: string, cwd: string, firstMessageText: string, preferredProjectId: string | null = null): void {
     optimisticThreadIdsAwaitingList.add(threadId)
     const nowIso = new Date().toISOString()
     const normalizedCwd = normalizePathForUi(cwd)
@@ -2067,14 +2074,17 @@ export function useDesktopState() {
         return comparableCwd === comparableRoot || comparableCwd.startsWith(`${comparableRoot}/`)
       })
       .sort((first, second) => second.root.length - first.root.length)[0]?.project
-    const projectId = matchedProject?.id ?? null
-    const projectName = matchedProject?.name ?? (normalizedCwd ? toProjectName(normalizedCwd) : 'Chat without project')
+    const projectId = preferredProjectId ?? matchedProject?.id ?? null
+    const preferredProject = projectId
+      ? (loadedThreadListRootsState?.localProjects ?? []).find((project) => project.id === projectId)
+      : undefined
+    const projectName = preferredProject?.name ?? matchedProject?.name ?? (normalizedCwd ? toProjectName(normalizedCwd) : 'Chat without project')
     const nextThread: UiThread = {
       id: threadId,
       title: toOptimisticThreadTitle(firstMessageText),
       projectId,
       projectName,
-      rootPaths: matchedProject ? [...matchedProject.rootPaths] : [],
+      rootPaths: preferredProject ? [...preferredProject.rootPaths] : matchedProject ? [...matchedProject.rootPaths] : [],
       cwd: normalizedCwd,
       hasWorktree: normalizedCwd.includes('/.codex/worktrees/') || normalizedCwd.includes('/.git/worktrees/'),
       createdAtIso: nowIso,
@@ -2091,14 +2101,14 @@ export function useDesktopState() {
       const nextGroup: UiProjectGroup = {
         projectId,
         projectName,
-        rootPaths: matchedProject ? [...matchedProject.rootPaths] : [],
+        rootPaths: preferredProject ? [...preferredProject.rootPaths] : matchedProject ? [...matchedProject.rootPaths] : [],
         threads: [nextThread, ...remainingThreads],
       }
       const nextGroups = [...sourceGroups.value]
       nextGroups.splice(existingGroupIndex, 1, nextGroup)
       sourceGroups.value = nextGroups
     } else {
-      sourceGroups.value = [{ projectId, projectName, rootPaths: matchedProject ? [...matchedProject.rootPaths] : [], threads: [nextThread] }, ...sourceGroups.value]
+      sourceGroups.value = [{ projectId, projectName, rootPaths: preferredProject ? [...preferredProject.rootPaths] : matchedProject ? [...matchedProject.rootPaths] : [], kind: projectId ? 'local' : 'projectless', threads: [nextThread] }, ...sourceGroups.value]
     }
 
     applyThreadFlags()
@@ -5052,6 +5062,7 @@ export function useDesktopState() {
     skills: Array<{ name: string; path: string }> = [],
     fileAttachments: FileAttachment[] = [],
     workspace: Pick<StartThreadOptions, 'outputDirectory' | 'workspaceRoot'> = {},
+    preferredProjectId: string | null = null,
   ): Promise<string> {
     if (isUpdatingSpeedMode.value) return ''
 
@@ -5104,7 +5115,10 @@ export function useDesktopState() {
         // The turn still carries this preset even if durable state is temporarily unavailable.
       })
 
-      insertOptimisticThread(threadId, resolvedThreadCwd, visibleText || '[Image]')
+      if (preferredProjectId) {
+        await setThreadProject(threadId, preferredProjectId)
+      }
+      insertOptimisticThread(threadId, resolvedThreadCwd, visibleText || '[Image]', preferredProjectId)
       appendOptimisticUserMessage(threadId, visibleText, imageUrls, skills, fileAttachments)
       blockInterruptUntilThreadIsPersisted(threadId)
       resumedThreadById.value = {

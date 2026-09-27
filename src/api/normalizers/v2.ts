@@ -657,6 +657,7 @@ function groupThreadsByProject(threads: UiThread[], state: ThreadProjectNormaliz
       projectId: first?.projectId ?? null,
       projectName: first?.projectId ? (first.projectName ?? key) : 'Chat without project',
       rootPaths: project ? [...project.rootPaths] : [],
+      kind: first?.projectId ? 'local' as const : 'projectless' as const,
       threads: projectThreads.sort(
         (a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime(),
       ),

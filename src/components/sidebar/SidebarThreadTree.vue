@@ -353,6 +353,16 @@
             <template #right>
               <div class="project-hover-controls">
                 <div :ref="(el) => setProjectMenuWrapRef(projectIdentity(group), el)" class="project-menu-wrap">
+                  <button
+                    v-if="group.kind !== 'projectless'"
+                    class="project-menu-trigger"
+                    type="button"
+                    aria-label="Project actions"
+                    title="Project actions"
+                    @click.stop="openProjectContextMenu(projectIdentity(group))"
+                  >
+                    ⋯
+                  </button>
                   <div
                     v-if="isProjectMenuOpen(projectIdentity(group))"
                     class="project-menu-panel"
@@ -360,6 +370,7 @@
                     @click.stop
                   >
                     <template v-if="projectMenuMode === 'actions'">
+                      <template v-if="group.kind !== 'remote'">
                       <button class="project-menu-item" type="button" @click="onBrowseProjectFiles(group)">
                         Browse files
                       </button>
@@ -390,6 +401,7 @@
                       >
                         Remove
                       </button>
+                      </template>
                     </template>
                     <template v-else>
                       <label class="project-menu-label">{{ t('Project name') }}</label>
@@ -2387,7 +2399,7 @@ function openRenameProjectMenu(group: UiProjectGroup): void {
 function projectGroupsForMove(threadId: string): UiProjectGroup[] {
   const current = props.groups.find((group) => group.threads.some((thread) => thread.id === threadId))
   const currentIdentity = current ? projectIdentity(current) : ''
-  return props.groups.filter((group) => group.projectId != null && projectIdentity(group) !== currentIdentity)
+  return props.groups.filter((group) => group.projectId != null && group.kind !== 'remote' && projectIdentity(group) !== currentIdentity)
 }
 
 function onMoveThread(threadId: string, projectId: string | null): void {
@@ -3357,6 +3369,10 @@ onBeforeUnmount(() => {
 
 .project-menu-wrap {
   @apply relative;
+}
+
+.project-menu-trigger {
+  @apply h-6 w-6 rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800;
 }
 
 .project-hover-controls {

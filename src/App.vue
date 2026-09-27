@@ -1596,6 +1596,7 @@ const directoryTryInFlightKey = ref('')
 let hasPendingRouteSync = false
 const hasInitialized = ref(false)
 const newThreadCwd = ref('')
+const newThreadProjectId = ref<string | null>(null)
 const newThreadRuntime = ref<'local' | 'worktree'>('local')
 const gitRepoStatusByCwd = ref<Record<string, boolean>>({})
 const gitRepoStatusRequestByCwd = new Map<string, Promise<boolean>>()
@@ -2971,6 +2972,7 @@ function resolvePreferredLocalCwd(group: UiProjectGroup | undefined, fallbackCwd
 
 function onStartNewThread(projectId: string): void {
   const projectGroup = findProjectGroup(projectId)
+  newThreadProjectId.value = projectGroup?.projectId ?? null
   const projectCwd = resolvePreferredLocalCwd(projectGroup, projectGroup?.threads[0]?.cwd?.trim() ?? '')
   if (projectCwd) {
     newThreadCwd.value = projectCwd
@@ -3182,6 +3184,7 @@ function onStartNewThreadFromToolbar(): void {
   if (resolvedCwd) {
     newThreadCwd.value = resolvedCwd
   }
+  newThreadProjectId.value = selectedThread.value?.projectId ?? null
   newThreadRuntime.value = 'local'
   if (isMobile.value) setSidebarCollapsed(true)
   if (isHomeRoute.value) return
@@ -3190,6 +3193,7 @@ function onStartNewThreadFromToolbar(): void {
 
 function onStartProjectlessNewChat(): void {
   newThreadCwd.value = ''
+  newThreadProjectId.value = null
   newThreadRuntime.value = 'local'
   if (isMobile.value) setSidebarCollapsed(true)
   if (isHomeRoute.value) return
@@ -3231,12 +3235,16 @@ async function loadGitRepoStatus(cwdRaw: string): Promise<void> {
 async function onRenameProject(payload: { projectId: string; displayName: string }): Promise<void> {
   const group = findProjectGroup(payload.projectId)
   if (!group) return
-  await updateLocalProject(payload.projectId, {
-    name: payload.displayName.trim() || group.projectName,
-    rootPaths: group.rootPaths ?? [],
-  })
-  await loadWorkspaceRootOptionsState()
-  await refreshAll()
+  try {
+    await updateLocalProject(payload.projectId, {
+      name: payload.displayName.trim() || group.projectName,
+      rootPaths: group.rootPaths ?? [],
+    })
+    await loadWorkspaceRootOptionsState()
+    await refreshAll()
+  } catch (error) {
+    recordVisibleFailure(error instanceof Error ? error.message : 'Failed to rename project')
+  }
 }
 
 function onRenameThread(payload: { threadId: string; title: string }): void {
@@ -3244,28 +3252,40 @@ function onRenameThread(payload: { threadId: string; title: string }): void {
 }
 
 async function onMoveThread(payload: { threadId: string; projectId: string | null }): Promise<void> {
-  await setThreadProject(payload.threadId, payload.projectId)
-  await refreshAll()
+  try {
+    await setThreadProject(payload.threadId, payload.projectId)
+    await refreshAll()
+  } catch (error) {
+    recordVisibleFailure(error instanceof Error ? error.message : 'Failed to move thread')
+  }
 }
 
 async function onRemoveProject(projectId: string): Promise<void> {
   if (!findProjectGroup(projectId)) return
-  await removeLocalProject(projectId)
-  await loadWorkspaceRootOptionsState()
-  await refreshAll()
-  void refreshDefaultProjectName()
+  try {
+    await removeLocalProject(projectId)
+    await loadWorkspaceRootOptionsState()
+    await refreshAll()
+    void refreshDefaultProjectName()
+  } catch (error) {
+    recordVisibleFailure(error instanceof Error ? error.message : 'Failed to remove project')
+  }
 }
 
 async function onReorderProject(payload: { projectId: string; toIndex: number }): Promise<void> {
   const group = findProjectGroup(payload.projectId)
   if (!group) return
-  await updateLocalProject(payload.projectId, {
-    name: group.projectName,
-    rootPaths: group.rootPaths ?? [],
-    order: payload.toIndex,
-  })
-  await loadWorkspaceRootOptionsState()
-  await refreshAll()
+  try {
+    await updateLocalProject(payload.projectId, {
+      name: group.projectName,
+      rootPaths: group.rootPaths ?? [],
+      order: payload.toIndex,
+    })
+    await loadWorkspaceRootOptionsState()
+    await refreshAll()
+  } catch (error) {
+    recordVisibleFailure(error instanceof Error ? error.message : 'Failed to reorder project')
+  }
 }
 
 function onRequestProjectGitStatus(projectId: string): void {
@@ -3893,7 +3913,11 @@ function scheduleMobileConversationJumpToLatest(): void {
 }
 
 function onSelectNewThreadFolder(cwd: string): void {
-  newThreadCwd.value = cwd.trim()
+  const normalizedCwd = cwd.trim()
+  newThreadCwd.value = normalizedCwd
+  newThreadProjectId.value = projectGroups.value.find((group) =>
+    group.projectId && (group.rootPaths ?? []).some((root) => normalizePathForUi(root).toLowerCase() === normalizePathForUi(normalizedCwd).toLowerCase()),
+  )?.projectId ?? null
   createFolderError.value = ''
 }
 
@@ -5505,6 +5529,7 @@ async function submitFirstMessageForNewThread(
       skills,
       fileAttachments,
       projectlessWorkspace,
+      newThreadProjectId.value,
     )
     if (!threadId) return
     await router.replace({ name: 'thread', params: { threadId } })

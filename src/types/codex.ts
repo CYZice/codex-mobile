@@ -316,6 +316,7 @@ export type UiProjectGroup = {
   projectName: string
   rootPaths?: string[]
   threads: UiThread[]
+  kind?: 'local' | 'remote' | 'projectless'
 }
 
 export type UiAccountQuotaStatus = 'idle' | 'loading' | 'ready' | 'error'
