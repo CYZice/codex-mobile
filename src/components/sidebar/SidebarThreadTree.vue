@@ -314,7 +314,7 @@
             role="button"
             tabindex="0"
             @click="toggleProjectCollapse(projectIdentity(group))"
-            @contextmenu.prevent="openProjectContextMenu(projectIdentity(group))"
+            @contextmenu="onProjectHeaderContextMenu($event, group)"
             @keydown="onProjectHeaderKeyDown($event, projectIdentity(group))"
             @keydown.enter.prevent="toggleProjectCollapse(projectIdentity(group))"
             @keydown.space.prevent="toggleProjectCollapse(projectIdentity(group))"
@@ -2371,7 +2371,14 @@ function requestProjectGitStatusAndUpdateMenuDirection(projectIdentityValue: str
   })
 }
 
+function onProjectHeaderContextMenu(event: MouseEvent, group: UiProjectGroup): void {
+  if (group.kind !== 'local') return
+  event.preventDefault()
+  openProjectContextMenu(projectIdentity(group))
+}
+
 function openProjectContextMenu(projectIdentityValue: string): void {
+  if (projectByIdentity(projectIdentityValue)?.kind !== 'local') return
   closeThreadMenu()
   isOrganizeMenuOpen.value = false
   openProjectMenuId.value = projectIdentityValue
@@ -2534,6 +2541,7 @@ function getProjectAutomationKey(projectId: string): string {
 function onProjectHeaderKeyDown(event: KeyboardEvent, projectName: string): void {
   if (!event.altKey) return
   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  if (projectByIdentity(projectName)?.kind !== 'local') return
 
   const currentIndex = props.groups.findIndex((group) => projectIdentity(group) === projectName)
   if (currentIndex < 0) return
@@ -2858,6 +2866,7 @@ function onProjectHandleMouseDown(event: MouseEvent, projectName: string): void 
   if (event.button !== 0) return
   if (isSearchActive.value) return
   if (pendingProjectDrag.value || activeProjectDrag.value) return
+  if (projectByIdentity(projectName)?.kind !== 'local') return
 
   const fromIndex = props.groups.findIndex((group) => projectIdentity(group) === projectName)
   const projectGroupElement = projectGroupElementByName.get(projectName)
