@@ -300,93 +300,93 @@
     <div v-else ref="groupsContainerRef" class="thread-tree-groups" :style="groupsContainerStyle">
       <article
         v-for="group in filteredGroups"
-        :key="group.projectName"
-        :ref="(el) => setProjectGroupRef(group.projectName, el)"
+        :key="projectIdentity(group)"
+        :ref="(el) => setProjectGroupRef(projectIdentity(group), el)"
         class="project-group"
         :data-project-name="group.projectName"
-        :data-expanded="!isCollapsed(group.projectName)"
-        :data-dragging="isDraggingProject(group.projectName)"
-        :style="projectGroupStyle(group.projectName)"
+        :data-expanded="!isCollapsed(projectIdentity(group))"
+        :data-dragging="isDraggingProject(projectIdentity(group))"
+        :style="projectGroupStyle(projectIdentity(group))"
       >
           <SidebarMenuRow
             as="div"
             class="project-header-row"
             role="button"
             tabindex="0"
-            @click="toggleProjectCollapse(group.projectName)"
-            @contextmenu.prevent="openProjectContextMenu(group.projectName)"
-            @keydown="onProjectHeaderKeyDown($event, group.projectName)"
-            @keydown.enter.prevent="toggleProjectCollapse(group.projectName)"
-            @keydown.space.prevent="toggleProjectCollapse(group.projectName)"
+            @click="toggleProjectCollapse(projectIdentity(group))"
+            @contextmenu.prevent="openProjectContextMenu(projectIdentity(group))"
+            @keydown="onProjectHeaderKeyDown($event, projectIdentity(group))"
+            @keydown.enter.prevent="toggleProjectCollapse(projectIdentity(group))"
+            @keydown.space.prevent="toggleProjectCollapse(projectIdentity(group))"
           >
             <template #left>
               <span class="project-icon-stack">
                 <span class="project-icon-folder">
-                  <IconTablerFolder v-if="isCollapsed(group.projectName)" class="thread-icon" />
+                  <IconTablerFolder v-if="isCollapsed(projectIdentity(group))" class="thread-icon" />
                   <IconTablerFolderOpen v-else class="thread-icon" />
                 </span>
                 <span class="project-icon-chevron">
-                  <IconTablerChevronRight v-if="isCollapsed(group.projectName)" class="thread-icon" />
+                  <IconTablerChevronRight v-if="isCollapsed(projectIdentity(group))" class="thread-icon" />
                   <IconTablerChevronDown v-else class="thread-icon" />
                 </span>
               </span>
             </template>
             <span
               class="project-main-button"
-              :data-dragging-handle="isDraggingProject(group.projectName)"
-              @mousedown.left="onProjectHandleMouseDown($event, group.projectName)"
+              :data-dragging-handle="isDraggingProject(projectIdentity(group))"
+              @mousedown.left="onProjectHandleMouseDown($event, projectIdentity(group))"
             >
-              <span class="project-title" :title="getProjectTooltipTitle(group.projectName)">
+              <span class="project-title" :title="getProjectTooltipTitle(group)">
                 {{ getProjectVisibleName(group) }}
               </span>
               <span
-                v-if="projectHasAutomation(group.projectName)"
+                v-if="projectHasAutomation(projectIdentity(group))"
                 class="thread-row-automation-chip"
-                :title="projectAutomationTooltip(group.projectName)"
+                :title="projectAutomationTooltip(projectIdentity(group))"
               >
                 <IconTablerBolt class="thread-row-automation-icon" />
-                <span v-if="projectAutomationCount(group.projectName) > 1" class="thread-row-automation-count">
-                  {{ projectAutomationCount(group.projectName) }}
+                <span v-if="projectAutomationCount(projectIdentity(group)) > 1" class="thread-row-automation-count">
+                  {{ projectAutomationCount(projectIdentity(group)) }}
                 </span>
               </span>
             </span>
             <template #right>
               <div class="project-hover-controls">
-                <div :ref="(el) => setProjectMenuWrapRef(group.projectName, el)" class="project-menu-wrap">
+                <div :ref="(el) => setProjectMenuWrapRef(projectIdentity(group), el)" class="project-menu-wrap">
                   <div
-                    v-if="isProjectMenuOpen(group.projectName)"
+                    v-if="isProjectMenuOpen(projectIdentity(group))"
                     class="project-menu-panel"
-                    :data-open-direction="projectMenuDirectionById[group.projectName] ?? 'down'"
+                    :data-open-direction="projectMenuDirectionById[projectIdentity(group)] ?? 'down'"
                     @click.stop
                   >
                     <template v-if="projectMenuMode === 'actions'">
-                      <button class="project-menu-item" type="button" @click="onBrowseProjectFiles(group.projectName)">
+                      <button class="project-menu-item" type="button" @click="onBrowseProjectFiles(group)">
                         Browse files
                       </button>
-                      <button class="project-menu-item" type="button" @click="onSaveProject(group.projectName)">
+                      <button class="project-menu-item" type="button" @click="onSaveProject(group)">
                         Export Project
                       </button>
-                      <button class="project-menu-item" type="button" @click="openProjectAutomationDialog(group.projectName)">
-                        {{ projectHasAutomation(group.projectName) ? 'Manage automations…' : 'Add automation…' }}
+                      <button class="project-menu-item" type="button" @click="openProjectAutomationDialog(group)">
+                        {{ projectHasAutomation(projectIdentity(group)) ? 'Manage automations…' : 'Add automation…' }}
                       </button>
                       <button
-                        v-if="projectGitRepoByName[group.projectName]"
+                        v-if="group.projectId && projectGitRepoById[group.projectId]"
                         class="project-menu-item"
                         type="button"
-                        @click="onCreateProjectWorktree(group.projectName)"
+                        @click="onCreateProjectWorktree(group)"
                       >
                         New worktree
                       </button>
                       <button class="project-menu-item" type="button" @click="openRenameProjectMenu(group)">
                         Rename project
                       </button>
-                      <button class="project-menu-item" type="button" @click="openProjectEditor(group.projectName)">
+                      <button class="project-menu-item" type="button" @click="openProjectEditor(group)">
                         Edit project
                       </button>
                       <button
                         class="project-menu-item project-menu-item-danger"
                         type="button"
-                        @click="onRemoveProject(group.projectName)"
+                        @click="onRemoveProject(group)"
                       >
                         Remove
                       </button>
@@ -397,7 +397,7 @@
                         v-model="projectRenameDraft"
                         class="project-menu-input"
                         type="text"
-                        @input="onProjectNameInput(group.projectName)"
+                        @change="onProjectNameInput(group)"
                       />
                     </template>
                   </div>
@@ -406,9 +406,9 @@
                 <button
                   class="thread-start-button"
                   type="button"
-                  :aria-label="getNewThreadButtonAriaLabel(group.projectName)"
-                  :title="getNewThreadButtonAriaLabel(group.projectName)"
-                  @click.stop="onStartNewThread(group.projectName)"
+                  :aria-label="getNewThreadButtonAriaLabel(group)"
+                  :title="getNewThreadButtonAriaLabel(group)"
+                  @click.stop="onStartNewThread(group)"
                 >
                   <IconTablerFilePencil class="thread-icon" />
                 </button>
@@ -484,7 +484,7 @@
             </li>
           </ul>
 
-          <SidebarMenuRow v-else-if="!isCollapsed(group.projectName)" as="p" class="project-empty-row">
+          <SidebarMenuRow v-else-if="!isCollapsed(projectIdentity(group))" as="p" class="project-empty-row">
             <template #left>
               <span class="project-empty-spacer" />
             </template>
@@ -495,8 +495,8 @@
             <template #left>
               <span class="thread-show-more-spacer" />
             </template>
-            <button class="thread-show-more-button" type="button" @click="toggleProjectExpansion(group.projectName)">
-              {{ isExpanded(group.projectName) ? 'Show less' : 'Show more' }}
+            <button class="thread-show-more-button" type="button" @click="toggleProjectExpansion(projectIdentity(group))">
+              {{ isExpanded(projectIdentity(group)) ? 'Show less' : 'Show more' }}
             </button>
           </SidebarMenuRow>
       </article>
@@ -944,8 +944,6 @@ import {
   runThreadAutomationNow,
   upsertProjectAutomation,
   upsertThreadAutomation,
-  removeWorkspaceRootPaths,
-  renameWorkspaceRootPaths,
   validateProjectRoot,
   updateLocalProject,
 } from '../../api/codexGateway'
@@ -973,8 +971,8 @@ import { groupThreadsByActivityDate, isAttentionThread, sortThreadsByActivity } 
 const props = defineProps<{
   groups: UiProjectGroup[]
   projectDisplayNameById: Record<string, string>
-  projectGitRepoByName: Record<string, boolean>
-  projectCwdByName: Record<string, string>
+  projectGitRepoById: Record<string, boolean>
+  projectCwdById: Record<string, string>
   workspaceRootOptions?: { order: string[]; labels: Record<string, string>; projectOrder: string[] }
   selectedThreadId: string
   isLoading: boolean
@@ -987,22 +985,30 @@ const props = defineProps<{
 const { t } = useUiLanguage()
 const { recordVisibleFailure } = useFeedbackDiagnostics()
 
+function projectIdentity(group: UiProjectGroup): string {
+  return group.projectId?.trim() || `legacy:${group.projectName}`
+}
+
+function projectByIdentity(identity: string): UiProjectGroup | undefined {
+  return props.groups.find((group) => projectIdentity(group) === identity)
+}
+
 const emit = defineEmits<{
   select: [threadId: string]
   archive: [threadId: string]
-  'start-new-thread': [projectName: string]
+  'start-new-thread': [projectId: string]
   'browse-thread-files': [threadId: string]
   'save-thread-project': [threadId: string]
-  'browse-project-files': [projectName: string]
-  'save-project': [projectName: string]
-  'request-project-git-status': [projectName: string]
-  'create-project-worktree': [projectName: string]
-  'rename-project': [payload: { projectName: string; displayName: string }]
+  'browse-project-files': [projectId: string]
+  'save-project': [projectId: string]
+  'request-project-git-status': [projectId: string]
+  'create-project-worktree': [projectId: string]
+  'rename-project': [payload: { projectId: string; displayName: string }]
   'project-folders-changed': []
   'rename-thread': [payload: { threadId: string; title: string }]
   'move-thread': [payload: { threadId: string; projectId: string | null }]
-  'remove-project': [projectName: string]
-  'reorder-project': [payload: { projectName: string; toIndex: number }]
+  'remove-project': [projectId: string]
+  'reorder-project': [payload: { projectId: string; toIndex: number }]
   'copy-thread-chat': [threadId: string]
   'fork-thread': [threadId: string]
   'start-new-chat': []
@@ -1010,7 +1016,7 @@ const emit = defineEmits<{
 }>()
 
 type PendingProjectDrag = {
-  projectName: string
+  projectId: string
   fromIndex: number
   startClientX: number
   startClientY: number
@@ -1022,7 +1028,7 @@ type PendingProjectDrag = {
 }
 
 type ActiveProjectDrag = {
-  projectName: string
+  projectId: string
   fromIndex: number
   pointerOffsetY: number
   groupLeft: number
@@ -1076,7 +1082,7 @@ const openThreadMenuStyle = ref<Record<string, string>>({})
 const projectMenuMode = ref<'actions' | 'rename'>('actions')
 const projectRenameDraft = ref('')
 const projectEditorVisible = ref(false)
-const projectEditorProjectName = ref('')
+const projectEditorProjectId = ref('')
 const projectEditorName = ref('')
 const projectEditorFolders = ref<string[]>([])
 const projectEditorSaving = ref(false)
@@ -1144,7 +1150,7 @@ const automationThreadTargetOptions = computed(() => {
   for (const group of props.groups) {
     for (const thread of group.threads) {
       const title = thread.title?.trim() || thread.id
-      const project = getProjectDisplayName(group.projectName)
+      const project = getProjectDisplayName(projectIdentity(group))
       rows.push({
         value: thread.id,
         label: `${title} · ${project}`,
@@ -1157,9 +1163,9 @@ const automationThreadTargetOptions = computed(() => {
 const automationProjectTargetOptions = computed(() => {
   const rows: Array<{ value: string; label: string; searchText: string }> = []
   for (const group of props.groups) {
-    const cwd = getProjectAutomationKey(group.projectName)
+    const cwd = group.projectId ? getProjectAutomationKey(group.projectId) : ''
     if (!cwd) continue
-    const label = getProjectDisplayName(group.projectName)
+    const label = getProjectDisplayName(projectIdentity(group))
     rows.push({
       value: cwd,
       label,
@@ -1336,8 +1342,9 @@ const filteredGroups = computed<UiProjectGroup[]>(() => {
     if (threads.length > 0) return [{ ...group, threads }]
     // Keep registered workspace placeholders so their "new thread" action remains available,
     // but drop orphaned empty groups that cannot resolve to a workspace root.
-    const root = props.projectCwdByName[group.projectName]?.trim() || group.projectName
-    return !isSearchActive.value && group.threads.length === 0 && !isProjectlessChatPath(root) && Boolean(props.projectCwdByName[group.projectName]?.trim())
+    const identity = projectIdentity(group)
+    const root = props.projectCwdById[identity]?.trim() || group.projectName
+    return !isSearchActive.value && group.threads.length === 0 && !isProjectlessChatPath(root) && Boolean(props.projectCwdById[identity]?.trim())
       ? [{ ...group, threads }]
       : []
   })
@@ -1484,20 +1491,20 @@ onMounted(async () => {
 
 const deleteThreadHasAutomation = computed(() => threadHasAutomation(deleteThreadDialogThreadId.value))
 
-const threadProjectNameById = computed(() => {
+const threadProjectIdentityById = computed(() => {
   const map = new Map<string, string>()
   for (const group of props.groups) {
     for (const thread of group.threads) {
-      map.set(thread.id, group.projectName)
+      map.set(thread.id, projectIdentity(group))
     }
   }
   return map
 })
-const unpinnedThreadsByProjectName = computed(() => {
+const unpinnedThreadsByProjectId = computed(() => {
   const map = new Map<string, UiThread[]>()
   for (const group of props.groups) {
     const rows = group.threads.filter((thread) => !pinnedThreadIdSet.value.has(thread.id) && !optimisticallyArchivedThreadIdSet.value.has(thread.id))
-    map.set(group.projectName, rows)
+    map.set(projectIdentity(group), rows)
   }
   return map
 })
@@ -1505,7 +1512,7 @@ const unpinnedThreadsByProjectName = computed(() => {
 const activityProjectLabelByThreadId = computed(() => {
   const labels = new Map<string, string>()
   for (const group of props.groups) {
-    const label = getProjectDisplayName(group.projectName)
+    const label = getProjectDisplayName(projectIdentity(group))
     for (const thread of group.threads) labels.set(thread.id, label)
   }
   return labels
@@ -1543,16 +1550,17 @@ function getActivityThreadSubtitle(thread: UiThread): string {
   if (isProjectlessChatPath(thread.cwd)) return t('Chat without project')
   return activityProjectLabelByThreadId.value.get(thread.id) || getPathLeafName(thread.cwd) || thread.cwd
 }
-const visibleThreadsByProjectName = computed(() => {
+const visibleThreadsByProjectId = computed(() => {
   const map = new Map<string, UiThread[]>()
   for (const group of filteredGroups.value) {
-    const rows = unpinnedThreadsByProjectName.value.get(group.projectName) ?? []
+    const identity = projectIdentity(group)
+    const rows = unpinnedThreadsByProjectId.value.get(identity) ?? []
     if (isSearchActive.value) {
-      map.set(group.projectName, rows.filter(threadMatchesSearch))
-    } else if (isCollapsed(group.projectName)) {
-      map.set(group.projectName, [])
+      map.set(identity, rows.filter(threadMatchesSearch))
+    } else if (isCollapsed(identity)) {
+      map.set(identity, [])
     } else {
-      map.set(group.projectName, isExpanded(group.projectName) ? rows : rows.slice(0, 10))
+      map.set(identity, isExpanded(identity) ? rows : rows.slice(0, 10))
     }
   }
   return map
@@ -1604,7 +1612,7 @@ const projectedDropProjectIndex = computed<number | null>(() => {
 
 const layoutProjectOrder = computed<string[]>(() => {
   const sourceGroups = isSearchActive.value ? filteredGroups.value : props.groups
-  const names = sourceGroups.map((group) => group.projectName)
+  const names = sourceGroups.map((group) => projectIdentity(group))
   const drag = activeProjectDrag.value
   const projectedIndex = projectedDropProjectIndex.value
 
@@ -1869,12 +1877,13 @@ function onForkThread(threadId: string): void {
   closeThreadMenu()
 }
 
-function getNewThreadButtonAriaLabel(projectName: string): string {
-  return `start new thread ${getProjectDisplayName(projectName)}`
+function getNewThreadButtonAriaLabel(group: UiProjectGroup): string {
+  return `start new thread ${getProjectDisplayName(projectIdentity(group))}`
 }
 
-function onStartNewThread(projectName: string): void {
-  emit('start-new-thread', projectName)
+function onStartNewThread(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  emit('start-new-thread', group.projectId)
 }
 
 function onBrowseThreadFiles(threadId: string): void {
@@ -1998,8 +2007,9 @@ function openAutomationDialog(threadId: string): void {
   closeThreadMenu()
 }
 
-function openProjectAutomationDialog(projectName: string): void {
-  const projectCwd = getProjectAutomationKey(projectName)
+function openProjectAutomationDialog(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  const projectCwd = getProjectAutomationKey(group.projectId)
   if (!projectCwd) {
     automationDialogScope.value = 'project'
     automationDialogThreadId.value = ''
@@ -2269,8 +2279,9 @@ async function onRunAutomationFromDialog(): Promise<void> {
   }
 }
 
-function getProjectDisplayName(projectName: string): string {
-  return props.projectDisplayNameById[projectName] ?? projectName
+function getProjectDisplayName(projectIdentityValue: string): string {
+  const group = projectByIdentity(projectIdentityValue)
+  return group?.projectName || props.projectDisplayNameById[projectIdentityValue] || projectIdentityValue.replace(/^legacy:/u, '')
 }
 
 defineExpose({
@@ -2282,8 +2293,8 @@ function isPathLikeProjectName(value: string): boolean {
   return value.includes('/') || value.includes('\\')
 }
 
-function getProjectTooltipTitle(projectName: string): string {
-  return isPathLikeProjectName(projectName) ? projectName : getProjectDisplayName(projectName)
+function getProjectTooltipTitle(group: UiProjectGroup): string {
+  return isPathLikeProjectName(group.projectName) ? group.projectName : getProjectDisplayName(projectIdentity(group))
 }
 
 function isDuplicatePathLeafName(value: string): boolean {
@@ -2300,8 +2311,8 @@ function isDuplicatePathLeafName(value: string): boolean {
 }
 
 function getProjectVisibleName(group: UiProjectGroup): string {
-  const customDisplayName = props.projectDisplayNameById[group.projectName]
-  const displayName = getProjectDisplayName(group.projectName)
+  const customDisplayName = group.projectId ? props.projectDisplayNameById[group.projectId] : undefined
+  const displayName = group.projectName || getProjectDisplayName(projectIdentity(group))
   const projectName = group.projectName
   if (customDisplayName && !isPathLikeProjectName(projectName) && projectName !== displayName) {
     if (displayName.includes(projectName) || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(projectName)) return displayName
@@ -2353,40 +2364,42 @@ function setChatSortMode(mode: ChatSortMode): void {
   chatSortMode.value = mode
 }
 
-function requestProjectGitStatusAndUpdateMenuDirection(projectName: string): void {
-  emit('request-project-git-status', projectName)
+function requestProjectGitStatusAndUpdateMenuDirection(projectIdentityValue: string): void {
+  emit('request-project-git-status', projectIdentityValue)
   nextTick(() => {
-    updateProjectMenuDirection(projectName)
+    updateProjectMenuDirection(projectIdentityValue)
   })
 }
 
-function openProjectContextMenu(projectName: string): void {
+function openProjectContextMenu(projectIdentityValue: string): void {
   closeThreadMenu()
   isOrganizeMenuOpen.value = false
-  openProjectMenuId.value = projectName
+  openProjectMenuId.value = projectIdentityValue
   projectMenuMode.value = 'actions'
-  projectRenameDraft.value = getProjectDisplayName(projectName)
-  requestProjectGitStatusAndUpdateMenuDirection(projectName)
+  projectRenameDraft.value = getProjectDisplayName(projectIdentityValue)
+  requestProjectGitStatusAndUpdateMenuDirection(projectIdentityValue)
 }
 
 function getProjectRenameDraftName(group: UiProjectGroup): string {
-  return props.projectDisplayNameById[group.projectName] ?? getProjectVisibleName(group)
+  return group.projectId ? props.projectDisplayNameById[group.projectId] ?? getProjectVisibleName(group) : getProjectVisibleName(group)
 }
 
 function openRenameProjectMenu(group: UiProjectGroup): void {
   closeThreadMenu()
-  const projectName = group.projectName
-  openProjectMenuId.value = projectName
+  const projectId = group.projectId
+  if (!projectId) return
+  openProjectMenuId.value = projectId
   projectMenuMode.value = 'rename'
   projectRenameDraft.value = getProjectRenameDraftName(group)
   nextTick(() => {
-    updateProjectMenuDirection(projectName)
+    updateProjectMenuDirection(projectId)
   })
 }
 
 function projectGroupsForMove(threadId: string): UiProjectGroup[] {
-  const current = props.groups.find((group) => group.threads.some((thread) => thread.id === threadId))?.projectName
-  return props.groups.filter((group) => group.projectName !== current && group.projectName.trim().length > 0)
+  const current = props.groups.find((group) => group.threads.some((thread) => thread.id === threadId))
+  const currentIdentity = current ? projectIdentity(current) : ''
+  return props.groups.filter((group) => projectIdentity(group) !== currentIdentity && group.projectName.trim().length > 0)
 }
 
 function onMoveThread(threadId: string, projectId: string | null): void {
@@ -2394,22 +2407,17 @@ function onMoveThread(threadId: string, projectId: string | null): void {
   closeThreadMenu()
 }
 
-function projectRootsForName(projectName: string): string[] {
-  const groupRoots = props.groups.find((group) => group.projectName === projectName)?.rootPaths ?? []
-  if (groupRoots.length > 0) return [...groupRoots]
-  const roots = props.workspaceRootOptions?.order ?? []
-  const normalized = projectName.toLowerCase()
-  const matches = roots.filter((root) => getPathLeafName(root).toLowerCase() === normalized || root === projectName)
-  if (matches.length > 0) return matches
-  const cwd = props.projectCwdByName[projectName]?.trim()
-  return cwd ? [cwd] : []
+function projectRootsForId(projectId: string): string[] {
+  const group = projectByIdentity(projectId)
+  return group?.rootPaths ? [...group.rootPaths] : []
 }
 
-function openProjectEditor(projectName: string): void {
+function openProjectEditor(group: UiProjectGroup): void {
+  if (!group.projectId) return
   closeProjectMenu()
-  projectEditorProjectName.value = projectName
-  projectEditorName.value = props.projectDisplayNameById[projectName] ?? getProjectDisplayName(projectName)
-  projectEditorFolders.value = projectRootsForName(projectName)
+  projectEditorProjectId.value = group.projectId
+  projectEditorName.value = group.projectName
+  projectEditorFolders.value = projectRootsForId(group.projectId)
   projectEditorError.value = ''
   projectEditorVisible.value = true
 }
@@ -2439,24 +2447,15 @@ function removeProjectEditorFolder(folder: string): void {
 
 async function saveProjectEditor(): Promise<void> {
   if (projectEditorSaving.value) return
-  const projectName = projectEditorProjectName.value
+  const projectId = projectEditorProjectId.value
   const folders = projectEditorFolders.value.filter(Boolean)
-  if (!projectName || folders.length === 0) return
+  if (!projectId || folders.length === 0) return
   projectEditorSaving.value = true
   projectEditorError.value = ''
   try {
-    const projectId = props.groups.find((group) => group.projectName === projectName)?.projectId
-    if (projectId) {
-      await updateLocalProject(projectId, { name: projectEditorName.value.trim() || projectName, rootPaths: folders })
-      emit('project-folders-changed')
-      closeProjectEditor()
-      return
-    }
-    const before = projectRootsForName(projectName)
-    const removed = before.filter((folder) => !folders.includes(folder))
-    if (removed.length > 0) await removeWorkspaceRootPaths(removed)
-    if (projectEditorName.value.trim()) emit('rename-project', { projectName, displayName: projectEditorName.value.trim() })
-    if (folders.length > 0) await renameWorkspaceRootPaths(folders, projectEditorName.value.trim())
+    const group = projectByIdentity(projectId)
+    if (!group) return
+    await updateLocalProject(projectId, { name: projectEditorName.value.trim() || group.projectName, rootPaths: folders })
     emit('project-folders-changed')
     closeProjectEditor()
   } catch (error) {
@@ -2467,38 +2466,43 @@ async function saveProjectEditor(): Promise<void> {
 }
 
 function removeProjectEditor(): void {
-  const projectName = projectEditorProjectName.value
-  if (!projectName) return
-  emit('remove-project', projectName)
+  const projectId = projectEditorProjectId.value
+  if (!projectId) return
+  emit('remove-project', projectId)
   closeProjectEditor()
 }
 
-function onBrowseProjectFiles(projectName: string): void {
-  emit('browse-project-files', projectName)
+function onBrowseProjectFiles(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  emit('browse-project-files', group.projectId)
   closeProjectMenu()
 }
 
-function onSaveProject(projectName: string): void {
-  emit('save-project', projectName)
+function onSaveProject(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  emit('save-project', group.projectId)
   closeProjectMenu()
 }
 
-function onCreateProjectWorktree(projectName: string): void {
-  emit('create-project-worktree', projectName)
+function onCreateProjectWorktree(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  emit('create-project-worktree', group.projectId)
   closeProjectMenu()
 }
 
-function onProjectNameInput(projectName: string): void {
+function onProjectNameInput(group: UiProjectGroup): void {
+  if (!group.projectId) return
   emit('rename-project', {
-    projectName,
+    projectId: group.projectId,
     displayName: projectRenameDraft.value,
   })
 }
 
-function onRemoveProject(projectName: string): void {
-  const projectCwd = getProjectAutomationKey(projectName)
-  emit('remove-project', projectName)
-  if (projectCwd && projectHasAutomation(projectName)) {
+function onRemoveProject(group: UiProjectGroup): void {
+  if (!group.projectId) return
+  const projectCwd = getProjectAutomationKey(group.projectId)
+  emit('remove-project', group.projectId)
+  if (projectCwd && projectHasAutomation(projectIdentity(group))) {
     projectAutomationActionError.value = ''
     const previousAutomationByProjectName = automationByProjectName.value
     automationByProjectName.value = omitAutomationProject(automationByProjectName.value, projectCwd)
@@ -2522,8 +2526,8 @@ function onRemoveProject(projectName: string): void {
   closeProjectMenu()
 }
 
-function getProjectAutomationKey(projectName: string): string {
-  const projectCwd = props.projectCwdByName[projectName]?.trim() ?? ''
+function getProjectAutomationKey(projectId: string): string {
+  const projectCwd = props.projectCwdById[projectId]?.trim() ?? ''
   return isAbsoluteLikePath(projectCwd) ? projectCwd : ''
 }
 
@@ -2531,7 +2535,7 @@ function onProjectHeaderKeyDown(event: KeyboardEvent, projectName: string): void
   if (!event.altKey) return
   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
 
-  const currentIndex = props.groups.findIndex((group) => group.projectName === projectName)
+  const currentIndex = props.groups.findIndex((group) => projectIdentity(group) === projectName)
   if (currentIndex < 0) return
 
   const delta = event.key === 'ArrowUp' ? -1 : 1
@@ -2540,7 +2544,7 @@ function onProjectHeaderKeyDown(event: KeyboardEvent, projectName: string): void
 
   event.preventDefault()
   emit('reorder-project', {
-    projectName,
+    projectId: projectName,
     toIndex: targetIndex,
   })
 }
@@ -2579,7 +2583,7 @@ function toggleProjectCollapse(projectName: string): void {
 function getProjectOuterHeight(projectName: string): number {
   const measuredHeight = measuredHeightByProject.value[projectName] ?? 0
   const drag = activeProjectDrag.value
-  const dragHeight = drag?.projectName === projectName ? drag.groupHeight : null
+  const dragHeight = drag?.projectId === projectName ? drag.groupHeight : null
   const baseHeight = dragHeight ?? measuredHeight
   const gap = isCollapsed(projectName) ? 0 : PROJECT_GROUP_EXPANDED_GAP_PX
   return Math.max(0, baseHeight + gap)
@@ -2855,14 +2859,14 @@ function onProjectHandleMouseDown(event: MouseEvent, projectName: string): void 
   if (isSearchActive.value) return
   if (pendingProjectDrag.value || activeProjectDrag.value) return
 
-  const fromIndex = props.groups.findIndex((group) => group.projectName === projectName)
+  const fromIndex = props.groups.findIndex((group) => projectIdentity(group) === projectName)
   const projectGroupElement = projectGroupElementByName.get(projectName)
   if (fromIndex < 0 || !projectGroupElement) return
 
   const groupRect = projectGroupElement.getBoundingClientRect()
   const groupGap = isCollapsed(projectName) ? 0 : PROJECT_GROUP_EXPANDED_GAP_PX
   pendingProjectDrag.value = {
-    projectName,
+    projectId: projectName,
     fromIndex,
     startClientX: event.clientX,
     startClientY: event.clientY,
@@ -2905,12 +2909,12 @@ function onProjectDragMouseUp(event: MouseEvent): void {
 
   const drag = activeProjectDrag.value
   if (drag && projectedDropProjectIndex.value !== null) {
-    const currentProjectIndex = props.groups.findIndex((group) => group.projectName === drag.projectName)
+    const currentProjectIndex = props.groups.findIndex((group) => projectIdentity(group) === drag.projectId)
     if (currentProjectIndex >= 0) {
       const toIndex = projectedDropProjectIndex.value
       if (toIndex !== currentProjectIndex) {
         emit('reorder-project', {
-          projectName: drag.projectName,
+          projectId: drag.projectId,
           toIndex,
         })
       }
@@ -2966,9 +2970,9 @@ function processProjectDragPointerSample(sample: DragPointerSample): void {
     }
 
     closeProjectMenu()
-    suppressNextProjectToggleId.value = pending.projectName
+    suppressNextProjectToggleId.value = pending.projectId
     activeProjectDrag.value = {
-      projectName: pending.projectName,
+      projectId: pending.projectId,
       fromIndex: pending.fromIndex,
       pointerOffsetY: pending.pointerOffsetY,
       groupLeft: pending.groupLeft,
@@ -3002,10 +3006,10 @@ function updateProjectDropTarget(sample: DragPointerSample): void {
   }
 
   const containerRect = groupsContainer.getBoundingClientRect()
-  const projectIndexByName = new Map(props.groups.map((group, index) => [group.projectName, index]))
+  const projectIndexByName = new Map(props.groups.map((group, index) => [projectIdentity(group), index]))
   const nonDraggedProjectNames = props.groups
-    .map((group) => group.projectName)
-    .filter((projectName) => projectName !== drag.projectName)
+    .map((group) => projectIdentity(group))
+    .filter((projectName) => projectName !== drag.projectId)
 
   let accumulatedTop = 0
   let nextDropTarget = props.groups.length
@@ -3037,18 +3041,18 @@ function isPointerInProjectDropZone(sample: DragPointerSample): boolean {
   return xInBounds && yInBounds
 }
 
-function isDraggingProject(projectName: string): boolean {
-  return activeProjectDrag.value?.projectName === projectName
+function isDraggingProject(projectId: string): boolean {
+  return activeProjectDrag.value?.projectId === projectId
 }
 
-function projectGroupStyle(projectName: string): Record<string, string> | undefined {
+function projectGroupStyle(projectId: string): Record<string, string> | undefined {
   const drag = activeProjectDrag.value
-  const targetTop = layoutTopByProject.value[projectName] ?? 0
-  const openThreadMenuProjectName = openThreadMenuId.value
-    ? (threadProjectNameById.value.get(openThreadMenuId.value) ?? '')
+  const targetTop = layoutTopByProject.value[projectId] ?? 0
+  const openThreadMenuProjectId = openThreadMenuId.value
+    ? (threadProjectIdentityById.value.get(openThreadMenuId.value) ?? '')
     : ''
   const shouldElevateForMenu =
-    openProjectMenuId.value === projectName || openThreadMenuProjectName === projectName
+    openProjectMenuId.value === projectId || openThreadMenuProjectId === projectId
 
   if (!drag) {
     return shouldElevateForMenu
@@ -3056,7 +3060,7 @@ function projectGroupStyle(projectName: string): Record<string, string> | undefi
       : undefined
   }
 
-  if (drag.projectName !== projectName) {
+  if (drag.projectId !== projectId) {
     return {
       position: 'absolute',
       top: '0',
@@ -3084,16 +3088,16 @@ function projectGroupStyle(projectName: string): Record<string, string> | undefi
 }
 
 function projectThreads(group: UiProjectGroup): UiThread[] {
-  return unpinnedThreadsByProjectName.value.get(group.projectName) ?? []
+  return unpinnedThreadsByProjectId.value.get(projectIdentity(group)) ?? []
 }
 
 function visibleThreads(group: UiProjectGroup): UiThread[] {
-  return visibleThreadsByProjectName.value.get(group.projectName) ?? []
+  return visibleThreadsByProjectId.value.get(projectIdentity(group)) ?? []
 }
 
 function hasHiddenThreads(group: UiProjectGroup): boolean {
   if (isSearchActive.value) return false
-  return !isCollapsed(group.projectName) && projectThreads(group).length > 10
+  return !isCollapsed(projectIdentity(group)) && projectThreads(group).length > 10
 }
 
 function hasThreads(group: UiProjectGroup): boolean {
@@ -3117,16 +3121,16 @@ function getThreadState(thread: UiThread): 'awaiting-approval' | 'awaiting-respo
 }
 
 watch(
-  () => props.groups.map((group) => group.projectName),
-  (projectNames) => {
-    const dragProjectName = activeProjectDrag.value?.projectName ?? pendingProjectDrag.value?.projectName ?? ''
-    if (dragProjectName && !props.groups.some((group) => group.projectName === dragProjectName)) {
+  () => props.groups.map(projectIdentity),
+  (projectIdentities) => {
+    const dragProjectId = activeProjectDrag.value?.projectId ?? pendingProjectDrag.value?.projectId ?? ''
+    if (dragProjectId && !props.groups.some((group) => projectIdentity(group) === dragProjectId)) {
       resetProjectDragState()
     }
 
-    const projectNameSet = new Set(projectNames)
+    const projectIdentitySet = new Set(projectIdentities)
     const nextMeasuredHeights = Object.fromEntries(
-      Object.entries(measuredHeightByProject.value).filter(([projectName]) => projectNameSet.has(projectName)),
+      Object.entries(measuredHeightByProject.value).filter(([identity]) => projectIdentitySet.has(identity)),
     ) as Record<string, number>
 
     if (Object.keys(nextMeasuredHeights).length !== Object.keys(measuredHeightByProject.value).length) {
@@ -3138,7 +3142,7 @@ watch(
 watch(
   () => {
     const projectName = openProjectMenuId.value
-    return projectName ? props.projectGitRepoByName[projectName] : undefined
+    return projectName ? props.projectGitRepoById[projectName] : undefined
   },
   () => {
     const projectName = openProjectMenuId.value

@@ -117,7 +117,7 @@ import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
 
 const props = defineProps<{
   groups: UiProjectGroup[]
-  projectCwdByName: Record<string, string>
+  projectCwdById: Record<string, string>
   projectDisplayNameById: Record<string, string>
   selectedAutomationId?: string
 }>()
@@ -164,8 +164,9 @@ const threadTitleById = computed(() => {
 const projectLabelByCwd = computed(() => {
   const map = new Map<string, string>()
   for (const group of props.groups) {
-    const cwd = props.projectCwdByName[group.projectName]?.trim()
-    const label = props.projectDisplayNameById[group.projectName]?.trim() || group.projectName
+    if (!group.projectId) continue
+    const cwd = props.projectCwdById[group.projectId]?.trim()
+    const label = group.projectName
     if (cwd) map.set(cwd, label)
   }
   return map

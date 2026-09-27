@@ -18,6 +18,7 @@ Local project names, roots, ordering, and thread assignments persist in Codex gl
 5. Move the chat to “No project” and confirm it remains in “Chat without project” even when its `cwd` matches a project root.
 6. Remove the project and confirm its chats remain visible under another matching root or “Chat without project”.
 7. Add a folder to the editor and cancel. Confirm the global state file is unchanged.
+8. Create or load two projects with the same display name, then use Edit, Remove, New thread, Browse files, and drag reorder on each project independently.
 
 ## Expected Results
 
@@ -26,6 +27,7 @@ Local project names, roots, ordering, and thread assignments persist in Codex gl
 - Assignment writes are server-side and shared by both browser contexts.
 - Removing a project clears assignments without deleting chats or files.
 - “No project” is an explicit persisted assignment; it does not immediately fall back to `cwd` inference.
+- Same-named projects keep independent menus, editor drafts, root paths, new-thread cwd, and ordering because UI actions use `projectId`.
 
 ## Rollback/Cleanup
 

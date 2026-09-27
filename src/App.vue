@@ -107,8 +107,8 @@
           </button>
 
           <SidebarThreadTree ref="sidebarThreadTreeRef" :groups="projectGroups" :project-display-name-by-id="projectDisplayNameById"
-            :project-git-repo-by-name="projectGitRepoByName"
-            :project-cwd-by-name="projectCwdByName"
+            :project-git-repo-by-id="projectGitRepoById"
+            :project-cwd-by-id="projectCwdById"
             :workspace-root-options="workspaceRootOptionsState"
             v-if="!isSidebarCollapsed"
             :selected-thread-id="selectedThreadId" :is-loading="isLoadingThreads"
@@ -635,7 +635,7 @@
             <AutomationsPanel
               ref="automationsPanelRef"
               :groups="projectGroups"
-              :project-cwd-by-name="projectCwdByName"
+              :project-cwd-by-id="projectCwdById"
               :project-display-name-by-id="projectDisplayNameById"
               :selected-automation-id="routeAutomationId"
               @select-automation="onSelectAutomationInPanel"
@@ -1275,6 +1275,7 @@ import {
   reloadCodexAppServer,
   removeAccount,
   removeLocalProject,
+  updateLocalProject,
   refreshAccountsFromAuth,
   resetGitBranchToCommit,
   startCodexLogin,
@@ -1284,7 +1285,7 @@ import {
   switchCcSwitchProvider,
   unarchiveThread,
 } from './api/codexGateway'
-import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiMessage, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
+import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiMessage, UiProjectGroup, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
 import type { ComposerCommandPayload, ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { PermissionPreset } from './permissions'
 import type { CcSwitchStatus, GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
@@ -1533,9 +1534,6 @@ const {
   setSelectedReasoningEffort,
   updateSelectedSpeedMode,
   respondToPendingServerRequest,
-  renameProject,
-  removeProject,
-  reorderProject,
   pinProjectToTop,
   startPolling,
   stopPolling,
@@ -2054,25 +2052,6 @@ function getProjectOrderNameForPath(path: string): string {
   return hasDuplicateFolderLeaf(normalizedPath, knownPaths) ? normalizedPath : getPathLeafName(normalizedPath)
 }
 
-function resolveWorkspaceRootCwd(projectName: string): string {
-  const normalizedProjectName = normalizePathForUi(projectName).trim()
-  if (!normalizedProjectName) return ''
-  const knownPaths = [
-    ...workspaceRootOptionsState.value.order,
-    ...projectGroups.value.map((group) => group.threads[0]?.cwd?.trim() ?? '').filter(Boolean),
-  ]
-  for (const cwdRaw of workspaceRootOptionsState.value.order) {
-    const cwd = normalizePathForUi(cwdRaw).trim()
-    if (!cwd) continue
-    const leafName = getPathLeafName(cwd)
-    const orderName = hasDuplicateFolderLeaf(cwd, knownPaths) ? cwd : leafName
-    if (cwd === normalizedProjectName || orderName === normalizedProjectName || leafName === normalizedProjectName) {
-      return cwd
-    }
-  }
-  return ''
-}
-
 const newThreadFolderOptions = computed(() => {
   const options: Array<{ value: string; label: string }> = [
     { value: '', label: t('Chat without project') },
@@ -2095,7 +2074,7 @@ const newThreadFolderOptions = computed(() => {
     seenCwds.add(cwd)
     options.push({
       value: cwd,
-      label: getFolderOptionLabel(cwd, projectDisplayNameById.value[group.projectName]),
+      label: getFolderOptionLabel(cwd, group.projectName),
     })
   }
 
@@ -2114,11 +2093,12 @@ const isNewThreadCwdGitRepo = computed(() => {
   const cwd = newThreadCwd.value.trim()
   return cwd ? gitRepoStatusByCwd.value[cwd] === true : false
 })
-const projectGitRepoByName = computed<Record<string, boolean>>(() => {
+const projectGitRepoById = computed<Record<string, boolean>>(() => {
   const result: Record<string, boolean> = {}
   for (const group of projectGroups.value) {
-    const cwd = resolvePreferredLocalCwd(group.projectName, group.threads[0]?.cwd?.trim() ?? '')
-    result[group.projectName] = cwd ? gitRepoStatusByCwd.value[cwd] === true : false
+    if (!group.projectId) continue
+    const cwd = resolvePreferredLocalCwd(group, group.threads[0]?.cwd?.trim() ?? '')
+    result[group.projectId] = cwd ? gitRepoStatusByCwd.value[cwd] === true : false
   }
   return result
 })
@@ -2978,19 +2958,23 @@ function isWorktreePath(cwdRaw: string): boolean {
   return cwd.includes('/.codex/worktrees/') || cwd.includes('/.git/worktrees/')
 }
 
-function resolvePreferredLocalCwd(projectName: string, fallbackCwd = ''): string {
-  const group = projectGroups.value.find((row) => row.projectName === projectName)
-  if (!group) return resolveWorkspaceRootCwd(projectName) || fallbackCwd.trim()
+function findProjectGroup(projectId: string): UiProjectGroup | undefined {
+  const normalizedId = projectId.trim()
+  return normalizedId ? projectGroups.value.find((row) => row.projectId === normalizedId) : undefined
+}
+
+function resolvePreferredLocalCwd(group: UiProjectGroup | undefined, fallbackCwd = ''): string {
+  if (!group) return fallbackCwd.trim()
   const declaredRoot = group.rootPaths?.[0]?.trim() ?? ''
   if (declaredRoot) return declaredRoot
   const nonWorktreeThread = group.threads.find((thread) => !isWorktreePath(thread.cwd))
   const candidate = nonWorktreeThread?.cwd?.trim() ?? group.threads[0]?.cwd?.trim() ?? ''
-  return candidate || resolveWorkspaceRootCwd(projectName) || fallbackCwd.trim()
+  return candidate || fallbackCwd.trim()
 }
 
-function onStartNewThread(projectName: string): void {
-  const projectGroup = projectGroups.value.find((group) => group.projectName === projectName)
-  const projectCwd = resolvePreferredLocalCwd(projectName, projectGroup?.threads[0]?.cwd?.trim() ?? '')
+function onStartNewThread(projectId: string): void {
+  const projectGroup = findProjectGroup(projectId)
+  const projectCwd = resolvePreferredLocalCwd(projectGroup, projectGroup?.threads[0]?.cwd?.trim() ?? '')
   if (projectCwd) {
     newThreadCwd.value = projectCwd
   }
@@ -3012,25 +2996,27 @@ function onBrowseThreadFiles(threadId: string): void {
   window.open(`/codex-local-browse${encodeURI(targetCwd)}`, '_blank', 'noopener,noreferrer')
 }
 
-function getProjectCwd(projectName: string): string {
-  const projectGroup = projectGroups.value.find((group) => group.projectName === projectName)
-  return resolvePreferredLocalCwd(projectName, projectGroup?.threads[0]?.cwd?.trim() ?? '')
+function getProjectCwd(projectId: string): string {
+  const projectGroup = findProjectGroup(projectId)
+  return resolvePreferredLocalCwd(projectGroup, projectGroup?.threads[0]?.cwd?.trim() ?? '')
 }
 
-const projectCwdByName = computed<Record<string, string>>(() =>
+const projectCwdById = computed<Record<string, string>>(() =>
   Object.fromEntries(
     projectGroups.value
-      .map((group) => [group.projectName, getProjectCwd(group.projectName).trim()] as const)
+      .filter((group): group is UiProjectGroup & { projectId: string } => Boolean(group.projectId))
+      .map((group) => [group.projectId, getProjectCwd(group.projectId).trim()] as const)
       .filter(([, cwd]) => cwd.length > 0),
   ),
 )
 
-function getProjectDisplayNameForWorktree(projectName: string): string {
-  return (projectDisplayNameById.value[projectName] ?? projectName).trim() || projectName
+function getProjectDisplayNameForWorktree(projectId: string): string {
+  const group = findProjectGroup(projectId)
+  return group?.projectName.trim() || projectId
 }
 
-function toWorktreeFolderNameDraft(projectName: string): string {
-  const displayName = getProjectDisplayNameForWorktree(projectName)
+function toWorktreeFolderNameDraft(projectId: string): string {
+  const displayName = getProjectDisplayNameForWorktree(projectId)
   const sanitized = displayName
     .replace(/[\\/]+/gu, '-')
     .replace(/[\u0000-\u001f]+/gu, '')
@@ -3038,14 +3024,14 @@ function toWorktreeFolderNameDraft(projectName: string): string {
   return sanitized || 'worktree'
 }
 
-function onBrowseProjectFiles(projectName: string): void {
-  const targetCwd = getProjectCwd(projectName)
+function onBrowseProjectFiles(projectId: string): void {
+  const targetCwd = getProjectCwd(projectId)
   if (!targetCwd || typeof window === 'undefined') return
   window.open(`/codex-local-browse${encodeURI(targetCwd)}`, '_blank', 'noopener,noreferrer')
 }
 
-async function onSaveProject(projectName: string): Promise<void> {
-  const targetCwd = getProjectCwd(projectName)
+async function onSaveProject(projectId: string): Promise<void> {
+  const targetCwd = getProjectCwd(projectId)
   await exportProjectZipForCwd(targetCwd)
 }
 
@@ -3148,13 +3134,13 @@ async function exportProjectZipForCwd(targetCwd: string): Promise<void> {
   }
 }
 
-async function onCreateProjectWorktree(projectName: string): Promise<void> {
-  const sourceCwd = getProjectCwd(projectName)
+async function onCreateProjectWorktree(projectId: string): Promise<void> {
+  const sourceCwd = getProjectCwd(projectId)
   if (!sourceCwd || typeof window === 'undefined') return
   await loadGitRepoStatus(sourceCwd)
   if (gitRepoStatusByCwd.value[sourceCwd] !== true) return
 
-  const suggestedName = `${toWorktreeFolderNameDraft(projectName)}-`
+  const suggestedName = `${toWorktreeFolderNameDraft(projectId)}-`
   const worktreeName = window.prompt('New worktree folder name', suggestedName)
   if (worktreeName === null) return
 
@@ -3191,9 +3177,8 @@ async function onCreateProjectWorktree(projectName: string): Promise<void> {
 function resolveSelectedThreadProjectCwd(): string {
   const thread = selectedThread.value
   if (!thread) return ''
-  const projectName = thread.projectName?.trim() ?? ''
-  if (!projectName) return thread.cwd?.trim() ?? ''
-  return resolvePreferredLocalCwd(projectName, thread.cwd?.trim() ?? '')
+  const projectGroup = thread.projectId ? findProjectGroup(thread.projectId) : undefined
+  return resolvePreferredLocalCwd(projectGroup, thread.cwd?.trim() ?? '') || (thread.cwd?.trim() ?? '')
 }
 
 function onStartNewThreadFromToolbar(): void {
@@ -3247,8 +3232,15 @@ async function loadGitRepoStatus(cwdRaw: string): Promise<void> {
   }
 }
 
-function onRenameProject(payload: { projectName: string; displayName: string }): void {
-  renameProject(payload.projectName, payload.displayName)
+async function onRenameProject(payload: { projectId: string; displayName: string }): Promise<void> {
+  const group = findProjectGroup(payload.projectId)
+  if (!group) return
+  await updateLocalProject(payload.projectId, {
+    name: payload.displayName.trim() || group.projectName,
+    rootPaths: group.rootPaths ?? [],
+  })
+  await loadWorkspaceRootOptionsState()
+  await refreshAll()
 }
 
 function onRenameThread(payload: { threadId: string; title: string }): void {
@@ -3260,21 +3252,29 @@ async function onMoveThread(payload: { threadId: string; projectId: string | nul
   await refreshAll()
 }
 
-async function onRemoveProject(projectName: string): Promise<void> {
-  const group = projectGroups.value.find((entry) => entry.projectName === projectName)
-  if (group?.projectId) await removeLocalProject(group.projectId)
-  else await removeProject(projectName)
+async function onRemoveProject(projectId: string): Promise<void> {
+  if (!findProjectGroup(projectId)) return
+  await removeLocalProject(projectId)
   await loadWorkspaceRootOptionsState()
+  await refreshAll()
   void refreshDefaultProjectName()
 }
 
-function onReorderProject(payload: { projectName: string; toIndex: number }): void {
-  reorderProject(payload.projectName, payload.toIndex)
+async function onReorderProject(payload: { projectId: string; toIndex: number }): Promise<void> {
+  const group = findProjectGroup(payload.projectId)
+  if (!group) return
+  await updateLocalProject(payload.projectId, {
+    name: group.projectName,
+    rootPaths: group.rootPaths ?? [],
+    order: payload.toIndex,
+  })
+  await loadWorkspaceRootOptionsState()
+  await refreshAll()
 }
 
-function onRequestProjectGitStatus(projectName: string): void {
-  const group = projectGroups.value.find((entry) => entry.projectName === projectName)
-  const cwd = resolvePreferredLocalCwd(projectName, group?.threads[0]?.cwd?.trim() ?? '')
+function onRequestProjectGitStatus(projectId: string): void {
+  const group = findProjectGroup(projectId)
+  const cwd = resolvePreferredLocalCwd(group, group?.threads[0]?.cwd?.trim() ?? '')
   void loadGitRepoStatus(cwd)
 }
 
@@ -5403,8 +5403,8 @@ watch(
       worktreeInitStatus.value = { phase: 'idle', title: '', message: '' }
       const current = newThreadCwd.value.trim()
       if (current && isWorktreePath(current)) {
-        const fallbackProjectName = selectedThread.value?.projectName ?? getPathLeafName(current)
-        const localCwd = resolvePreferredLocalCwd(fallbackProjectName, '')
+        const fallbackProject = selectedThread.value?.projectId ? findProjectGroup(selectedThread.value.projectId) : undefined
+        const localCwd = resolvePreferredLocalCwd(fallbackProject, '')
         if (localCwd) {
           newThreadCwd.value = localCwd
         }
