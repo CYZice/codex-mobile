@@ -235,7 +235,7 @@
                 :class="{ 'message-generated-image-list': message.messageType === 'imageView' }"
                 :data-role="message.role"
               >
-                <li v-for="imageUrl in message.images" :key="imageUrl" class="message-image-item">
+                <li v-for="(imageUrl, imageIndex) in message.images" :key="`${message.id}:image:${imageIndex}:${imageUrl}`" class="message-image-item">
                   <button class="message-image-button" type="button" @click="openImageModal(imageUrl)">
                     <img
                       class="message-image-preview"
