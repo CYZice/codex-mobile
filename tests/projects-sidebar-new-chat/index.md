@@ -25,6 +25,7 @@ Return to the [manual test index](../../tests.md).
 | [Sidebar scroll position survives collapse](sidebar-scroll-position-survives-collapse.md) |
 | [Toolbar new thread keeps active project](toolbar-new-thread-keeps-active-project.md) |
 | [Desktop local projects and web project persistence](desktop-local-projects-and-web-project-persistence.md) |
+| [Stable project IDs and server-side thread assignments](stable-project-ids-and-thread-assignments.md) |
 | [Codex Desktop style sidebar](codex-desktop-style-sidebar.md) |
 | [Sidebar priority activity view](sidebar-activity-priority-view.md) |
 | [Project and chat sidebar flow on mobile](project-chat-flow-on-mobile.md) |

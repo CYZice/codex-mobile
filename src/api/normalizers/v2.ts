@@ -17,39 +17,18 @@ import type {
   UiProjectGroup,
   UiThread,
 } from '../../types/codex'
-import { normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
+import { isProjectlessChatPath, normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
 import { stripChatGptConversationReferenceBlocks } from '../../composerReferences'
 
-const THREAD_PROJECT_OVERRIDES_KEY = 'codex-web-local.thread-project-overrides.v1'
-const PROJECT_ROOT_ALIASES_KEY = 'codex-web-local.project-root-aliases.v1'
-
-function readThreadProjectOverrides(): Record<string, string> {
-  if (typeof localStorage === 'undefined') return {}
-  try {
-    const value = JSON.parse(localStorage.getItem(THREAD_PROJECT_OVERRIDES_KEY) ?? '{}') as unknown
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string> : {}
-  } catch { return {} }
+export type ThreadProjectNormalizationState = {
+  localProjects: Array<{ id: string; name: string; rootPaths: string[]; order?: number }>
+  threadAssignments: Record<string, string>
 }
 
-function readProjectRootAliases(): Record<string, string> {
-  if (typeof localStorage === 'undefined') return {}
-  try {
-    const value = JSON.parse(localStorage.getItem(PROJECT_ROOT_ALIASES_KEY) ?? '{}') as unknown
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string> : {}
-  } catch { return {} }
-}
-
-export function persistProjectRootAliases(projectName: string, roots: string[]): void {
-  if (typeof localStorage === 'undefined') return
-  const aliases = readProjectRootAliases()
-  for (const root of roots) aliases[root] = projectName
-  localStorage.setItem(PROJECT_ROOT_ALIASES_KEY, JSON.stringify(aliases))
-}
-
-export function persistThreadProjectOverride(threadId: string, projectName: string): void {
-  if (typeof localStorage === 'undefined') return
-  const next = { ...readThreadProjectOverrides(), [threadId]: projectName }
-  localStorage.setItem(THREAD_PROJECT_OVERRIDES_KEY, JSON.stringify(next))
+function pathMatchesProjectRoot(cwd: string, root: string): boolean {
+  const normalizedCwd = normalizePathForComparison(cwd).replace(/[\\/]+$/u, '')
+  const normalizedRoot = normalizePathForComparison(root).replace(/[\\/]+$/u, '')
+  return normalizedCwd === normalizedRoot || normalizedCwd.startsWith(`${normalizedRoot}/`)
 }
 
 function toIso(seconds: number): string {
@@ -615,7 +594,7 @@ function readThreadInProgress(summary: Thread): boolean {
   return isTurnInProgress(lastTurn)
 }
 
-function toUiThread(summary: Thread, projectOverrides: Record<string, string> = readThreadProjectOverrides(), rootAliases: Record<string, string> = readProjectRootAliases()): UiThread {
+function toUiThread(summary: Thread, state: ThreadProjectNormalizationState | null = null): UiThread {
   const rawSummary = summary as Record<string, unknown>
   const cwd = normalizePathForUi(typeof rawSummary.cwd === 'string' ? rawSummary.cwd : summary.cwd)
   const comparableCwd = normalizePathForComparison(cwd)
@@ -627,11 +606,22 @@ function toUiThread(summary: Thread, projectOverrides: Record<string, string> = 
     comparableCwd.includes('/.codex/worktrees/') ||
     comparableCwd.includes('/.git/worktrees/')
 
-  const projectOverride = projectOverrides[summary.id] || rootAliases[cwd]
+  const assignedProjectId = state?.threadAssignments?.[summary.id] ?? null
+  const comparableRoots = state?.localProjects ?? []
+  const matchedProject = assignedProjectId
+    ? comparableRoots.find((project) => project.id === assignedProjectId)
+    : comparableRoots
+      .flatMap((project) => project.rootPaths.map((root) => ({ project, root })))
+      .filter(({ root }) => pathMatchesProjectRoot(comparableCwd, root))
+      .sort((first, second) => second.root.length - first.root.length)[0]?.project
+  const projectId = matchedProject?.id ?? null
+  const projectName = matchedProject?.name?.trim() || (isProjectlessChatPath(cwd) ? 'Chat without project' : toProjectName(cwd))
   return {
     id: summary.id,
     title: toThreadTitle(summary),
-    projectName: projectOverride?.trim() || toProjectName(cwd),
+    projectId,
+    projectName,
+    rootPaths: matchedProject ? [...matchedProject.rootPaths] : [],
     cwd,
     hasWorktree,
     createdAtIso: toIso(summary.createdAt),
@@ -642,37 +632,46 @@ function toUiThread(summary: Thread, projectOverrides: Record<string, string> = 
   }
 }
 
-export function normalizeThreadSummaryV2(payload: ThreadReadResponse): UiThread {
-  return toUiThread(payload.thread)
+export function normalizeThreadSummaryV2(payload: ThreadReadResponse, state: ThreadProjectNormalizationState | null = null): UiThread {
+  return toUiThread(payload.thread, state)
 }
 
-function groupThreadsByProject(threads: UiThread[]): UiProjectGroup[] {
+function groupThreadsByProject(threads: UiThread[], state: ThreadProjectNormalizationState | null = null): UiProjectGroup[] {
   const grouped = new Map<string, UiThread[]>()
   for (const thread of threads) {
-    const rows = grouped.get(thread.projectName)
+    const key = thread.projectId ?? `path:${thread.projectName}`
+    const rows = grouped.get(key)
     if (rows) rows.push(thread)
-    else grouped.set(thread.projectName, [thread])
+    else grouped.set(key, [thread])
   }
 
   return Array.from(grouped.entries())
-    .map(([projectName, projectThreads]) => ({
-      projectName,
+    .map(([key, projectThreads]) => {
+      const first = projectThreads[0]
+      const project = state?.localProjects.find((item) => item.id === first?.projectId)
+      return {
+      projectId: first?.projectId ?? null,
+      projectName: first?.projectName ?? key,
+      rootPaths: project ? [...project.rootPaths] : [],
       threads: projectThreads.sort(
         (a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime(),
       ),
-    }))
+    }})
     .sort((a, b) => {
+      if (a.projectId && b.projectId && state) {
+        const aOrder = state.localProjects.find((item) => item.id === a.projectId)?.order ?? Number.MAX_SAFE_INTEGER
+        const bOrder = state.localProjects.find((item) => item.id === b.projectId)?.order ?? Number.MAX_SAFE_INTEGER
+        if (aOrder !== bOrder) return aOrder - bOrder
+      }
       const aLast = new Date(a.threads[0]?.updatedAtIso ?? 0).getTime()
       const bLast = new Date(b.threads[0]?.updatedAtIso ?? 0).getTime()
       return bLast - aLast
     })
 }
 
-export function normalizeThreadGroupsV2(payload: ThreadListResponse): UiProjectGroup[] {
-  const projectOverrides = readThreadProjectOverrides()
-  const rootAliases = readProjectRootAliases()
-  const uiThreads = payload.data.map((thread) => toUiThread(thread, projectOverrides, rootAliases))
-  return groupThreadsByProject(uiThreads)
+export function normalizeThreadGroupsV2(payload: ThreadListResponse, state: ThreadProjectNormalizationState | null = null): UiProjectGroup[] {
+  const uiThreads = payload.data.map((thread) => toUiThread(thread, state))
+  return groupThreadsByProject(uiThreads, state)
 }
 
 export function normalizeThreadMessagesV2(payload: ThreadReadResponse, baseTurnIndex = 0): UiMessage[] {

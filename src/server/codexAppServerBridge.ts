@@ -208,6 +208,13 @@ export type WorkspaceRootsState = {
     remotePath: string
     label: string
   }>
+  localProjects?: Array<{
+    id: string
+    name: string
+    rootPaths: string[]
+    order: number
+  }>
+  threadAssignments?: Record<string, string>
 }
 
 type LocalProjectState = {
@@ -217,6 +224,8 @@ type LocalProjectState = {
   rootPaths: string[]
   raw: Record<string, unknown>
 }
+
+const THREAD_PROJECT_ASSIGNMENTS_KEY = 'thread-project-assignments'
 
 type PendingServerRequest = {
   id: number
@@ -4291,7 +4300,7 @@ function normalizeLocalProjects(value: unknown): LocalProjectState[] {
   for (const [storageKey, item] of Object.entries(record)) {
     const raw = asRecord(item)
     if (!raw) continue
-    const id = (typeof raw.id === 'string' ? raw.id : storageKey).trim()
+    const id = (typeof raw.id === 'string' ? raw.id : '').trim()
     if (!id || seenIds.has(id)) continue
     const rootPaths = normalizeStringArray(raw.rootPaths)
     if (rootPaths.length === 0) continue
@@ -4305,6 +4314,18 @@ function normalizeLocalProjects(value: unknown): LocalProjectState[] {
     })
   }
   return projects
+}
+
+function normalizeThreadProjectAssignments(value: unknown): Record<string, string> {
+  const record = asRecord(value)
+  if (!record) return {}
+  const assignments: Record<string, string> = {}
+  for (const [threadId, projectId] of Object.entries(record)) {
+    const normalizedThreadId = threadId.trim()
+    const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : ''
+    if (normalizedThreadId && normalizedProjectId) assignments[normalizedThreadId] = normalizedProjectId
+  }
+  return assignments
 }
 
 
@@ -5919,6 +5940,7 @@ async function canonicalizeLocalProjects(
 function mergeLocalProjectsIntoWorkspaceRootsState(
   state: WorkspaceRootsState,
   localProjects: LocalProjectState[],
+  threadAssignments: Record<string, string> = {},
 ): WorkspaceRootsState {
   const order: string[] = []
   const seenOrder = new Set<string>()
@@ -5961,12 +5983,33 @@ function mergeLocalProjectsIntoWorkspaceRootsState(
   for (const rootPath of order) appendProjectOrder(rootPath)
   for (const remoteProject of state.remoteProjects) appendProjectOrder(remoteProject.id)
 
+  const localProjectRows = localProjects
+    .slice()
+    .sort((first, second) => {
+      const firstIndex = state.projectOrder.indexOf(first.id)
+      const secondIndex = state.projectOrder.indexOf(second.id)
+      return (firstIndex < 0 ? Number.MAX_SAFE_INTEGER : firstIndex)
+        - (secondIndex < 0 ? Number.MAX_SAFE_INTEGER : secondIndex)
+    })
+    .map((project, orderIndex) => ({
+      id: project.id,
+      name: project.name || basename(project.rootPaths[0] ?? '') || project.id,
+      rootPaths: [...project.rootPaths],
+      order: orderIndex,
+    }))
+  const knownProjectIds = new Set(localProjectRows.map((project) => project.id))
+  const filteredAssignments = Object.fromEntries(
+    Object.entries(threadAssignments).filter(([, projectId]) => knownProjectIds.has(projectId)),
+  )
+
   return {
     order,
     labels,
     active: [...state.active],
     projectOrder,
     remoteProjects: state.remoteProjects.map((project) => ({ ...project })),
+    localProjects: localProjectRows,
+    threadAssignments: filteredAssignments,
   }
 }
 
@@ -5980,6 +6023,11 @@ function withoutGeneratedChatProjectRoots(state: WorkspaceRootsState): Workspace
     active: state.active.filter(keepRoot),
     projectOrder: state.projectOrder.filter(keepRoot),
     labels: Object.fromEntries(Object.entries(state.labels).filter(([root]) => keepRoot(root))),
+    localProjects: (state.localProjects ?? []).map((project) => ({
+      ...project,
+      rootPaths: project.rootPaths.filter(keepRoot),
+    })).filter((project) => project.rootPaths.length > 0),
+    threadAssignments: { ...(state.threadAssignments ?? {}) },
   }
 }
 
@@ -6114,6 +6162,8 @@ export async function canonicalizeWorkspaceRootsState(
     active,
     projectOrder,
     remoteProjects: state.remoteProjects.map((project) => ({ ...project })),
+    localProjects: (state.localProjects ?? []).map((project) => ({ ...project, rootPaths: [...project.rootPaths] })),
+    threadAssignments: { ...(state.threadAssignments ?? {}) },
   }
 }
 
@@ -6175,10 +6225,20 @@ export async function readWorkspaceRootsState(): Promise<WorkspaceRootsState> {
       active: normalizeStringArray(payload['active-workspace-roots']),
       projectOrder: normalizeStringArray(payload['project-order']),
       remoteProjects: normalizeRemoteProjects(payload['remote-projects']),
+      localProjects: [],
+      threadAssignments: {},
     }),
     canonicalizeLocalProjects(normalizeLocalProjects(payload['local-projects'])),
   ])
-  return withoutGeneratedChatProjectRoots(mergeLocalProjectsIntoWorkspaceRootsState(state, localProjects))
+  return withoutGeneratedChatProjectRoots(mergeLocalProjectsIntoWorkspaceRootsState(
+    state,
+    localProjects,
+    normalizeThreadProjectAssignments(payload[THREAD_PROJECT_ASSIGNMENTS_KEY]),
+  ))
+}
+
+export async function readLocalProjectsState(): Promise<WorkspaceRootsState> {
+  return await readWorkspaceRootsState()
 }
 
 export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): Promise<void> {
@@ -6199,6 +6259,9 @@ export async function writeWorkspaceRootsState(nextState: WorkspaceRootsState): 
       .filter((rootPath) => localRootKeys.has(workspaceRootComparisonKey(rootPath)))
     payload['local-projects'] = reconciled.localProjects
     payload['project-order'] = reconciled.projectOrder
+    if (state.threadAssignments !== undefined) {
+      payload[THREAD_PROJECT_ASSIGNMENTS_KEY] = normalizeThreadProjectAssignments(state.threadAssignments)
+    }
   })
 }
 
@@ -6384,6 +6447,149 @@ export async function removeWorkspaceRoots(rootPaths: string[]): Promise<Workspa
       projectOrder: existingState.projectOrder.filter((item) => !targetKeys.has(workspaceRootComparisonKey(item))),
     }
   })
+}
+
+export async function validateProjectRootPath(rawPath: string): Promise<string> {
+  const candidate = rawPath.trim()
+  if (!candidate) throw new Error('Project root is required')
+  const absolute = isAbsolute(candidate) ? candidate : resolve(candidate)
+  const info = await stat(absolute)
+  if (!info.isDirectory()) throw new Error('Project root is not a directory')
+  return await realpath(absolute)
+}
+
+function readLocalProjectRecordById(payload: Record<string, unknown>, projectId: string): { storageKey: string; project: LocalProjectState } | null {
+  const projects = normalizeLocalProjects(payload['local-projects'])
+  const project = projects.find((item) => item.id === projectId)
+  return project ? { storageKey: project.storageKey, project } : null
+}
+
+export async function updateLocalProject(
+  projectId: string,
+  input: { name: string; rootPaths: string[]; order?: number },
+): Promise<WorkspaceRootsState> {
+  const normalizedId = projectId.trim()
+  const name = input.name.trim()
+  if (!normalizedId || !name) throw new Error('Project id and name are required')
+  const rootPaths = await canonicalizeWorkspaceRootPathList(normalizeStringArray(input.rootPaths), realpath)
+  if (rootPaths.length === 0) throw new Error('At least one project root is required')
+  await withCodexGlobalStateUpdate(async (payload) => {
+    const match = readLocalProjectRecordById(payload, normalizedId)
+    if (!match) throw new Error('Project not found')
+    const now = Date.now()
+    payload['local-projects'] = {
+      ...(asRecord(payload['local-projects']) ?? {}),
+      [match.storageKey]: {
+        ...match.project.raw,
+        id: normalizedId,
+        name,
+        rootPaths,
+        updatedAt: now,
+      },
+    }
+    const savedRoots = normalizeStringArray(payload['electron-saved-workspace-roots'])
+    payload['electron-saved-workspace-roots'] = normalizeStringArray([
+      ...rootPaths,
+      ...savedRoots,
+      ...normalizeLocalProjects(payload['local-projects']).flatMap((project) => project.rootPaths),
+    ])
+    const labels = normalizeStringRecord(payload['electron-workspace-root-labels'])
+    for (const rootPath of rootPaths) labels[rootPath] = name
+    payload['electron-workspace-root-labels'] = labels
+    const order = normalizeStringArray(payload['project-order'])
+    const currentOrder = order.includes(normalizedId) ? order : [...order, normalizedId]
+    if (typeof input.order === 'number' && Number.isFinite(input.order)) {
+      const targetIndex = Math.max(0, Math.min(Math.trunc(input.order), currentOrder.length - 1))
+      currentOrder.splice(currentOrder.indexOf(normalizedId), 1)
+      currentOrder.splice(targetIndex, 0, normalizedId)
+    }
+    payload['project-order'] = currentOrder
+  })
+  return await readWorkspaceRootsState()
+}
+
+export async function removeLocalProject(projectId: string): Promise<WorkspaceRootsState> {
+  const normalizedId = projectId.trim()
+  if (!normalizedId) throw new Error('Project id is required')
+  await withCodexGlobalStateUpdate((payload) => {
+    const match = readLocalProjectRecordById(payload, normalizedId)
+    if (!match) throw new Error('Project not found')
+    const projects = { ...(asRecord(payload['local-projects']) ?? {}) }
+    delete projects[match.storageKey]
+    payload['local-projects'] = projects
+    payload['project-order'] = normalizeStringArray(payload['project-order']).filter((item) => item !== normalizedId)
+    const assignments = normalizeThreadProjectAssignments(payload[THREAD_PROJECT_ASSIGNMENTS_KEY])
+    for (const [threadId, assignedProjectId] of Object.entries(assignments)) {
+      if (assignedProjectId === normalizedId) delete assignments[threadId]
+    }
+    payload[THREAD_PROJECT_ASSIGNMENTS_KEY] = assignments
+  })
+  return await readWorkspaceRootsState()
+}
+
+export async function assignThreadToProject(threadId: string, projectId: string | null): Promise<WorkspaceRootsState> {
+  const normalizedThreadId = threadId.trim()
+  const normalizedProjectId = projectId?.trim() ?? ''
+  if (!normalizedThreadId) throw new Error('Thread id is required')
+  await withCodexGlobalStateUpdate((payload) => {
+    if (normalizedProjectId && !readLocalProjectRecordById(payload, normalizedProjectId)) {
+      throw new Error('Project not found')
+    }
+    const assignments = normalizeThreadProjectAssignments(payload[THREAD_PROJECT_ASSIGNMENTS_KEY])
+    if (normalizedProjectId) assignments[normalizedThreadId] = normalizedProjectId
+    else delete assignments[normalizedThreadId]
+    payload[THREAD_PROJECT_ASSIGNMENTS_KEY] = assignments
+  })
+  return await readWorkspaceRootsState()
+}
+
+export async function migrateLegacyProjectState(
+  aliasesValue: unknown,
+  overridesValue: unknown,
+): Promise<WorkspaceRootsState> {
+  const aliases = normalizeStringRecord(aliasesValue)
+  const overrides = normalizeStringRecord(overridesValue)
+  await withCodexGlobalStateUpdate(async (payload) => {
+    const projects = { ...(asRecord(payload['local-projects']) ?? {}) }
+    const normalizedProjects = normalizeLocalProjects(projects)
+    const usedIds = new Set(normalizedProjects.map((project) => project.id))
+    const projectByName = new Map(normalizedProjects.map((project) => [project.name.trim().toLowerCase(), project]))
+    const savedRoots = normalizeStringArray(payload['electron-saved-workspace-roots'])
+    const labels = normalizeStringRecord(payload['electron-workspace-root-labels'])
+    const order = normalizeStringArray(payload['project-order'])
+    const rootKey = (value: string) => workspaceRootComparisonKey(value)
+    for (const [rawRoot, rawName] of Object.entries(aliases)) {
+      const rootPath = await validateProjectRootPath(rawRoot)
+      const name = rawName.trim() || basename(rootPath) || rootPath
+      let project = normalizedProjects.find((candidate) => candidate.rootPaths.some((root) => rootKey(root) === rootKey(rootPath)))
+      if (!project) project = projectByName.get(name.toLowerCase())
+      if (!project) {
+        let id = randomUUID()
+        while (usedIds.has(id)) id = randomUUID()
+        usedIds.add(id)
+        project = { storageKey: id, id, name, rootPaths: [], raw: {} }
+        normalizedProjects.push(project)
+      }
+      if (!project.rootPaths.some((root) => rootKey(root) === rootKey(rootPath))) project.rootPaths.push(rootPath)
+      project.name = name
+      projects[project.storageKey] = { ...project.raw, id: project.id, name: project.name, rootPaths: project.rootPaths }
+      if (!savedRoots.some((root) => rootKey(root) === rootKey(rootPath))) savedRoots.push(rootPath)
+      labels[rootPath] = name
+      if (!order.includes(project.id)) order.push(project.id)
+      projectByName.set(name.toLowerCase(), project)
+    }
+    const assignments = normalizeThreadProjectAssignments(payload[THREAD_PROJECT_ASSIGNMENTS_KEY])
+    for (const [threadId, projectName] of Object.entries(overrides)) {
+      const project = projectByName.get(projectName.trim().toLowerCase())
+      if (project) assignments[threadId] = project.id
+    }
+    payload['local-projects'] = projects
+    payload['electron-saved-workspace-roots'] = savedRoots
+    payload['electron-workspace-root-labels'] = labels
+    payload['project-order'] = order
+    payload[THREAD_PROJECT_ASSIGNMENTS_KEY] = assignments
+  })
+  return await readWorkspaceRootsState()
 }
 
 async function rollbackCreatedWorktree(
@@ -9691,6 +9897,78 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         await workspaceRootsCompatibilityMigration
         const state = await readWorkspaceRootsState()
         setJson(res, 200, { data: state })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/local-projects-state') {
+        await workspaceRootsCompatibilityMigration
+        setJson(res, 200, { data: await readWorkspaceRootsState() })
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/local-projects/migrate') {
+        try {
+          const record = asRecord(await readJsonBody(req))
+          setJson(res, 200, { data: await migrateLegacyProjectState(record?.aliases, record?.overrides) })
+        } catch (error) {
+          setJson(res, 400, { error: getErrorMessage(error, 'Failed to migrate legacy project state') })
+        }
+        return
+      }
+
+      const localProjectMatch = url.pathname.match(/^\/codex-api\/local-projects\/([^/]+)$/u)
+      if (localProjectMatch && req.method === 'PATCH') {
+        try {
+          const record = asRecord(await readJsonBody(req))
+          if (!record || typeof record.name !== 'string' || !Array.isArray(record.rootPaths)) {
+            setJson(res, 400, { error: 'Invalid body: expected { name: string, rootPaths: string[] }' })
+            return
+          }
+          setJson(res, 200, { data: await updateLocalProject(decodeURIComponent(localProjectMatch[1] ?? ''), {
+            name: record.name,
+            rootPaths: normalizeStringArray(record.rootPaths),
+            ...(typeof record.order === 'number' ? { order: record.order } : {}),
+          }) })
+        } catch (error) {
+          setJson(res, 400, { error: getErrorMessage(error, 'Failed to update project') })
+        }
+        return
+      }
+      if (localProjectMatch && req.method === 'DELETE') {
+        try {
+          setJson(res, 200, { data: await removeLocalProject(decodeURIComponent(localProjectMatch[1] ?? '')) })
+        } catch (error) {
+          setJson(res, 404, { error: getErrorMessage(error, 'Failed to remove project') })
+        }
+        return
+      }
+
+      if (req.method === 'POST' && url.pathname === '/codex-api/project-root/validate') {
+        try {
+          const record = asRecord(await readJsonBody(req))
+          const path = await validateProjectRootPath(typeof record?.path === 'string' ? record.path : '')
+          setJson(res, 200, { data: { path } })
+        } catch (error) {
+          setJson(res, 400, { error: getErrorMessage(error, 'Failed to validate project root') })
+        }
+        return
+      }
+
+      const threadProjectMatch = url.pathname.match(/^\/codex-api\/threads\/([^/]+)\/project$/u)
+      if (threadProjectMatch && req.method === 'PUT') {
+        try {
+          const record = asRecord(await readJsonBody(req))
+          const projectId = record && (record.projectId === null || typeof record.projectId === 'string')
+            ? record.projectId
+            : undefined
+          if (projectId === undefined) {
+            setJson(res, 400, { error: 'Invalid body: expected { projectId: string | null }' })
+            return
+          }
+          setJson(res, 200, { data: await assignThreadToProject(decodeURIComponent(threadProjectMatch[1] ?? ''), projectId) })
+        } catch (error) {
+          setJson(res, 400, { error: getErrorMessage(error, 'Failed to assign thread') })
+        }
         return
       }
 

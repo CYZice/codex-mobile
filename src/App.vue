@@ -1229,7 +1229,6 @@ import IconTablerSearch from './components/icons/IconTablerSearch.vue'
 import IconTablerBell from './components/icons/IconTablerBell.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
-import { persistThreadProjectOverride } from './api/normalizers/v2'
 import IconTablerLayoutSidebar from './components/icons/IconTablerLayoutSidebar.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
 import { useDesktopState } from './composables/useDesktopState'
@@ -1269,11 +1268,13 @@ import {
   getThreadTerminalQuickCommands,
   getThreadTerminalStatus,
   getWorkspaceRootsState,
+  setThreadProject,
   importProjectZip,
   listLocalDirectories,
   openProjectRoot,
   reloadCodexAppServer,
   removeAccount,
+  removeLocalProject,
   refreshAccountsFromAuth,
   resetGitBranchToCommit,
   startCodexLogin,
@@ -2980,6 +2981,8 @@ function isWorktreePath(cwdRaw: string): boolean {
 function resolvePreferredLocalCwd(projectName: string, fallbackCwd = ''): string {
   const group = projectGroups.value.find((row) => row.projectName === projectName)
   if (!group) return resolveWorkspaceRootCwd(projectName) || fallbackCwd.trim()
+  const declaredRoot = group.rootPaths?.[0]?.trim() ?? ''
+  if (declaredRoot) return declaredRoot
   const nonWorktreeThread = group.threads.find((thread) => !isWorktreePath(thread.cwd))
   const candidate = nonWorktreeThread?.cwd?.trim() ?? group.threads[0]?.cwd?.trim() ?? ''
   return candidate || resolveWorkspaceRootCwd(projectName) || fallbackCwd.trim()
@@ -3253,12 +3256,17 @@ function onRenameThread(payload: { threadId: string; title: string }): void {
 }
 
 async function onMoveThread(payload: { threadId: string; projectName: string }): Promise<void> {
-  persistThreadProjectOverride(payload.threadId, payload.projectName)
+  const targetGroup = payload.projectName === '__no-project__'
+    ? null
+    : projectGroups.value.find((group) => group.projectName === payload.projectName)
+  await setThreadProject(payload.threadId, targetGroup?.projectId ?? null)
   await refreshAll()
 }
 
 async function onRemoveProject(projectName: string): Promise<void> {
-  await removeProject(projectName)
+  const group = projectGroups.value.find((entry) => entry.projectName === projectName)
+  if (group?.projectId) await removeLocalProject(group.projectId)
+  else await removeProject(projectName)
   await loadWorkspaceRootOptionsState()
   void refreshDefaultProjectName()
 }

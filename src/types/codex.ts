@@ -82,7 +82,9 @@ export type UserInput = {
 export type UiThread = {
   id: string
   title: string
+  projectId?: string | null
   projectName: string
+  rootPaths?: string[]
   cwd: string
   hasWorktree: boolean
   createdAtIso: string
@@ -310,7 +312,9 @@ export type UiThreadTokenUsage = {
 }
 
 export type UiProjectGroup = {
+  projectId?: string | null
   projectName: string
+  rootPaths?: string[]
   threads: UiThread[]
 }
 

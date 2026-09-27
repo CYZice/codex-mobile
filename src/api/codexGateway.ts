@@ -28,6 +28,7 @@ import {
   normalizeThreadSummaryV2,
   readThreadInProgressFromResponse,
 } from './normalizers/v2'
+import type { ThreadProjectNormalizationState } from './normalizers/v2'
 import type {
   SpeedMode,
   UiAccountEntry,
@@ -215,6 +216,8 @@ export type WorkspaceRootsState = {
     remotePath: string
     label: string
   }>
+  localProjects?: Array<{ id: string; name: string; rootPaths: string[]; order: number }>
+  threadAssignments?: Record<string, string>
 }
 
 let workspaceRootsStatePromise: Promise<WorkspaceRootsState> | null = null
@@ -712,8 +715,9 @@ async function getThreadGroupsPageV2(cursor: string | null, limit: number, archi
   })
   const workspaceRootsRecovered = (payload as Record<string, unknown>).workspaceRootsRecovered === true
   if (workspaceRootsRecovered) invalidateWorkspaceRootsStateCache()
+  const workspaceState = await getWorkspaceRootsState()
   return {
-    groups: normalizeThreadGroupsV2(payload),
+    groups: normalizeThreadGroupsV2(payload, workspaceState as ThreadProjectNormalizationState),
     nextCursor: typeof payload.nextCursor === 'string' && payload.nextCursor.length > 0
       ? payload.nextCursor
       : null,
@@ -734,7 +738,7 @@ async function getThreadSummaryV2(threadId: string): Promise<UiThread> {
     threadId,
     includeTurns: false,
   })
-  return normalizeThreadSummaryV2(payload)
+  return normalizeThreadSummaryV2(payload, await getWorkspaceRootsState() as ThreadProjectNormalizationState)
 }
 
 async function getThreadDetailV2(threadId: string): Promise<{
@@ -2632,6 +2636,22 @@ function normalizeWorkspaceRootsState(payload: unknown): WorkspaceRootsState {
         }]
       })
       : [],
+    localProjects: Array.isArray(record.localProjects)
+      ? record.localProjects.flatMap((item, index) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+        const project = item as Record<string, unknown>
+        const id = typeof project.id === 'string' ? project.id.trim() : ''
+        const name = typeof project.name === 'string' ? project.name.trim() : ''
+        const rootPaths = normalizeArray(project.rootPaths).map((value) => normalizePathForUi(value))
+        return id && rootPaths.length > 0 ? [{ id, name: name || id, rootPaths, order: typeof project.order === 'number' ? project.order : index }] : []
+      })
+      : [],
+    threadAssignments: record.threadAssignments && typeof record.threadAssignments === 'object' && !Array.isArray(record.threadAssignments)
+      ? Object.fromEntries(Object.entries(record.threadAssignments as Record<string, unknown>).flatMap(([threadId, projectId]) => {
+        const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : ''
+        return threadId.trim() && normalizedProjectId ? [[threadId.trim(), normalizedProjectId]] : []
+      }))
+      : {},
   }
 }
 
@@ -3047,6 +3067,7 @@ export async function getWorkspaceRootsState(): Promise<WorkspaceRootsState> {
 }
 
 async function fetchWorkspaceRootsState(): Promise<WorkspaceRootsState> {
+  await migrateLegacyProjectStateIfNeeded()
   const response = await fetch('/codex-api/workspace-roots-state', { cache: 'no-store' })
   const payload = (await response.json()) as unknown
   if (!response.ok) {
@@ -3066,7 +3087,37 @@ function cloneWorkspaceRootsState(state: WorkspaceRootsState): WorkspaceRootsSta
     active: [...state.active],
     projectOrder: [...state.projectOrder],
     remoteProjects: state.remoteProjects?.map((item) => ({ ...item })) ?? [],
+    localProjects: state.localProjects?.map((item) => ({ ...item, rootPaths: [...item.rootPaths] })) ?? [],
+    threadAssignments: { ...(state.threadAssignments ?? {}) },
   }
+}
+
+let legacyProjectMigrationPromise: Promise<void> | null = null
+
+async function migrateLegacyProjectStateIfNeeded(): Promise<void> {
+  if (typeof window === 'undefined' || legacyProjectMigrationPromise) return await legacyProjectMigrationPromise
+  const aliasesKey = 'codex-web-local.project-root-aliases.v1'
+  const overridesKey = 'codex-web-local.thread-project-overrides.v1'
+  const aliasesRaw = window.localStorage.getItem(aliasesKey)
+  const overridesRaw = window.localStorage.getItem(overridesKey)
+  if (!aliasesRaw && !overridesRaw) return
+  legacyProjectMigrationPromise = (async () => {
+    let aliases: unknown = {}
+    let overrides: unknown = {}
+    try { aliases = aliasesRaw ? JSON.parse(aliasesRaw) : {} } catch { aliases = {} }
+    try { overrides = overridesRaw ? JSON.parse(overridesRaw) : {} } catch { overrides = {} }
+    const response = await fetch('/codex-api/local-projects/migrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aliases, overrides }),
+    })
+    if (!response.ok) throw new Error('Legacy project migration failed')
+    window.localStorage.removeItem(aliasesKey)
+    window.localStorage.removeItem(overridesKey)
+  })().finally(() => {
+    legacyProjectMigrationPromise = null
+  })
+  return await legacyProjectMigrationPromise
 }
 
 function invalidateWorkspaceRootsStateCache(): void {
@@ -3579,6 +3630,34 @@ export async function renameWorkspaceRootPaths(rootPaths: string[], label: strin
 
 export async function removeWorkspaceRootPaths(rootPaths: string[]): Promise<WorkspaceRootsState> {
   return await mutateWorkspaceRootsState('/codex-api/workspace-roots', 'DELETE', { rootPaths })
+}
+
+export async function updateLocalProject(projectId: string, input: { name: string; rootPaths: string[]; order?: number }): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState(`/codex-api/local-projects/${encodeURIComponent(projectId)}`, 'PATCH', input)
+}
+
+export async function removeLocalProject(projectId: string): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState(`/codex-api/local-projects/${encodeURIComponent(projectId)}`, 'DELETE', {})
+}
+
+export async function validateProjectRoot(path: string): Promise<string> {
+  const response = await fetch('/codex-api/project-root/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) throw new Error(getErrorMessageFromPayload(payload, 'Failed to validate project root'))
+  const data = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>).data
+    : null
+  return data && typeof data === 'object' && !Array.isArray(data) && typeof (data as Record<string, unknown>).path === 'string'
+    ? (data as Record<string, string>).path
+    : ''
+}
+
+export async function setThreadProject(threadId: string, projectId: string | null): Promise<WorkspaceRootsState> {
+  return await mutateWorkspaceRootsState(`/codex-api/threads/${encodeURIComponent(threadId)}/project`, 'PUT', { projectId })
 }
 
 export async function openProjectRoot(path: string, options?: { createIfMissing?: boolean; label?: string }): Promise<string> {

@@ -1176,7 +1176,7 @@ export function buildWorkspaceRootsProjectOrderState(
     }
   }
   for (const group of groups) {
-    const cwd = group.threads[0]?.cwd?.trim() ?? ''
+    const cwd = group.rootPaths?.[0]?.trim() ?? group.threads[0]?.cwd?.trim() ?? ''
     if (!cwd) continue
     rootByProjectName.set(group.projectName, cwd)
   }

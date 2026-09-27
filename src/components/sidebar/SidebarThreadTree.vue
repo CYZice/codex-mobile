@@ -632,12 +632,15 @@
         <div class="thread-menu-label">Move to project</div>
         <button
           v-for="group in projectGroupsForMove(openThreadMenuThread.id)"
-          :key="`move:${group.projectName}`"
+          :key="`move:${group.projectId ?? group.projectName}`"
           class="thread-menu-item"
           type="button"
           @click="onMoveThread(openThreadMenuThread.id, group.projectName)"
         >
           <IconTablerFolder class="thread-menu-item-icon" /><span>{{ getProjectVisibleName(group) }}</span>
+        </button>
+        <button class="thread-menu-item" type="button" @click="onMoveThread(openThreadMenuThread.id, '__no-project__')">
+          <IconTablerFolder class="thread-menu-item-icon" /><span>No project</span>
         </button>
         <button class="thread-menu-item" type="button" @click="openDeleteThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
           <IconTablerArchive class="thread-menu-item-icon" />
@@ -944,8 +947,8 @@ import {
   openProjectRoot,
   removeWorkspaceRootPaths,
   renameWorkspaceRootPaths,
+  updateLocalProject,
 } from '../../api/codexGateway'
-import { persistProjectRootAliases } from '../../api/normalizers/v2'
 import type { UiProjectGroup, UiThread, UiThreadAutomation, UiThreadAutomationStatus } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
 import IconTablerChevronRight from '../icons/IconTablerChevronRight.vue'
@@ -2392,6 +2395,8 @@ function onMoveThread(threadId: string, projectName: string): void {
 }
 
 function projectRootsForName(projectName: string): string[] {
+  const groupRoots = props.groups.find((group) => group.projectName === projectName)?.rootPaths ?? []
+  if (groupRoots.length > 0) return [...groupRoots]
   const roots = props.workspaceRootOptions?.order ?? []
   const normalized = projectName.toLowerCase()
   const matches = roots.filter((root) => getPathLeafName(root).toLowerCase() === normalized || root === projectName)
@@ -2440,12 +2445,18 @@ async function saveProjectEditor(): Promise<void> {
   projectEditorSaving.value = true
   projectEditorError.value = ''
   try {
+    const projectId = props.groups.find((group) => group.projectName === projectName)?.projectId
+    if (projectId) {
+      await updateLocalProject(projectId, { name: projectEditorName.value.trim() || projectName, rootPaths: folders })
+      emit('project-folders-changed')
+      closeProjectEditor()
+      return
+    }
     const before = projectRootsForName(projectName)
     const removed = before.filter((folder) => !folders.includes(folder))
     if (removed.length > 0) await removeWorkspaceRootPaths(removed)
     if (projectEditorName.value.trim()) emit('rename-project', { projectName, displayName: projectEditorName.value.trim() })
     if (folders.length > 0) await renameWorkspaceRootPaths(folders, projectEditorName.value.trim())
-    persistProjectRootAliases(projectName, folders)
     emit('project-folders-changed')
     closeProjectEditor()
   } catch (error) {
