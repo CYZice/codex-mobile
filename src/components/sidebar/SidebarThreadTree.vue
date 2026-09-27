@@ -380,6 +380,9 @@
                       <button class="project-menu-item" type="button" @click="openRenameProjectMenu(group)">
                         Rename project
                       </button>
+                      <button class="project-menu-item" type="button" @click="openProjectEditor(group.projectName)">
+                        Edit project
+                      </button>
                       <button
                         class="project-menu-item project-menu-item-danger"
                         type="button"
@@ -625,6 +628,17 @@
           <IconTablerPin class="thread-menu-item-icon" />
           <span>{{ isPinned(openThreadMenuThread.id) ? 'Unpin thread' : 'Pin thread' }}</span>
         </button>
+        <div class="thread-menu-separator" />
+        <div class="thread-menu-label">Move to project</div>
+        <button
+          v-for="group in projectGroupsForMove(openThreadMenuThread.id)"
+          :key="`move:${group.projectName}`"
+          class="thread-menu-item"
+          type="button"
+          @click="onMoveThread(openThreadMenuThread.id, group.projectName)"
+        >
+          <IconTablerFolder class="thread-menu-item-icon" /><span>{{ getProjectVisibleName(group) }}</span>
+        </button>
         <button class="thread-menu-item" type="button" @click="openDeleteThreadDialog(openThreadMenuThread.id, openThreadMenuThread.title)">
           <IconTablerArchive class="thread-menu-item-icon" />
           <span>{{ t('Archive thread') }}</span>
@@ -661,6 +675,30 @@
           <IconTablerTrash class="thread-menu-item-icon" />
           <span>{{ t('Delete thread') }}</span>
         </button>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="projectEditorVisible" class="rename-thread-overlay" @click.self="closeProjectEditor">
+        <div class="rename-thread-panel project-editor-panel" role="dialog" aria-modal="true" aria-label="Edit project">
+          <h3 class="rename-thread-title">Edit project</h3>
+          <input v-model="projectEditorName" class="rename-thread-input" type="text" aria-label="Project name" placeholder="Project name" />
+          <div class="project-editor-folders">
+            <div class="project-editor-label">Source folders</div>
+            <div v-for="folder in projectEditorFolders" :key="folder" class="project-editor-folder">
+              <IconTablerFolder class="thread-icon" /><span :title="folder">{{ folder }}</span>
+              <button v-if="projectEditorFolders.length > 1" type="button" class="project-editor-remove" aria-label="Remove folder" @click="removeProjectEditorFolder(folder)">×</button>
+            </div>
+            <button type="button" class="project-editor-add" @click="addProjectEditorFolder"><IconTablerFolderOpen class="thread-icon" /> Add folder</button>
+          </div>
+          <div v-if="projectEditorError" class="thread-tree-action-error">{{ projectEditorError }}</div>
+          <div class="rename-thread-actions">
+            <button class="rename-thread-button rename-thread-button-danger" type="button" @click="removeProjectEditor">Remove local project</button>
+            <span class="project-editor-actions-spacer" />
+            <button class="rename-thread-button" type="button" @click="closeProjectEditor">Cancel</button>
+            <button class="rename-thread-button rename-thread-button-primary" type="button" :disabled="projectEditorSaving" @click="saveProjectEditor">{{ projectEditorSaving ? 'Saving…' : 'Save' }}</button>
+          </div>
+        </div>
       </div>
     </Teleport>
 
@@ -903,7 +941,11 @@ import {
   runThreadAutomationNow,
   upsertProjectAutomation,
   upsertThreadAutomation,
+  openProjectRoot,
+  removeWorkspaceRootPaths,
+  renameWorkspaceRootPaths,
 } from '../../api/codexGateway'
+import { persistProjectRootAliases } from '../../api/normalizers/v2'
 import type { UiProjectGroup, UiThread, UiThreadAutomation, UiThreadAutomationStatus } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
 import IconTablerChevronRight from '../icons/IconTablerChevronRight.vue'
@@ -930,6 +972,7 @@ const props = defineProps<{
   projectDisplayNameById: Record<string, string>
   projectGitRepoByName: Record<string, boolean>
   projectCwdByName: Record<string, string>
+  workspaceRootOptions?: { order: string[]; labels: Record<string, string>; projectOrder: string[] }
   selectedThreadId: string
   isLoading: boolean
   isThreadListFullyLoaded: boolean
@@ -952,7 +995,9 @@ const emit = defineEmits<{
   'request-project-git-status': [projectName: string]
   'create-project-worktree': [projectName: string]
   'rename-project': [payload: { projectName: string; displayName: string }]
+  'project-folders-changed': []
   'rename-thread': [payload: { threadId: string; title: string }]
+  'move-thread': [payload: { threadId: string; projectName: string }]
   'remove-project': [projectName: string]
   'reorder-project': [payload: { projectName: string; toIndex: number }]
   'copy-thread-chat': [threadId: string]
@@ -1027,6 +1072,12 @@ const threadMenuDirectionById = ref<Record<string, MenuDirection>>({})
 const openThreadMenuStyle = ref<Record<string, string>>({})
 const projectMenuMode = ref<'actions' | 'rename'>('actions')
 const projectRenameDraft = ref('')
+const projectEditorVisible = ref(false)
+const projectEditorProjectName = ref('')
+const projectEditorName = ref('')
+const projectEditorFolders = ref<string[]>([])
+const projectEditorSaving = ref(false)
+const projectEditorError = ref('')
 const renameThreadDialogVisible = ref(false)
 const renameThreadDialogThreadId = ref('')
 const renameThreadDraft = ref('')
@@ -2330,6 +2381,87 @@ function openRenameProjectMenu(group: UiProjectGroup): void {
   })
 }
 
+function projectGroupsForMove(threadId: string): UiProjectGroup[] {
+  const current = props.groups.find((group) => group.threads.some((thread) => thread.id === threadId))?.projectName
+  return props.groups.filter((group) => group.projectName !== current && group.projectName.trim().length > 0)
+}
+
+function onMoveThread(threadId: string, projectName: string): void {
+  emit('move-thread', { threadId, projectName })
+  closeThreadMenu()
+}
+
+function projectRootsForName(projectName: string): string[] {
+  const roots = props.workspaceRootOptions?.order ?? []
+  const normalized = projectName.toLowerCase()
+  const matches = roots.filter((root) => getPathLeafName(root).toLowerCase() === normalized || root === projectName)
+  if (matches.length > 0) return matches
+  const cwd = props.projectCwdByName[projectName]?.trim()
+  return cwd ? [cwd] : []
+}
+
+function openProjectEditor(projectName: string): void {
+  closeProjectMenu()
+  projectEditorProjectName.value = projectName
+  projectEditorName.value = props.projectDisplayNameById[projectName] ?? getProjectDisplayName(projectName)
+  projectEditorFolders.value = projectRootsForName(projectName)
+  projectEditorError.value = ''
+  projectEditorVisible.value = true
+}
+
+function closeProjectEditor(): void {
+  projectEditorVisible.value = false
+  projectEditorError.value = ''
+}
+
+async function addProjectEditorFolder(): Promise<void> {
+  const candidate = window.prompt('Folder path')?.trim() ?? ''
+  if (!candidate) return
+  if (projectEditorFolders.value.some((folder) => folder.toLowerCase() === candidate.toLowerCase())) return
+  try {
+    const normalized = await openProjectRoot(candidate, { createIfMissing: false, label: projectEditorName.value.trim() })
+    if (!normalized) return
+    projectEditorFolders.value = [...projectEditorFolders.value, normalized]
+  } catch (error) {
+    projectEditorError.value = error instanceof Error ? error.message : 'Failed to add folder.'
+  }
+}
+
+function removeProjectEditorFolder(folder: string): void {
+  if (projectEditorFolders.value.length <= 1) return
+  projectEditorFolders.value = projectEditorFolders.value.filter((item) => item !== folder)
+}
+
+async function saveProjectEditor(): Promise<void> {
+  if (projectEditorSaving.value) return
+  const projectName = projectEditorProjectName.value
+  const folders = projectEditorFolders.value.filter(Boolean)
+  if (!projectName || folders.length === 0) return
+  projectEditorSaving.value = true
+  projectEditorError.value = ''
+  try {
+    const before = projectRootsForName(projectName)
+    const removed = before.filter((folder) => !folders.includes(folder))
+    if (removed.length > 0) await removeWorkspaceRootPaths(removed)
+    if (projectEditorName.value.trim()) emit('rename-project', { projectName, displayName: projectEditorName.value.trim() })
+    if (folders.length > 0) await renameWorkspaceRootPaths(folders, projectEditorName.value.trim())
+    persistProjectRootAliases(projectName, folders)
+    emit('project-folders-changed')
+    closeProjectEditor()
+  } catch (error) {
+    projectEditorError.value = error instanceof Error ? error.message : 'Failed to save project.'
+  } finally {
+    projectEditorSaving.value = false
+  }
+}
+
+function removeProjectEditor(): void {
+  const projectName = projectEditorProjectName.value
+  if (!projectName) return
+  emit('remove-project', projectName)
+  closeProjectEditor()
+}
+
 function onBrowseProjectFiles(projectName: string): void {
   emit('browse-project-files', projectName)
   closeProjectMenu()
@@ -3253,6 +3385,16 @@ onBeforeUnmount(() => {
 .project-menu-input {
   @apply px-2 py-1 text-sm text-zinc-800 bg-transparent border-none outline-none;
 }
+
+.project-editor-panel { width: min(520px, calc(100vw - 32px)); }
+.project-editor-folders { margin-top: 18px; border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 14px; overflow: hidden; }
+.project-editor-label { padding: 12px 16px; font-size: 12px; color: var(--text-muted, #737373); border-bottom: 1px solid var(--border-subtle, #e5e7eb); }
+.project-editor-folder, .project-editor-add { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; border: 0; background: transparent; text-align: left; color: inherit; }
+.project-editor-folder + .project-editor-folder { border-top: 1px solid var(--border-subtle, #e5e7eb); }
+.project-editor-folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.project-editor-remove { border: 0; background: transparent; color: var(--text-muted, #737373); font-size: 20px; cursor: pointer; }
+.project-editor-add { border-top: 1px solid var(--border-subtle, #e5e7eb); cursor: pointer; color: var(--accent, #f97316); }
+.project-editor-actions-spacer { flex: 1; }
 
 .project-empty-row {
   @apply cursor-default;

@@ -109,6 +109,7 @@
           <SidebarThreadTree ref="sidebarThreadTreeRef" :groups="projectGroups" :project-display-name-by-id="projectDisplayNameById"
             :project-git-repo-by-name="projectGitRepoByName"
             :project-cwd-by-name="projectCwdByName"
+            :workspace-root-options="workspaceRootOptionsState"
             v-if="!isSidebarCollapsed"
             :selected-thread-id="selectedThreadId" :is-loading="isLoadingThreads"
             :is-thread-list-fully-loaded="isThreadListFullyLoaded"
@@ -117,6 +118,7 @@
             :activity-view="isSidebarActivityView"
             @select="onSelectThread"
             @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
+            @project-folders-changed="loadWorkspaceRootOptionsState"
             @browse-thread-files="onBrowseThreadFiles"
             @save-thread-project="onSaveThreadProject"
             @browse-project-files="onBrowseProjectFiles"
@@ -124,6 +126,7 @@
             @request-project-git-status="onRequestProjectGitStatus"
             @create-project-worktree="onCreateProjectWorktree"
             @rename-thread="onRenameThread"
+            @move-thread="onMoveThread"
             @fork-thread="onForkThread"
             @remove-project="onRemoveProject" @reorder-project="onReorderProject"
             @copy-thread-chat="onCopyThreadChat"
@@ -1226,6 +1229,7 @@ import IconTablerSearch from './components/icons/IconTablerSearch.vue'
 import IconTablerBell from './components/icons/IconTablerBell.vue'
 import IconTablerSettings from './components/icons/IconTablerSettings.vue'
 import IconTablerTerminal from './components/icons/IconTablerTerminal.vue'
+import { persistThreadProjectOverride } from './api/normalizers/v2'
 import IconTablerLayoutSidebar from './components/icons/IconTablerLayoutSidebar.vue'
 import IconTablerX from './components/icons/IconTablerX.vue'
 import { useDesktopState } from './composables/useDesktopState'
@@ -3246,6 +3250,11 @@ function onRenameProject(payload: { projectName: string; displayName: string }):
 
 function onRenameThread(payload: { threadId: string; title: string }): void {
   void renameThreadById(payload.threadId, payload.title)
+}
+
+async function onMoveThread(payload: { threadId: string; projectName: string }): Promise<void> {
+  persistThreadProjectOverride(payload.threadId, payload.projectName)
+  await refreshAll()
 }
 
 async function onRemoveProject(projectName: string): Promise<void> {

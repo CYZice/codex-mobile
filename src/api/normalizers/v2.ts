@@ -20,6 +20,38 @@ import type {
 import { normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
 import { stripChatGptConversationReferenceBlocks } from '../../composerReferences'
 
+const THREAD_PROJECT_OVERRIDES_KEY = 'codex-web-local.thread-project-overrides.v1'
+const PROJECT_ROOT_ALIASES_KEY = 'codex-web-local.project-root-aliases.v1'
+
+function readThreadProjectOverrides(): Record<string, string> {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const value = JSON.parse(localStorage.getItem(THREAD_PROJECT_OVERRIDES_KEY) ?? '{}') as unknown
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string> : {}
+  } catch { return {} }
+}
+
+function readProjectRootAliases(): Record<string, string> {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const value = JSON.parse(localStorage.getItem(PROJECT_ROOT_ALIASES_KEY) ?? '{}') as unknown
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string> : {}
+  } catch { return {} }
+}
+
+export function persistProjectRootAliases(projectName: string, roots: string[]): void {
+  if (typeof localStorage === 'undefined') return
+  const aliases = readProjectRootAliases()
+  for (const root of roots) aliases[root] = projectName
+  localStorage.setItem(PROJECT_ROOT_ALIASES_KEY, JSON.stringify(aliases))
+}
+
+export function persistThreadProjectOverride(threadId: string, projectName: string): void {
+  if (typeof localStorage === 'undefined') return
+  const next = { ...readThreadProjectOverrides(), [threadId]: projectName }
+  localStorage.setItem(THREAD_PROJECT_OVERRIDES_KEY, JSON.stringify(next))
+}
+
 function toIso(seconds: number): string {
   return new Date(seconds * 1000).toISOString()
 }
@@ -583,7 +615,7 @@ function readThreadInProgress(summary: Thread): boolean {
   return isTurnInProgress(lastTurn)
 }
 
-function toUiThread(summary: Thread): UiThread {
+function toUiThread(summary: Thread, projectOverrides: Record<string, string> = readThreadProjectOverrides(), rootAliases: Record<string, string> = readProjectRootAliases()): UiThread {
   const rawSummary = summary as Record<string, unknown>
   const cwd = normalizePathForUi(typeof rawSummary.cwd === 'string' ? rawSummary.cwd : summary.cwd)
   const comparableCwd = normalizePathForComparison(cwd)
@@ -595,10 +627,11 @@ function toUiThread(summary: Thread): UiThread {
     comparableCwd.includes('/.codex/worktrees/') ||
     comparableCwd.includes('/.git/worktrees/')
 
+  const projectOverride = projectOverrides[summary.id] || rootAliases[cwd]
   return {
     id: summary.id,
     title: toThreadTitle(summary),
-    projectName: toProjectName(cwd),
+    projectName: projectOverride?.trim() || toProjectName(cwd),
     cwd,
     hasWorktree,
     createdAtIso: toIso(summary.createdAt),
@@ -636,7 +669,9 @@ function groupThreadsByProject(threads: UiThread[]): UiProjectGroup[] {
 }
 
 export function normalizeThreadGroupsV2(payload: ThreadListResponse): UiProjectGroup[] {
-  const uiThreads = payload.data.map(toUiThread)
+  const projectOverrides = readThreadProjectOverrides()
+  const rootAliases = readProjectRootAliases()
+  const uiThreads = payload.data.map((thread) => toUiThread(thread, projectOverrides, rootAliases))
   return groupThreadsByProject(uiThreads)
 }
 
