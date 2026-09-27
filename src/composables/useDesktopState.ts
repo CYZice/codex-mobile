@@ -85,6 +85,12 @@ function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
   return groups.flatMap((group) => group.threads)
 }
 
+// Project ordering and display names are owned by the server-side Project model.
+// These no-op shims are temporary compile guards for legacy internal callers and
+// intentionally never read or write browser storage.
+function saveProjectOrder(_order: string[]): void {}
+function saveProjectDisplayNames(_displayNames: Record<string, string>): void {}
+
 export function findAdjacentThreadId(threads: UiThread[], threadId: string): string {
   const targetIndex = threads.findIndex((thread) => thread.id === threadId)
   if (targetIndex < 0) return ''
@@ -509,62 +515,6 @@ function saveSelectedThreadId(threadId: string): void {
   window.localStorage.setItem(SELECTED_THREAD_STORAGE_KEY, threadId)
 }
 
-function loadProjectOrder(): string[] {
-  if (typeof window === 'undefined') return []
-
-  try {
-    const raw = window.localStorage.getItem(PROJECT_ORDER_STORAGE_KEY)
-    if (!raw) return []
-
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    const order: string[] = []
-    for (const item of parsed) {
-      if (typeof item !== 'string' || item.length === 0) continue
-      const normalizedItem = toProjectName(item)
-      if (normalizedItem.length > 0 && !order.includes(normalizedItem)) {
-        order.push(normalizedItem)
-      }
-    }
-    return order
-  } catch {
-    return []
-  }
-}
-
-function saveProjectOrder(order: string[]): void {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(PROJECT_ORDER_STORAGE_KEY, JSON.stringify(order))
-}
-
-function loadProjectDisplayNames(): Record<string, string> {
-  if (typeof window === 'undefined') return {}
-
-  try {
-    const raw = window.localStorage.getItem(PROJECT_DISPLAY_NAME_STORAGE_KEY)
-    if (!raw) return {}
-
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-
-    const displayNames: Record<string, string> = {}
-    for (const [projectName, displayName] of Object.entries(parsed as Record<string, unknown>)) {
-      const normalizedProjectName = typeof projectName === 'string' ? toProjectName(projectName) : ''
-      if (normalizedProjectName.length > 0 && typeof displayName === 'string') {
-        displayNames[normalizedProjectName] = displayName
-      }
-    }
-    return displayNames
-  } catch {
-    return {}
-  }
-}
-
-function saveProjectDisplayNames(displayNames: Record<string, string>): void {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(PROJECT_DISPLAY_NAME_STORAGE_KEY, JSON.stringify(displayNames))
-}
-
 function mergeProjectOrder(previousOrder: string[], incomingGroups: UiProjectGroup[]): string[] {
   const nextOrder: string[] = []
 
@@ -947,6 +897,7 @@ function omitKey<TValue>(record: Record<string, TValue>, key: string): Record<st
 function areThreadFieldsEqual(first: UiThread, second: UiThread): boolean {
   return (
     first.id === second.id &&
+    first.projectId === second.projectId &&
     first.title === second.title &&
     first.projectName === second.projectName &&
     first.cwd === second.cwd &&
@@ -1010,9 +961,10 @@ function mergeThreadGroups(
   previous: UiProjectGroup[],
   incoming: UiProjectGroup[],
 ): UiProjectGroup[] {
-  const previousGroupsByName = new Map(previous.map((group) => [group.projectName, group]))
+  const previousGroupsById = new Map(previous.map((group) => [group.projectId ?? `thread:${group.projectName}`, group]))
   const mergedGroups: UiProjectGroup[] = incoming.map((incomingGroup) => {
-    const previousGroup = previousGroupsByName.get(incomingGroup.projectName)
+    const groupKey = incomingGroup.projectId ?? `thread:${incomingGroup.projectName}`
+    const previousGroup = previousGroupsById.get(groupKey)
     const previousThreadsById = new Map(previousGroup?.threads.map((thread) => [thread.id, thread]) ?? [])
 
     const mergedThreads = incomingGroup.threads.map((incomingThread) => {
@@ -1025,6 +977,7 @@ function mergeThreadGroups(
 
     if (
       previousGroup &&
+      previousGroup.projectId === incomingGroup.projectId &&
       previousGroup.projectName === incomingGroup.projectName &&
       areThreadArraysEqual(previousGroup.threads, mergedThreads)
     ) {
@@ -1032,7 +985,9 @@ function mergeThreadGroups(
     }
 
     return {
+      projectId: incomingGroup.projectId ?? null,
       projectName: incomingGroup.projectName,
+      rootPaths: [...(incomingGroup.rootPaths ?? [])],
       threads: mergedThreads,
     }
   })
@@ -1057,19 +1012,23 @@ export function mergeIncomingWithLocalInProgressThreads(
     return incoming
   }
 
-  const incomingByProjectName = new Map(incoming.map((group) => [group.projectName, group]))
+  const incomingByProjectId = new Map(incoming.map((group) => [group.projectId ?? `thread:${group.projectName}`, group]))
   const merged: UiProjectGroup[] = incoming.map((group) => ({
+    projectId: group.projectId ?? null,
     projectName: group.projectName,
+    rootPaths: [...(group.rootPaths ?? [])],
     threads: [...group.threads],
   }))
 
   for (const thread of localInProgressThreads) {
-    const existingGroup = incomingByProjectName.get(thread.projectName)
+    const existingGroup = incomingByProjectId.get(thread.projectId ?? `thread:${thread.projectName}`)
     if (existingGroup) {
-      const mergedGroupIndex = merged.findIndex((group) => group.projectName === thread.projectName)
+      const mergedGroupIndex = merged.findIndex((group) => (group.projectId ?? `thread:${group.projectName}`) === (thread.projectId ?? `thread:${thread.projectName}`))
       if (mergedGroupIndex >= 0) {
         merged[mergedGroupIndex] = {
+          projectId: merged[mergedGroupIndex].projectId ?? null,
           projectName: merged[mergedGroupIndex].projectName,
+          rootPaths: [...(merged[mergedGroupIndex].rootPaths ?? [])],
           threads: [thread, ...merged[mergedGroupIndex].threads],
         }
       }
@@ -1077,7 +1036,9 @@ export function mergeIncomingWithLocalInProgressThreads(
     }
 
     merged.push({
+      projectId: thread.projectId ?? null,
       projectName: thread.projectName,
+      rootPaths: [...(thread.rootPaths ?? [])],
       threads: [thread],
     })
   }
@@ -1476,8 +1437,8 @@ export function useDesktopState() {
   const selectedSpeedMode = ref<SpeedMode>('standard')
   const activeProviderId = ref('')
   const codexCliMissingError = ref('')
-  const projectOrder = ref<string[]>(loadProjectOrder())
-  const projectDisplayNameById = ref<Record<string, string>>(loadProjectDisplayNames())
+  const projectOrder = ref<string[]>([])
+  const projectDisplayNameById = ref<Record<string, string>>({})
   const loadedVersionByThreadId = ref<Record<string, string>>({})
   const loadedMessagesByThreadId = ref<Record<string, boolean>>({})
   const hasMoreOlderMessagesByThreadId = ref<Record<string, boolean>>({})
@@ -2403,11 +2364,22 @@ export function useDesktopState() {
     optimisticThreadIdsAwaitingList.add(threadId)
     const nowIso = new Date().toISOString()
     const normalizedCwd = normalizePathForUi(cwd)
-    const projectName = toProjectName(normalizedCwd)
+    const comparableCwd = normalizedCwd.replace(/[\\/]+$/u, '').toLowerCase()
+    const matchedProject = (loadedThreadListRootsState?.localProjects ?? [])
+      .flatMap((project) => project.rootPaths.map((root) => ({ project, root })))
+      .filter(({ root }) => {
+        const comparableRoot = normalizePathForUi(root).replace(/[\\/]+$/u, '').toLowerCase()
+        return comparableCwd === comparableRoot || comparableCwd.startsWith(`${comparableRoot}/`)
+      })
+      .sort((first, second) => second.root.length - first.root.length)[0]?.project
+    const projectId = matchedProject?.id ?? null
+    const projectName = matchedProject?.name ?? (normalizedCwd ? toProjectName(normalizedCwd) : 'Chat without project')
     const nextThread: UiThread = {
       id: threadId,
       title: toOptimisticThreadTitle(firstMessageText),
+      projectId,
       projectName,
+      rootPaths: matchedProject ? [...matchedProject.rootPaths] : [],
       cwd: normalizedCwd,
       hasWorktree: normalizedCwd.includes('/.codex/worktrees/') || normalizedCwd.includes('/.git/worktrees/'),
       createdAtIso: nowIso,
@@ -2417,25 +2389,26 @@ export function useDesktopState() {
       inProgress: false,
     }
 
-    const existingGroupIndex = sourceGroups.value.findIndex((group) => group.projectName === projectName)
+    const existingGroupIndex = sourceGroups.value.findIndex((group) => group.projectId === projectId)
     if (existingGroupIndex >= 0) {
       const existingGroup = sourceGroups.value[existingGroupIndex]
       const remainingThreads = existingGroup.threads.filter((thread) => thread.id !== threadId)
       const nextGroup: UiProjectGroup = {
+        projectId,
         projectName,
+        rootPaths: matchedProject ? [...matchedProject.rootPaths] : [],
         threads: [nextThread, ...remainingThreads],
       }
       const nextGroups = [...sourceGroups.value]
       nextGroups.splice(existingGroupIndex, 1, nextGroup)
       sourceGroups.value = nextGroups
     } else {
-      sourceGroups.value = [{ projectName, threads: [nextThread] }, ...sourceGroups.value]
+      sourceGroups.value = [{ projectId, projectName, rootPaths: matchedProject ? [...matchedProject.rootPaths] : [], threads: [nextThread] }, ...sourceGroups.value]
     }
 
     const nextProjectOrder = mergeProjectOrder(projectOrder.value, sourceGroups.value)
     if (!areStringArraysEqual(projectOrder.value, nextProjectOrder)) {
       projectOrder.value = nextProjectOrder
-      saveProjectOrder(projectOrder.value)
     }
     applyThreadFlags()
   }
@@ -4533,7 +4506,6 @@ export function useDesktopState() {
     if (!areStringArraysEqual(projectOrder.value, nextProjectOrder)) {
       projectOrder.value = nextProjectOrder
       if (!hasWorkspaceRootsState) {
-        saveProjectOrder(projectOrder.value)
       }
     }
 
@@ -4648,18 +4620,23 @@ export function useDesktopState() {
     }
     const groupsByProject = new Map<string, UiThread[]>()
     for (const thread of threadById.values()) {
-      const existing = groupsByProject.get(thread.projectName)
+      const projectKey = thread.projectId ?? `thread:${thread.projectName}`
+      const existing = groupsByProject.get(projectKey)
       if (existing) existing.push(thread)
-      else groupsByProject.set(thread.projectName, [thread])
+      else groupsByProject.set(projectKey, [thread])
     }
 
     return Array.from(groupsByProject.entries())
-      .map(([projectName, threads]) => ({
-        projectName,
+      .map(([, threads]) => {
+        const first = threads[0]
+        return {
+        projectId: first?.projectId ?? null,
+        projectName: first?.projectName ?? 'Chat without project',
+        rootPaths: [...(first?.rootPaths ?? [])],
         threads: threads.sort(
           (first, second) => new Date(second.updatedAtIso).getTime() - new Date(first.updatedAtIso).getTime(),
         ),
-      }))
+      }})
       .sort((first, second) => {
         const firstUpdated = new Date(first.threads[0]?.updatedAtIso ?? 0).getTime()
         const secondUpdated = new Date(second.threads[0]?.updatedAtIso ?? 0).getTime()
