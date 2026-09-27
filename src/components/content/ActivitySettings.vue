@@ -51,11 +51,11 @@
           <span class="source-badge">CC Switch</span>
         </div>
 
-        <div class="heatmap-scroll">
+        <div ref="heatmapScroll" class="heatmap-scroll">
           <div
             class="heatmap-grid"
             :style="{
-              gridTemplateColumns: `2rem repeat(${calendar.weeks}, .75rem)`,
+              '--heatmap-weeks': String(calendar.weeks),
               gridTemplateRows: '1.25rem repeat(7, .75rem)',
             }"
           >
@@ -76,6 +76,7 @@
               :key="cell.date"
               class="heatmap-day"
               :class="[`level-${tokenLevel(cell.tokens)}`, { outside: !cell.inRange }]"
+              :data-week="cell.week"
               :style="{ gridColumn: String(cell.week + 2), gridRow: String(cell.weekday + 2) }"
               :title="cell.inRange ? `${cell.date}: ${compact(cell.tokens)} tokens · ${cell.requests.toLocaleString()} requests` : ''"
             />
@@ -239,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   getCcSwitchUsage,
   getMemoryFile,
@@ -261,6 +262,7 @@ const memoryError = ref('')
 const selectedModelKeys = ref<Record<'recent' | 'all', string>>({ recent: '', all: '' })
 const loading = ref(false)
 const error = ref('')
+const heatmapScroll = ref<HTMLElement | null>(null)
 const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 type ModelDistributionItem = CcSwitchUsageDashboard['models'][number] & {
@@ -424,6 +426,33 @@ function tokenLevel(tokens: number) {
   return 4
 }
 
+function scrollHeatmapToActivity() {
+  const container = heatmapScroll.value
+  if (!container) return
+  const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
+  if (maxScroll <= 1) {
+    container.scrollLeft = 0
+    return
+  }
+
+  const activeCells = calendar.value.cells.filter((cell) => cell.inRange && cell.tokens > 0)
+  const targetWeek = activeCells.at(-1)?.week ?? Math.max(0, calendar.value.weeks - 1)
+  const target = container.querySelector<HTMLElement>(`.heatmap-day[data-week="${targetWeek}"]`)
+  if (!target) return
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const targetOffset = targetRect.left - containerRect.left + container.scrollLeft
+  // Keep the latest active week toward the right side so preceding active weeks
+  // remain visible while later empty weeks do not dominate the first viewport.
+  const desired = targetOffset - container.clientWidth * 0.72
+  container.scrollLeft = Math.max(0, Math.min(maxScroll, desired))
+}
+
+function syncHeatmapViewport() {
+  void nextTick().then(scrollHeatmapToActivity)
+}
+
 function memorySourceName(path: string) {
   return path.split(/[\\/]/u).at(-1) || path
 }
@@ -478,6 +507,7 @@ async function load() {
         selectedModelKeys.value[panel.id] = panel.items[0]?.key ?? ''
       }
     }
+    syncHeatmapViewport()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -485,7 +515,14 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  window.addEventListener('resize', syncHeatmapViewport)
+  void load()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncHeatmapViewport)
+})
 </script>
 
 <style scoped>
@@ -507,12 +544,12 @@ onMounted(load)
 .section-heading{@apply flex items-start justify-between gap-4}
 .activity-section h3{@apply text-lg font-semibold}
 .source-badge{@apply rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-500}
-.heatmap-scroll{@apply mt-5 overflow-x-auto pb-2}
-.heatmap-grid{display:grid;gap:4px;align-items:center;width:max-content;min-width:100%}
+.heatmap-scroll{@apply mt-5 overflow-hidden}
+.heatmap-grid{display:grid;grid-template-columns:2rem repeat(var(--heatmap-weeks),minmax(0,1fr));gap:4px;align-items:center;width:100%;min-width:0}
 .month-label{@apply text-xs text-zinc-500;align-self:end;white-space:nowrap}
 .weekday-label{@apply text-[11px] text-zinc-500;justify-self:end;padding-right:3px}
 .heatmap-day,.heatmap-legend i{@apply box-border block rounded-[2px] border border-zinc-300}
-.heatmap-day{width:.75rem;height:.75rem}
+.heatmap-day{width:100%;aspect-ratio:1;height:auto}
 .heatmap-day.outside{visibility:hidden}
 .level-0{@apply bg-transparent}.level-1{@apply bg-amber-100}.level-2{@apply bg-amber-200}.level-3{@apply bg-amber-300}.level-4{@apply bg-amber-400}
 .heatmap-legend{@apply mt-3 flex items-center gap-2 text-xs text-zinc-500}
@@ -577,6 +614,9 @@ onMounted(load)
 .activity-error{@apply rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800}
 .activity-error p{@apply mt-1 text-sm}
 @media(max-width:900px){
+  .heatmap-scroll{@apply overflow-x-auto pb-2}
+  .heatmap-grid{grid-template-columns:2rem repeat(var(--heatmap-weeks),.75rem);width:max-content;min-width:100%;column-gap:4px}
+  .heatmap-day{width:.75rem;height:.75rem;aspect-ratio:auto}
   .summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .token-breakdown{grid-template-columns:repeat(2,minmax(0,1fr))}
   .insight-list--grid{grid-template-columns:repeat(2,minmax(0,1fr))}
