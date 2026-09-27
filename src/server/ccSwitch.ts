@@ -384,7 +384,7 @@ function insertTopLevelField(config: string, field: string, literal: string): st
 
 function appendOfficialUnifiedProvider(config: string): string {
   const separator = config.endsWith('\n') ? '\n' : '\n\n'
-  const next = `${config}${separator}[model_providers.custom]\nname = "OpenAI"\nrequires_openai_auth = true\nsupports_websockets = true\nwire_api = "responses"\n`
+  const next = `${config}${separator}[model_providers.custom]\nname = "OpenAI"\nrequires_openai_auth = true\nsupports_websockets = false\nwire_api = "responses"\n`
   parseConfig(next)
   return next
 }
@@ -395,7 +395,7 @@ function isOfficialUnifiedProviderTable(value: unknown): boolean {
     && Object.keys(table).length === 4
     && table.name === 'OpenAI'
     && table.requires_openai_auth === true
-    && table.supports_websockets === true
+    && table.supports_websockets === false
     && table.wire_api === 'responses')
 }
 

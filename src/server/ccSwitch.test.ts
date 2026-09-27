@@ -163,6 +163,7 @@ describe('CC Switch Codex config projection', () => {
     expect(projected).toContain('model_provider = "custom"')
     expect(projected).toContain('[model_providers.custom]')
     expect(projected).toContain('requires_openai_auth = true')
+    expect(projected).toContain('supports_websockets = false')
     expect(projected).not.toContain('experimental_bearer_token')
   })
 })
