@@ -354,7 +354,7 @@
               <div class="project-hover-controls">
                 <div :ref="(el) => setProjectMenuWrapRef(projectIdentity(group), el)" class="project-menu-wrap">
                   <button
-                    v-if="group.kind !== 'projectless'"
+                    v-if="group.kind === 'local'"
                     class="project-menu-trigger"
                     type="button"
                     aria-label="Project actions"
