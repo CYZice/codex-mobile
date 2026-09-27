@@ -39,6 +39,7 @@ const gatewayMocks = vi.hoisted(() => ({
   setPermissionState: vi.fn(),
   setThreadQueueState: vi.fn(),
   setThreadUnreadState: vi.fn(),
+  setThreadProject: vi.fn(),
   setWorkspaceProjectOrder: vi.fn(),
   startThread: vi.fn(),
   startThreadTurn: vi.fn(),
@@ -1294,7 +1295,7 @@ describe('provider model selection', () => {
     expect(state.selectedModelId.value).toBe('big-pickle')
   })
 
-  it('captures the active provider when creating a new thread', async () => {
+  it('captures the active provider and persists the preferred project when creating a new thread', async () => {
     installTestWindow()
     gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
     gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
@@ -1333,7 +1334,10 @@ describe('provider model selection', () => {
 
     const state = useDesktopState()
     await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
-    await state.sendMessageToNewThread('hi', '/tmp/project')
+    await state.sendMessageToNewThread('hi', '/tmp/project', [], [], [], {}, 'project-1')
+
+    expect(gatewayMocks.setThreadProject).toHaveBeenCalledWith('codex-thread', 'project-1')
+    expect(gatewayMocks.setThreadProject.mock.invocationCallOrder[0]).toBeLessThan(gatewayMocks.startThreadTurn.mock.invocationCallOrder[0])
 
     expect(gatewayMocks.startThread).toHaveBeenCalledWith({
       cwd: '/tmp/project',

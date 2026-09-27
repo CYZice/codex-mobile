@@ -2973,6 +2973,7 @@ function resolvePreferredLocalCwd(group: UiProjectGroup | undefined, fallbackCwd
 function onStartNewThread(projectId: string): void {
   const projectGroup = findProjectGroup(projectId)
   newThreadProjectId.value = projectGroup?.projectId ?? null
+  newThreadRuntime.value = 'local'
   const projectCwd = resolvePreferredLocalCwd(projectGroup, projectGroup?.threads[0]?.cwd?.trim() ?? '')
   if (projectCwd) {
     newThreadCwd.value = projectCwd
@@ -3159,6 +3160,7 @@ async function onCreateProjectWorktree(projectId: string): Promise<void> {
     if (!normalizedPath) return
 
     newThreadCwd.value = normalizedPath
+    newThreadProjectId.value = projectId
     newThreadRuntime.value = 'local'
     await loadWorkspaceRootOptionsState()
     await refreshDefaultProjectName()
@@ -3912,6 +3914,24 @@ function scheduleMobileConversationJumpToLatest(): void {
   })
 }
 
+function resolveNewThreadProjectIdForCwd(cwdRaw: string): string | null {
+  const comparableCwd = normalizePathForUi(cwdRaw).replace(/[\\/]+/gu, '/').replace(/\/+$/u, '').toLowerCase()
+  if (!comparableCwd) return null
+  let bestMatch: { projectId: string; rootLength: number } | null = null
+  for (const group of projectGroups.value) {
+    if (group.kind !== 'local' || !group.projectId) continue
+    for (const root of group.rootPaths ?? []) {
+      const comparableRoot = normalizePathForUi(root).replace(/[\\/]+/gu, '/').replace(/\/+$/u, '').toLowerCase()
+      if (!comparableRoot) continue
+      if (comparableCwd !== comparableRoot && !comparableCwd.startsWith(`${comparableRoot}/`)) continue
+      if (!bestMatch || comparableRoot.length > bestMatch.rootLength) {
+        bestMatch = { projectId: group.projectId, rootLength: comparableRoot.length }
+      }
+    }
+  }
+  return bestMatch?.projectId ?? null
+}
+
 function onSelectNewThreadFolder(cwd: string): void {
   const normalizedCwd = cwd.trim()
   newThreadCwd.value = normalizedCwd
@@ -4224,6 +4244,7 @@ async function onSubmitProjectSetup(): Promise<void> {
     if (!normalizedPath) return
 
     newThreadCwd.value = normalizedPath
+    newThreadProjectId.value = null
     await loadWorkspaceRootOptionsState()
     await refreshDefaultProjectName()
     isProjectSetupModalOpen.value = false
@@ -4256,8 +4277,10 @@ async function finishProjectImport(
     const result = await importer(baseDir)
     if (!result.path) return
     newThreadCwd.value = result.path
+    newThreadProjectId.value = null
     await loadWorkspaceRootOptionsState()
     await refreshAll({ includeSelectedThreadMessages: false, forceThreadRefresh: true })
+    newThreadProjectId.value = resolveNewThreadProjectIdForCwd(result.path)
     await refreshDefaultProjectName()
   } catch (error) {
     const message = error instanceof Error ? error.message : fallbackMessage
@@ -4352,8 +4375,10 @@ async function onConfirmExistingFolder(path = resolvedExistingFolderPath.value):
     }
 
     newThreadCwd.value = normalizedPath
+    newThreadProjectId.value = null
     await loadWorkspaceRootOptionsState()
     await refreshAll({ includeSelectedThreadMessages: false, forceThreadRefresh: true })
+    newThreadProjectId.value = resolveNewThreadProjectIdForCwd(normalizedPath)
     await refreshDefaultProjectName()
     onCloseExistingFolderPanel()
   } catch (error) {
@@ -4444,6 +4469,7 @@ async function applyLaunchProjectPathFromUrl(): Promise<boolean> {
     })
     if (!normalizedPath) return false
     newThreadCwd.value = normalizedPath
+    newThreadProjectId.value = null
     await router.replace({ name: 'home' })
     await loadWorkspaceRootOptionsState()
     const nextUrl = new URL(window.location.href)
@@ -5361,6 +5387,7 @@ watch(
   (options) => {
     if (options.length === 0) {
       newThreadCwd.value = ''
+      newThreadProjectId.value = null
       void refreshDefaultProjectName()
       return
     }
@@ -5369,6 +5396,7 @@ watch(
       const hasSelected = options.some((option) => option.value === selected)
       if (!hasSelected) {
         newThreadCwd.value = ''
+        newThreadProjectId.value = null
       }
     }
     void refreshDefaultProjectName()
